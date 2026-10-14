@@ -1,0 +1,31 @@
+{
+  "name": "ystara-test-suite",
+  "private": true,
+  "type": "module",
+  "version": "0.0.1",
+  "description": "Ystara Test Suite: regression and scenario testing for SAP Datasphere pipelines",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc -b",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint .",
+    "dev:api": "npm run dev -w @ystara/api",
+    "dev:worker": "npm run dev -w @ystara/worker",
+    "dev:web": "npm run dev -w @ystara/web",
+    "spike:cli": "node tools/spike/cli-capabilities.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^2.1.8"
+  }
+}
