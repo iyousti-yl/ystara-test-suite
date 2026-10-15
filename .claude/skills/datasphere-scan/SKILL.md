@@ -25,4 +25,6 @@ How to read the arguments:
 
 Then follow your procedure: preflight, scan with `npm run scan -- ...`, read the newest folder in `tools/scan/output/`, check the lineage for warnings, isolated objects, missed references and implausible edges, and return the report in your standard format.
 
+With `--output`, build the pipeline by your pipeline rules, not as `pipeline.json` has it: trace back from the output through the main chain to the ingestion tables and the flows that load them, include config and control side inputs and what they depend on, follow only the writer that belongs to this pipeline (other writers are listed as excluded), leave out task chains, and ignore references that only appear in SQL comments. Apply `.claude/tenant-conventions.local.md` on top if it exists.
+
 Never run any Datasphere command other than `datasphere --version` yourself, and never change any file.

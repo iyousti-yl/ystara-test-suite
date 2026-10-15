@@ -5,7 +5,7 @@ Regression and scenario testing for SAP Datasphere pipelines. Read `docs/archite
 ## Non-negotiable
 
 - **Read-only on every Datasphere tenant.** Code may only `list`/`read` through the CLI and run `SELECT` through SQL. No create, update, delete, deploy or task runs, ever. The gate is `packages/connector/src/readonly.ts`; changing it is a product decision, not a code change. `.claude/settings.json` also denies write commands for Claude Code.
-- **No client data or code in this repository.** Fixtures are synthetic. Scan output (`tools/scan/output/`) and `.env` are git-ignored and never committed.
+- **No client or tenant-specific content in this repository.** No data, code, object names, naming conventions or process rules from any tenant: the product is tenant-agnostic. Fixtures are synthetic. Tenant notes go in git-ignored `*.local.md` files (e.g. `.claude/tenant-conventions.local.md`); scan output (`tools/scan/output/`) and `.env` are git-ignored too. None of it is ever committed.
 
 ## How we work
 
