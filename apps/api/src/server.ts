@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
+import { pathToFileURL } from "node:url";
 import { ROLES } from "@ystara/shared";
 
 /**
@@ -22,7 +23,8 @@ export async function buildServer() {
   return app;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL keeps this check working on Windows (C:\... vs file:///C:/...).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const app = await buildServer();
   const port = Number(process.env.API_PORT ?? 4000);
   await app.listen({ port, host: "0.0.0.0" });
