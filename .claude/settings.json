@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run scan *)",
+      "Bash(npm run spike:cli)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run lint)",
+      "Bash(npm test)",
+      "Bash(datasphere --version)"
+    ],
+    "deny": [
+      "Bash(datasphere * create *)",
+      "Bash(datasphere * create)",
+      "Bash(datasphere * update *)",
+      "Bash(datasphere * update)",
+      "Bash(datasphere * delete *)",
+      "Bash(datasphere * delete)",
+      "Bash(datasphere * run *)",
+      "Bash(datasphere * run)",
+      "Bash(datasphere tasks *)",
+      "Bash(datasphere * tasks *)",
+      "Read(./.env)",
+      "Read(./.env.*)"
+    ]
+  }
+}

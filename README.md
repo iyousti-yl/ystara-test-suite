@@ -43,6 +43,8 @@ npm run scan -- --from tools/scan/output/<run> --output OTHER_VIEW   # replay a 
 
 Results land in `tools/scan/output/<timestamp>/` (git-ignored): `lineage.md` (Mermaid diagram), `pipeline.json`, `graph.json` and `raw.json`. `raw.json` holds object definitions only, never table rows.
 
+In Claude Code, `/datasphere-scan HR --output V_HEADCOUNT_OUT` hands the scan to the dedicated `datasphere-scanner` agent (`.claude/agents/`), which runs it read-only, checks the lineage for gaps and returns a short report. See `CLAUDE.md` for the agent-and-skill convention.
+
 ### Feasibility spike
 
 `npm run spike:cli` lists and reads one object of each kind and reports what the installed CLI supports. Read-only.
