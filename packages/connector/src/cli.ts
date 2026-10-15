@@ -1,65 +1,84 @@
 import { execa } from "execa";
-import type { TenantConnection } from "./types.js";
+import { assertReadOnly, commandPath, type CliObjectKind, type ReadCommand } from "./readonly.js";
 
 /**
- * Thin wrapper around `@sap/datasphere-cli`.
+ * Thin, read-only wrapper around `@sap/datasphere-cli` (tested with 2026.x).
  *
- * Why a wrapper and not direct API calls: the CLI is SAP's supported automation
- * surface for Datasphere objects, handles OAuth for us, and tracks SAP's
+ * Why the CLI and not direct API calls: it is SAP's supported automation
+ * surface for Datasphere objects, handles login for us, and tracks SAP's
  * object formats. We pay with a process spawn per call, which is fine for a
  * background worker.
  *
- * The exact subcommands differ slightly between CLI releases; the feasibility
- * spike (tools/spike) records what the installed version supports and this file
- * is adjusted from its output. Treat the commands below as the phase 0 draft.
+ * Authentication: the user (or, later, the worker) logs in once with
+ * `datasphere login`; this wrapper only passes `--host`.
+ *
+ * CLI 2026.x notes (found with the feasibility spike):
+ *  - `list` and `read` always return JSON; there is no `--output` flag.
+ *  - `list` returns 25 items unless `--top` is given.
+ *  - SQL and graphical views share the `views` command.
  */
-export class DatasphereCli {
-  constructor(
-    private readonly conn: TenantConnection,
-    private readonly bin = "datasphere",
-  ) {}
+export interface CliOptions {
+  host: string;
+  /** Executable name or path. Default "datasphere". */
+  bin?: string;
+  /** Per-call timeout. Default 120 s. */
+  timeoutMs?: number;
+}
 
-  private baseArgs(): string[] {
-    return ["--host", this.conn.host];
+export interface ListedObject {
+  technicalName: string;
+  businessName?: string;
+}
+
+export class DatasphereCli {
+  private readonly bin: string;
+  private readonly timeoutMs: number;
+
+  constructor(private readonly opts: CliOptions) {
+    this.bin = opts.bin ?? "datasphere";
+    this.timeoutMs = opts.timeoutMs ?? 120_000;
   }
 
-  /** Runs a CLI command and returns stdout. Secrets go through an options file, never argv, so they don't show in process lists. */
-  async run(args: string[], input?: string): Promise<string> {
-    const { stdout } = await execa(this.bin, [...this.baseArgs(), ...args], {
-      input,
-      env: { ...process.env, DATASPHERE_OAUTH_CLIENT_ID: this.conn.oauth.clientId },
-      reject: true,
-    });
+  /** The single place a CLI process is started. Every call passes the read-only guard first. */
+  async exec(cmd: ReadCommand, flags: Record<string, string> = {}): Promise<string> {
+    const path = commandPath(cmd);
+    assertReadOnly(path);
+    const args = ["--host", this.opts.host, ...path, ...Object.entries(flags).flatMap(([k, v]) => [`--${k}`, v])];
+    const { stdout } = await execa(this.bin, args, { timeout: this.timeoutMs });
     return stdout;
   }
 
   async version(): Promise<string> {
-    const { stdout } = await execa(this.bin, ["--version"]);
+    const { stdout } = await execa(this.bin, ["--version"], { timeout: this.timeoutMs });
     return stdout.trim();
   }
 
-  async listSpaces(): Promise<string[]> {
-    const out = await this.run(["spaces", "list", "--output", "json"]);
-    const parsed = JSON.parse(out) as unknown;
-    return Array.isArray(parsed) ? parsed.map((s) => String((s as { name?: string }).name ?? s)) : [];
+  async listObjects(space: string, kind: CliObjectKind, top = 1000): Promise<ListedObject[]> {
+    const out = await this.exec({ group: "objects", kind, verb: "list" }, { space, top: String(top) });
+    return parseListing(out);
   }
 
-  async listObjects(space: string, kind: string): Promise<unknown> {
-    // e.g. kind = "tables" | "views" | "data-flows" | "task-chains" | ...
-    const out = await this.run(["objects", kind, "list", "--space", space, "--output", "json"]);
+  async readObject(space: string, kind: CliObjectKind, technicalName: string): Promise<unknown> {
+    const out = await this.exec({ group: "objects", kind, verb: "read" }, { space, "technical-name": technicalName });
     return JSON.parse(out) as unknown;
   }
+}
 
-  async readObject(space: string, kind: string, technicalName: string): Promise<unknown> {
-    const out = await this.run(["objects", kind, "read", "--space", space, "--technical-name", technicalName, "--output", "json"]);
-    return JSON.parse(out) as unknown;
-  }
-
-  async createObject(space: string, kind: string, definition: unknown): Promise<void> {
-    await this.run(["objects", kind, "create", "--space", space, "--file-path", "/dev/stdin"], JSON.stringify(definition));
-  }
-
-  async runTaskChain(space: string, technicalName: string): Promise<string> {
-    return this.run(["tasks", "chains", "run", "--space", space, "--object", technicalName]);
-  }
+/** Accepts the shapes seen so far: an array of strings or of objects with technicalName/name. */
+export function parseListing(stdout: string): ListedObject[] {
+  const parsed = JSON.parse(stdout) as unknown;
+  const items = Array.isArray(parsed) ? parsed : [];
+  return items
+    .map((item): ListedObject | null => {
+      if (typeof item === "string") return { technicalName: item };
+      if (item && typeof item === "object") {
+        const o = item as Record<string, unknown>;
+        const name = o.technicalName ?? o.name;
+        if (typeof name === "string") {
+          return { technicalName: name, businessName: typeof o.businessName === "string" ? o.businessName : undefined };
+        }
+      }
+      return null;
+    })
+    .filter((x): x is ListedObject => x !== null);
 }

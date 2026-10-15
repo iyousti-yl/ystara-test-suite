@@ -23,6 +23,16 @@ export const OBJECT_TYPES = [
 
 export type ObjectType = (typeof OBJECT_TYPES)[number];
 
+/** Types that hold data at rest. Fixtures are injected into these; everything else computes or moves data. */
+export const TABLE_TYPES: ReadonlySet<ObjectType> = new Set<ObjectType>(["local_table", "remote_table"]);
+
+/** Types that copy data into a target table when they run. */
+export const FLOW_TYPES: ReadonlySet<ObjectType> = new Set<ObjectType>([
+  "data_flow",
+  "transformation_flow",
+  "replication_flow",
+]);
+
 export interface DspObjectRef {
   space: string;
   technicalName: string;
@@ -31,15 +41,18 @@ export interface DspObjectRef {
 
 export interface DspObject extends DspObjectRef {
   businessName?: string;
-  /** Raw definition (CSN or CLI JSON). Stored as-is for re-parsing and for test-copy generation. */
+  /** Raw definition as returned by the CLI. Stored as-is so it can be re-parsed when the parser improves. */
   definition: unknown;
   /** Stable hash of `definition`, used to detect changes between scans. */
   definitionHash: string;
-  /** Whether the CLI can deploy a modified copy of this object into a test space. */
-  deployable: boolean;
 }
 
-/** Edge kinds in the lineage graph. */
+/**
+ * Edges always point in the direction data (or control) moves:
+ *  - reads_from: `from` is the source, `to` is the object that reads it (table -> view, view -> flow)
+ *  - writes_to:  `from` is a flow, `to` is the table it loads
+ *  - triggers:   `from` is a task chain, `to` is a step it runs (control only, no data)
+ */
 export type EdgeKind = "reads_from" | "writes_to" | "triggers";
 
 export interface DspEdge {
@@ -53,17 +66,29 @@ export interface LineageGraph {
   spaces: string[];
   nodes: DspObject[];
   edges: DspEdge[];
+  /** Objects that could not be read or parsed. A scan never fails as a whole because of one object. */
+  warnings: string[];
 }
 
 /**
  * A pipeline is the unit tests attach to: one output object plus every upstream
- * step needed to produce it. Steps are ordered so they can be executed top-down.
+ * step needed to produce it, ordered so each step comes after everything it depends on.
  */
 export interface Pipeline {
-  id: string;
   name: string;
   output: DspObjectRef;
-  /** Ingestion points where fixtures can be injected (usually local tables filled by flows). */
+  /** Tables with no other table upstream: where fixtures are injected or snapshots start. */
   entryPoints: DspObjectRef[];
+  /** Every object in the chain, upstream first, output last. */
   steps: DspObjectRef[];
+  /** Task chains that run one or more of the steps. Not part of the data path. */
+  orchestrators: DspObjectRef[];
+}
+
+export function refKey(ref: Pick<DspObjectRef, "space" | "technicalName">): string {
+  return `${ref.space}.${ref.technicalName}`;
+}
+
+export function toRef(o: DspObjectRef): DspObjectRef {
+  return { space: o.space, technicalName: o.technicalName, type: o.type };
 }
