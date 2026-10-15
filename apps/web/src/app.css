@@ -1,0 +1,277 @@
+/*
+ * Layout and the lineage picture. Colours and fonts come from the UI5 theme's
+ * CSS variables (--sap...), so everything follows light and dark mode.
+ */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--sapBackgroundColor);
+  color: var(--sapTextColor);
+  font-family: var(--sapFontFamily);
+  font-size: var(--sapFontSize);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.app-main {
+  flex: 1;
+  overflow: auto;
+}
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+/* Pages with a lineage picture use the whole window; the picture takes the height left over. */
+.page-wide {
+  max-width: none;
+  height: 100%;
+  box-sizing: border-box;
+  padding-bottom: 1rem;
+}
+.page-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.25rem;
+}
+.page-header-subtitle {
+  margin-top: 0.25rem;
+  color: var(--sapContent_LabelColor);
+}
+.page-header-actions,
+.facts,
+.list-toolbar,
+.exclusions,
+.dialog-footer,
+.object-panel-actions,
+.object-panel-flags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.facts {
+  gap: 1rem;
+}
+.list-toolbar > :first-child {
+  margin-right: auto;
+}
+.dialog-footer {
+  justify-content: flex-end;
+  width: 100%;
+  padding: 0.25rem 0;
+}
+.dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 32rem;
+}
+.block {
+  display: block;
+  margin: 0.5rem 0;
+}
+section.block > ui5-title {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+.muted {
+  color: var(--sapContent_LabelColor);
+}
+.mono {
+  font-family: var(--sapFontFamily_Mono, "72Mono", ui-monospace, monospace);
+}
+.type-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  margin-right: 0.4rem;
+}
+.warnings {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+  max-height: 10rem;
+  overflow: auto;
+}
+
+/* --- Pipeline: picture on the left, details on the right */
+
+.pipeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-height: 0;
+}
+.pipeline > ui5-segmented-button {
+  align-self: flex-start;
+}
+.pipeline-main {
+  display: flex;
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 24rem;
+}
+.pipeline-graph {
+  flex: 1;
+  border: 1px solid var(--sapGroup_ContentBorderColor);
+  border-radius: var(--sapElement_BorderCornerRadius);
+  background: var(--sapGroup_ContentBackground);
+  overflow: hidden;
+}
+.object-panel {
+  width: 22rem;
+  flex-shrink: 0;
+  overflow: auto;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--sapGroup_ContentBorderColor);
+  border-radius: var(--sapElement_BorderCornerRadius);
+  background: var(--sapGroup_ContentBackground);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-sizing: border-box;
+}
+.steps-view {
+  overflow: auto;
+}
+.object-panel-type {
+  font-size: var(--sapFontSmallSize);
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.object-panel-links ul,
+.steps {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}
+.object-panel-links li,
+.steps li {
+  margin: 0.15rem 0;
+}
+.object-panel-definition pre {
+  margin: 0;
+  max-height: 24rem;
+  overflow: auto;
+  font-size: var(--sapFontSmallSize);
+}
+
+/* --- Lineage nodes and edges (React Flow) */
+
+.lineage-node {
+  box-sizing: border-box;
+  width: 240px;
+  height: 76px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--sapGroup_ContentBorderColor);
+  border-left-width: 4px;
+  border-radius: 0.5rem;
+  background: var(--sapTile_Background);
+  color: var(--sapTextColor);
+  box-shadow: var(--sapContent_Shadow0);
+  overflow: hidden;
+}
+.lineage-node.is-selected {
+  outline: 2px solid var(--sapContent_FocusColor);
+  outline-offset: 1px;
+}
+.lineage-node.is-output {
+  border-color: var(--sapPositiveElementColor);
+  border-width: 2px 2px 2px 4px;
+}
+.lineage-node.is-excluded {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.lineage-node-type {
+  font-size: 0.6875rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.lineage-node-space {
+  color: var(--sapContent_LabelColor);
+  font-weight: normal;
+}
+.lineage-node-name {
+  font-family: var(--sapFontFamily_Mono, "72Mono", ui-monospace, monospace);
+  font-size: 0.8125rem;
+  font-weight: bold;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lineage-node-business {
+  font-size: 0.75rem;
+  color: var(--sapContent_LabelColor);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lineage-node-flags {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.15rem;
+}
+.flag {
+  font-size: 0.625rem;
+  line-height: 1rem;
+  padding: 0 0.3rem;
+  border-radius: 0.25rem;
+  border: 1px solid currentColor;
+}
+.flag-output {
+  color: var(--sapPositiveTextColor);
+}
+.flag-entry {
+  color: var(--sapInformativeTextColor);
+}
+.flag-muted {
+  color: var(--sapContent_LabelColor);
+}
+.flag-warning {
+  color: var(--sapCriticalTextColor);
+}
+.flag-error {
+  color: var(--sapNegativeTextColor);
+}
+.react-flow__edge.lineage-edge.is-write path.react-flow__edge-path {
+  stroke-width: 2;
+}
+.react-flow__edge.lineage-edge.is-excluded path.react-flow__edge-path {
+  stroke-dasharray: 6 4;
+  opacity: 0.6;
+}
+.lineage-hint {
+  color: var(--sapContent_LabelColor);
+  font-size: var(--sapFontSmallSize);
+}
+.react-flow__minimap-node.minimap-table {
+  fill: var(--sapChart_OrderedColor_1);
+}
+.react-flow__minimap-node.minimap-flow {
+  fill: var(--sapChart_OrderedColor_6);
+}
+.react-flow__minimap-node.minimap-view {
+  fill: var(--sapChart_OrderedColor_3);
+}
+.react-flow__minimap-node.minimap-model {
+  fill: var(--sapChart_OrderedColor_2);
+}
+.react-flow__minimap-node.minimap-other {
+  fill: var(--sapNeutralElementColor);
+}

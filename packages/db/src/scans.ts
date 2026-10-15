@@ -1,30 +1,12 @@
-import { refKey, type DspEdge, type DspObject, type EdgeKind, type LineageGraph, type ObjectType } from "@ystara/shared";
+import { refKey, type DspEdge, type DspObject, type EdgeKind, type LineageGraph, type ObjectDetails, type ObjectType, type Scan, type ScanSource, type ScanStatus } from "@ystara/shared";
 import type { Db, Queryable } from "./db.js";
 
 /**
- * Discovery scans: a request to read some spaces of a tenant, and, once done,
- * what was read (object definitions) and the lineage graph built from it.
- *
- * Lifecycle: queued (API) -> running (worker) -> succeeded | failed.
- * Imported scans (a saved `npm run scan` folder) go straight to succeeded.
+ * Discovery scans (see the Scan type in @ystara/shared for the lifecycle).
+ * The graph of a succeeded scan is stored as objects and edges; definitions
+ * are stored once per tenant and hash.
  */
-export type ScanStatus = "queued" | "running" | "succeeded" | "failed";
-export type ScanSource = "tenant" | "import";
-
-export interface Scan {
-  id: string;
-  tenantId: string;
-  spaces: string[];
-  source: ScanSource;
-  status: ScanStatus;
-  requestedAt: Date;
-  startedAt: Date | null;
-  finishedAt: Date | null;
-  objectCount: number | null;
-  edgeCount: number | null;
-  warnings: string[];
-  error: string | null;
-}
+export type { Scan, ScanSource, ScanStatus };
 
 /** One object as the CLI returned it. Same shape as the connector's RawObject. */
 export interface StoredObject {
@@ -183,6 +165,52 @@ export async function loadGraph(db: Queryable, scanId: string, opts: { definitio
   const edges: DspEdge[] = edgeRows.map((e) => ({ from: ref(e.from_space, e.from_name), to: ref(e.to_space, e.to_name), kind: e.kind }));
 
   return { scannedAt: (scan.finishedAt ?? scan.requestedAt).toISOString(), spaces: scan.spaces, nodes, edges, warnings: scan.warnings };
+}
+
+/** One object of a scan with its definition and every edge that touches it, or undefined if the scan doesn't have it. */
+export async function loadObject(db: Queryable, scanId: string, space: string, technicalName: string): Promise<ObjectDetails | undefined> {
+  const { rows } = await db.query<{ type: ObjectType; business_name: string | null; definition_hash: string; definition: unknown }>(
+    `select o.type, o.business_name, o.definition_hash, d.definition
+     from scan_objects o
+     join scans s on s.id = o.scan_id
+     join object_definitions d on d.tenant_id = s.tenant_id and d.hash = o.definition_hash
+     where o.scan_id = $1 and o.space = $2 and o.technical_name = $3`,
+    [scanId, space, technicalName],
+  );
+  if (rows.length === 0) return undefined;
+  const o = rows[0];
+  const { rows: edgeRows } = await db.query<{
+    from_space: string;
+    from_name: string;
+    from_type: ObjectType | null;
+    to_space: string;
+    to_name: string;
+    to_type: ObjectType | null;
+    kind: EdgeKind;
+  }>(
+    `select e.from_space, e.from_name, f.type as from_type, e.to_space, e.to_name, t.type as to_type, e.kind
+     from scan_edges e
+     left join scan_objects f on f.scan_id = e.scan_id and f.space = e.from_space and f.technical_name = e.from_name
+     left join scan_objects t on t.scan_id = e.scan_id and t.space = e.to_space and t.technical_name = e.to_name
+     where e.scan_id = $1 and ((e.from_space = $2 and e.from_name = $3) or (e.to_space = $2 and e.to_name = $3))
+     order by e.kind, e.from_space, e.from_name, e.to_space, e.to_name`,
+    [scanId, space, technicalName],
+  );
+  return {
+    object: {
+      space,
+      technicalName,
+      type: o.type,
+      ...(o.business_name ? { businessName: o.business_name } : {}),
+      definition: o.definition,
+      definitionHash: o.definition_hash,
+    },
+    edges: edgeRows.map((e) => ({
+      from: { space: e.from_space, technicalName: e.from_name, type: e.from_type ?? "unknown" },
+      to: { space: e.to_space, technicalName: e.to_name, type: e.to_type ?? "unknown" },
+      kind: e.kind,
+    })),
+  };
 }
 
 /** What a scan read, as the CLI returned it, so the graph can be rebuilt with a newer parser. */

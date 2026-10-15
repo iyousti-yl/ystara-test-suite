@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { refKey } from "@ystara/shared";
 import { HR_SPACE } from "./fixtures/hr-space.js";
-import { buildPipeline } from "./graph.js";
+import { buildPipeline, pipelineGraph } from "./graph.js";
 import { toMermaid } from "./mermaid.js";
 import { graphFromRaw, readSpaces, type RawObject } from "./scan.js";
 import type { ObjectSource } from "../types.js";
@@ -130,6 +130,17 @@ describe("pipeline with the other writer excluded", () => {
       const q = buildPipeline(graph, OUTPUT, { excludeWriters: [pattern] });
       expect(q.steps.map(refKey)).toEqual(p.steps.map(refKey));
     }
+  });
+
+  it("gives the web app the steps, the excluded writer and the data edges between them to draw", () => {
+    const g = pipelineGraph(graph, p);
+    expect(g.nodes.map((n) => n.technicalName).sort()).toEqual([...names, "DF_EMPLOYEE_BACKFILL"].sort());
+    expect(g.nodes.find((n) => n.technicalName === "LT_HEADCOUNT")).not.toHaveProperty("definition");
+    const drawn = g.edges.map((e) => `${e.from.technicalName} ${e.kind} ${e.to.technicalName}`);
+    expect(drawn).toContain("DF_EMPLOYEE_BACKFILL writes_to LT_EMPLOYEE_RAW");
+    expect(drawn).toContain("LT_EMPLOYEE_RAW reads_from V_EMPLOYEE_CLEAN");
+    expect(drawn.filter((d) => d.includes("DF_EMPLOYEE_BACKFILL"))).toEqual(["DF_EMPLOYEE_BACKFILL writes_to LT_EMPLOYEE_RAW"]);
+    expect(g.edges.every((e) => e.kind !== "triggers")).toBe(true);
   });
 
   it("renders a Mermaid diagram with only the pipeline's steps", () => {

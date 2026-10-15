@@ -45,8 +45,8 @@ afterAll(async () => {
   await db.close();
 });
 
-const post = (url: string, payload: object) => app.inject({ method: "POST", url, payload });
-const get = (url: string) => app.inject({ method: "GET", url });
+const post = (url: string, payload: object) => app.inject({ method: "POST", url: `/api${url}`, payload });
+const get = (url: string) => app.inject({ method: "GET", url: `/api${url}` });
 
 async function tenantWithScan(name: string) {
   const tenant = (await post("/tenants", { name, host: "https://synthetic.example.com" })).json();
@@ -60,6 +60,7 @@ describe("tenants", () => {
     const res = await post("/tenants", { name: "Partner", host: "https://partner.example.com" });
     expect(res.statusCode).toBe(201);
     expect((await get("/tenants")).json().map((t: { name: string }) => t.name)).toContain("Partner");
+    expect((await get(`/tenants/${res.json().id}`)).json()).toMatchObject({ name: "Partner", host: "https://partner.example.com" });
   });
 
   it("need an https URL and a unique name", async () => {
@@ -99,6 +100,18 @@ describe("scans", () => {
   });
 });
 
+describe("objects", () => {
+  it("come with their definition and every edge that touches them", async () => {
+    const { scan } = await tenantWithScan("Objects");
+    const res = await get(`/scans/${scan.id}/objects/S/LT_DATA`);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().object).toMatchObject({ technicalName: "LT_DATA", type: "local_table", definition: RAW[0].definition });
+    expect(res.json().edges).toHaveLength(3);
+    expect((await get(`/scans/${scan.id}/objects/S/NOPE`)).statusCode).toBe(404);
+    expect((await get(`/scans/${scan.id}/objects/S/..%2Fetc`)).statusCode).toBe(400);
+  });
+});
+
 describe("pipelines", () => {
   it("can be tried on a scan, flagging a table with two writers", async () => {
     const { scan } = await tenantWithScan("Try");
@@ -107,6 +120,7 @@ describe("pipelines", () => {
     const p: Pipeline = res.json().pipeline;
     expect(p.ambiguousWriters.map((a) => a.writers.map((w) => w.technicalName))).toEqual([["DF_LOAD", "DF_OTHER_RELOAD"]]);
     expect(res.json().mermaid).toMatch(/^flowchart LR/);
+    expect(res.json().graph.nodes.map((n: { technicalName: string }) => n.technicalName).sort()).toEqual(["DF_LOAD", "DF_OTHER_RELOAD", "LT_DATA", "LT_OLD", "V_OUT"]);
   });
 
   it("leave out excluded writers, given in the query", async () => {
@@ -114,6 +128,17 @@ describe("pipelines", () => {
     const p: Pipeline = (await get(`/scans/${scan.id}/pipeline?output=S.V_OUT&excludeWriter=DF_OTHER_*&excludeWriter=NONE`)).json().pipeline;
     expect(p.steps.map((s) => s.technicalName)).toEqual(["DF_LOAD", "LT_DATA", "V_OUT"]);
     expect(p.excludedWriters.map((x) => x.writer.technicalName)).toEqual(["DF_OTHER_RELOAD"]);
+  });
+
+  it("draw the excluded writer next to the table it writes, without its own inputs", async () => {
+    const { scan } = await tenantWithScan("Drawn");
+    const { graph } = (await get(`/scans/${scan.id}/pipeline?output=V_OUT&excludeWriter=DF_OTHER_RELOAD`)).json();
+    expect(graph.nodes.map((n: { technicalName: string }) => n.technicalName).sort()).toEqual(["DF_LOAD", "DF_OTHER_RELOAD", "LT_DATA", "V_OUT"]);
+    expect(graph.edges.map((e: { from: { technicalName: string }; to: { technicalName: string } }) => `${e.from.technicalName}>${e.to.technicalName}`).sort()).toEqual([
+      "DF_LOAD>LT_DATA",
+      "DF_OTHER_RELOAD>LT_DATA",
+      "LT_DATA>V_OUT",
+    ]);
   });
 
   it("are saved and computed on the tenant's latest successful scan", async () => {
@@ -124,7 +149,7 @@ describe("pipelines", () => {
     expect(res.scanId).toBe(scan.id);
     expect(res.pipeline.steps).toHaveLength(3);
     expect((await get(`/tenants/${tenant.id}/pipelines`)).json()).toHaveLength(1);
-    expect((await app.inject({ method: "DELETE", url: `/pipelines/${created.json().id}` })).statusCode).toBe(204);
+    expect((await app.inject({ method: "DELETE", url: `/api/pipelines/${created.json().id}` })).statusCode).toBe(204);
   });
 
   it("explain what is missing instead of failing", async () => {
