@@ -7,9 +7,10 @@ import { migrate } from "./migrate.js";
  * compiled to WebAssembly). No Docker or database server needed, on Windows too.
  * Import it from "@ystara/db/testing" in test files only.
  */
-export async function createTestDb(): Promise<Db> {
+export async function createTestDb(opts: { migrated?: boolean } = {}): Promise<Db> {
   const pg = new PGlite();
   const db: Db = {
+    where: "the in-memory test database",
     query: (text, params) => pg.query(text, params),
     exec: async (sql) => {
       await pg.exec(sql);
@@ -25,6 +26,6 @@ export async function createTestDb(): Promise<Db> {
       ),
     close: () => pg.close(),
   };
-  await migrate(db);
+  if (opts.migrated ?? true) await migrate(db);
   return db;
 }

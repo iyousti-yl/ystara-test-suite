@@ -29,7 +29,7 @@ Read [docs/architecture/overview.md](docs/architecture/overview.md) first.
 
 ```bash
 npm install
-cp .env.example .env     # fill in values
+cp .env.example .env.local     # fill in values (not .env: see below)
 npm run typecheck
 npm test
 ```
@@ -44,6 +44,10 @@ docker compose down                   # stop; add -v to also delete the database
 
 The API and Postgres are published on 127.0.0.1 only: there is no sign-in yet. Everything stored is metadata (definitions and lineage), never table rows.
 
+**Ports.** Postgres is on host port 55432 (not 5432, so it never meets another Postgres on your machine) and the API on 4000. To change them, set `YSTARA_DB_PORT` / `YSTARA_API_PORT` in `.env`: Compose and the npm tools both read it, so they always agree. The API, worker and `db:*` tools check that the database they reach is Ystara's and stop with a clear message otherwise.
+
+**Settings.** App settings and secrets go in `.env.local`. `.env` may only hold the `YSTARA_*` ports, because Compose reads `.env` and can print parts of its values (a `$` in a secret is read as a variable); the tools refuse to start when `.env` holds anything else and name the keys to move. Shell variables win over both files.
+
 Load a scan you already saved with `npm run scan`, without calling the tenant, then ask for a pipeline:
 
 ```bash
@@ -57,7 +61,7 @@ API routes (all JSON): `GET/POST /tenants`, `GET/POST /tenants/:id/scans` (POST 
 
 ### Discovery scan (read-only)
 
-Builds the lineage of a space and, optionally, the pipeline behind one output object. Needs `datasphere login` done once, `DSP_HOST` in `.env`, and the CLI installed (`npm i -g @sap/datasphere-cli`).
+Builds the lineage of a space and, optionally, the pipeline behind one output object. Needs `datasphere login` done once, `DSP_HOST` in `.env.local`, and the CLI installed (`npm i -g @sap/datasphere-cli`).
 
 ```bash
 npm run scan -- --space HR --output V_HEADCOUNT_OUT

@@ -16,3 +16,11 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      # A secret with a `$` in .env.local must never show up in what Compose prints
+      # (it would if docker-compose.yml loaded the file or substituted app settings).
+      - name: Compose never sees app settings
+        run: |
+          printf '%s\n' "DSP_OAUTH_CLIENT_SECRET='canary\$SECRET_TAIL'" > .env.local
+          docker compose config > compose.out 2>&1
+          if grep -E 'canary|SECRET_TAIL' compose.out; then echo "Compose printed part of a secret"; exit 1; fi
+          rm .env.local compose.out

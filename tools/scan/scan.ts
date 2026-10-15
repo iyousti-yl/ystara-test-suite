@@ -6,7 +6,7 @@
  * object. Nothing in the tenant is created, changed or deleted: the connector
  * only allows `list` and `read` commands.
  *
- * Usage (after `datasphere login` and with DSP_HOST in .env):
+ * Usage (after `datasphere login` and with DSP_HOST in .env.local):
  *   npm run scan -- --space HR
  *   npm run scan -- --space HR --space SHARED --output V_HEADCOUNT_OUT
  *   npm run scan -- --from tools/scan/output/<run> --output V_HEADCOUNT_OUT   (replay a saved scan, no tenant needed)
@@ -34,9 +34,10 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { DatasphereCli, buildPipeline, graphFromRaw, readSpaces, toMermaid, type RawObject } from "@ystara/connector";
 import type { LineageGraph, Pipeline } from "@ystara/shared";
+import { loadLocalEnv } from "@ystara/shared/env";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-await loadDotEnv(path.join(root, ".env"));
+loadLocalEnv(root);
 
 const { values } = parseArgs({
   options: {
@@ -61,7 +62,7 @@ if (values.from) {
   const host = process.env.DSP_HOST;
   spaces = values.space ?? (process.env.DSP_SPACE ? [process.env.DSP_SPACE] : []);
   if (!host || spaces.length === 0) {
-    console.error("Need DSP_HOST in .env and at least one --space (or DSP_SPACE).");
+    console.error("Need DSP_HOST in .env.local and at least one --space (or DSP_SPACE).");
     process.exit(1);
   }
   const cli = new DatasphereCli({ host, bin: process.env.DSP_CLI_BIN });
@@ -149,12 +150,4 @@ async function loadConfig(file: string, required: boolean): Promise<ScanConfig> 
   }
   console.log(`Using ${path.relative(root, file)}`);
   return config;
-}
-
-async function loadDotEnv(file: string) {
-  if (!existsSync(file)) return;
-  for (const line of (await readFile(file, "utf8")).split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
-  }
 }

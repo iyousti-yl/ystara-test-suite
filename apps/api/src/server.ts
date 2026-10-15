@@ -1,12 +1,12 @@
 import Fastify, { type FastifyError } from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
-import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import PgBoss from "pg-boss";
 import { ZodError } from "zod";
-import { connect, DEFAULT_DATABASE_URL, type Db } from "@ystara/db";
+import { assertYstaraDatabase, connect, databaseUrl, type Db } from "@ystara/db";
 import { ROLES } from "@ystara/shared";
+import { loadLocalEnv } from "@ystara/shared/env";
 import { discoveryRoutes } from "./routes/discovery.js";
 
 /**
@@ -45,14 +45,15 @@ export async function buildServer(deps: { db: Db; queue: JobQueue }, opts: { log
 
 // pathToFileURL keeps this check working on Windows (C:\... vs file:///C:/...).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const envFile = fileURLToPath(new URL("../../../.env", import.meta.url));
-  if (existsSync(envFile)) process.loadEnvFile(envFile);
+  loadLocalEnv(fileURLToPath(new URL("../../../", import.meta.url)));
 
-  const url = process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL;
+  const url = databaseUrl();
+  const db = connect(url);
+  await assertYstaraDatabase(db); // before pg-boss creates its own tables in someone else's database
   const boss = new PgBoss(url);
   boss.on("error", (err) => console.error("[api] queue error", err));
   await boss.start(); // queues are created by `npm run db:migrate`
 
-  const app = await buildServer({ db: connect(url), queue: boss });
-  await app.listen({ port: Number(process.env.API_PORT ?? 4000), host: process.env.API_HOST ?? "127.0.0.1" });
+  const app = await buildServer({ db, queue: boss });
+  await app.listen({ port: Number(process.env.YSTARA_API_PORT ?? 4000), host: process.env.API_HOST ?? "127.0.0.1" });
 }
