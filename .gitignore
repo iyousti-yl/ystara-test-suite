@@ -6,4 +6,5 @@ dist/
 !.env.example
 coverage/
 tools/spike/output/
+tools/spike/.YSTARA_SPIKE_*.json
 .DS_Store
