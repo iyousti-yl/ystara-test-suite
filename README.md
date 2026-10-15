@@ -2,7 +2,7 @@
 
 Regression and scenario testing for SAP Datasphere pipelines: discover the full lineage of a pipeline from ingestion to consumed output, capture snapshots, run fixture-based scenarios, and know before a transport whether the numbers still hold.
 
-**Status:** phase 0 (foundations). Nothing here is customer-ready yet.
+**Status:** phase 1 (connector and discovery). Nothing here is customer-ready yet.
 
 ## Layout
 
@@ -14,9 +14,12 @@ apps/
 packages/
   shared/     Types, scenario YAML schema, validation (used by all apps)
   connector/  The only code that talks to Datasphere (CLI + HANA SQL)
+  db/         Postgres access: SQL migrations, tenants, scans, pipelines
 docs/
   architecture/  Architecture decisions and diagrams
 tools/
+  scan/       `npm run scan`: read-only discovery from your machine
+  db/         `npm run db:import`: load a saved scan into the database
   spike/      One-off feasibility scripts (not shipped)
 ```
 
@@ -28,8 +31,29 @@ Read [docs/architecture/overview.md](docs/architecture/overview.md) first.
 npm install
 cp .env.example .env     # fill in values
 npm run typecheck
-npm run dev:api          # http://localhost:4000/health
+npm test
 ```
+
+### Run the app locally (Docker)
+
+```bash
+docker compose up -d --build          # Postgres, migrations, API and worker
+curl http://127.0.0.1:4000/health
+docker compose down                   # stop; add -v to also delete the database
+```
+
+The API and Postgres are published on 127.0.0.1 only: there is no sign-in yet. Everything stored is metadata (definitions and lineage), never table rows.
+
+Load a scan you already saved with `npm run scan`, without calling the tenant, then ask for a pipeline:
+
+```bash
+npm run db:import -- --from tools/scan/output/<run> --tenant Partner
+curl "http://127.0.0.1:4000/scans/<scan id>/pipeline?output=<SPACE.VIEW>&excludeWriter=<OTHER_FLOW>"
+```
+
+API routes (all JSON): `GET/POST /tenants`, `GET/POST /tenants/:id/scans` (POST queues a read-only scan for the worker), `GET /scans/:id`, `GET /scans/:id/graph`, `GET /scans/:id/pipeline?output=...&excludeWriter=...`, `GET/POST /tenants/:id/pipelines`, `GET/DELETE /pipelines/:id` (a saved pipeline, computed on the tenant's latest successful scan).
+
+**Scanning a tenant from the app.** The worker uses the Datasphere CLI's own login until the connection wizard stores tenant credentials. The worker container has no login, so to scan a tenant, run the worker on your machine instead: `docker compose stop worker`, then `npm run dev:worker` (after `datasphere login`). To run the API or worker with npm against the Docker database: `docker compose up -d postgres migrate`, then `npm run dev:api` / `npm run dev:worker`. Schema changes are numbered SQL files in `packages/db/migrations/`; `npm run db:migrate` applies them.
 
 ### Discovery scan (read-only)
 

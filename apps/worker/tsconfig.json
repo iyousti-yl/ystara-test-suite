@@ -4,6 +4,18 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src"],
-  "references": [{ "path": "../../packages/shared" }, { "path": "../../packages/connector" }]
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../packages/shared"
+    },
+    {
+      "path": "../../packages/connector"
+    },
+    {
+      "path": "../../packages/db"
+    }
+  ]
 }

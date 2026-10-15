@@ -21,4 +21,7 @@ npm run typecheck   # tsc for all packages and tools
 npm run lint
 npm test
 npm run scan -- --space <SPACE> [--output <OBJECT>]   # read-only discovery scan
+docker compose up -d --build                         # Postgres, migrations, API and worker (127.0.0.1 only)
+npm run db:migrate                                   # apply packages/db/migrations and create job queues
+npm run db:import -- --from <scan folder> --tenant <NAME>   # load a saved scan, no tenant calls
 ```

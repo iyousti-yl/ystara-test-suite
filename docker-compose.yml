@@ -1,0 +1,61 @@
+# Runs Ystara locally: Postgres, the API and the worker.
+#   docker compose up -d --build     start everything (API on http://127.0.0.1:4000)
+#   docker compose up -d postgres    only the database, to run the API or worker with npm on your machine
+#   docker compose down              stop (add -v to also delete the database)
+# Ports are published on 127.0.0.1 only: there is no sign-in yet.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ystara
+      POSTGRES_PASSWORD: ystara # local development only
+      POSTGRES_DB: ystara
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ystara -d ystara"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    image: ystara:dev
+    build: .
+    command: ["node", "packages/db/dist/run-migrations.js"]
+    environment:
+      DATABASE_URL: postgres://ystara:ystara@postgres:5432/ystara
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: ystara:dev
+    build: .
+    command: ["node", "apps/api/dist/server.js"]
+    environment:
+      DATABASE_URL: postgres://ystara:ystara@postgres:5432/ystara
+      API_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:4000:4000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Scans run here with the Datasphere CLI. Until the connection wizard stores tenant credentials,
+  # the container has no CLI login: to scan a tenant, stop this service and run `npm run dev:worker`
+  # on your machine, where `datasphere login` works. Imported scans need no worker.
+  worker:
+    image: ystara:dev
+    build: .
+    command: ["node", "apps/worker/dist/main.js"]
+    environment:
+      DATABASE_URL: postgres://ystara:ystara@postgres:5432/ystara
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:

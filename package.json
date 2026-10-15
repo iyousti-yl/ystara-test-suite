@@ -17,12 +17,15 @@
     "dev:worker": "npm run dev -w @ystara/worker",
     "dev:web": "npm run dev -w @ystara/web",
     "spike:cli": "node tools/spike/cli-capabilities.mjs",
-    "scan": "tsc -b && tsx tools/scan/scan.ts"
+    "scan": "tsc -b && tsx tools/scan/scan.ts",
+    "db:migrate": "tsc -b && node packages/db/dist/run-migrations.js",
+    "db:import": "tsc -b && tsx tools/db/import-scan.ts"
   },
   "engines": {
     "node": ">=22"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10",
     "@types/node": "^22.10.0",
     "eslint": "^9.17.0",
     "tsx": "^4.19.2",
