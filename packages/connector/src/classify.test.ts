@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyKind, hashDefinition, DEPLOYABLE } from "./classify.js";
+import { classifyKind, classifyObject, hashDefinition } from "./classify.js";
 
 describe("classifyKind", () => {
   it("maps known CLI kinds to object types", () => {
@@ -12,16 +12,18 @@ describe("classifyKind", () => {
   });
 });
 
-describe("hashDefinition", () => {
-  it("is stable for equal definitions and changes when the definition changes", () => {
-    const a = { kind: "entity", elements: { ID: { type: "cds.String" } } };
-    expect(hashDefinition(a)).toBe(hashDefinition(structuredClone(a)));
-    expect(hashDefinition(a)).not.toBe(hashDefinition({ ...a, kind: "view" }));
+describe("classifyObject", () => {
+  it("splits the merged views command into SQL and graphical views", () => {
+    expect(classifyObject("views", { definitions: { V: { "@DataWarehouse.sqlEditor.query": "SELECT 1 FROM DUMMY" } } })).toBe("sql_view");
+    expect(classifyObject("views", { definitions: { V: { "@DataWarehouse.querybuilder.model": {} } } })).toBe("graphical_view");
   });
 });
 
-describe("DEPLOYABLE", () => {
-  it("never treats remote tables as deployable (they point at live sources)", () => {
-    expect(DEPLOYABLE.has("remote_table")).toBe(false);
+describe("hashDefinition", () => {
+  it("ignores key order and changes when the content changes", () => {
+    const a = { kind: "entity", elements: { ID: { type: "cds.String" } } };
+    const b = { elements: { ID: { type: "cds.String" } }, kind: "entity" };
+    expect(hashDefinition(a)).toBe(hashDefinition(b));
+    expect(hashDefinition(a)).not.toBe(hashDefinition({ ...a, kind: "view" }));
   });
 });

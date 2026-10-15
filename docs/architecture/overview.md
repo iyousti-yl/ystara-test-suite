@@ -4,11 +4,11 @@ _Phase 0 version. Written so one person can maintain the whole system. Update it
 
 ## What the system does
 
-1. **Connect** to a customer's SAP Datasphere tenant with a scoped OAuth client (CLI) and a database user limited to a dedicated test space (SQL).
+1. **Connect** to a customer's SAP Datasphere tenant, **read-only**: the Datasphere CLI for object definitions (`list` and `read` only) and a database user with read access for `SELECT` queries. Ystara never creates, changes, deletes or runs anything in a tenant.
 2. **Discover** every object in the selected spaces and build a lineage graph (what reads from what, what writes to what, what triggers what).
 3. Let users define **pipelines** (an output object and its upstream chain) and attach tests:
    - **Snapshots:** capture metrics of each object, compare across time or before/after a change.
-   - **Scenarios:** load fixture data into entry tables of a test copy of the pipeline, run the flows, evaluate assertions at checkpoints.
+   - **Scenarios:** simulate the pipeline's logic on fixture data, entirely inside one read-only `SELECT`, and evaluate assertions at checkpoints (see "How a scenario run works").
 4. **Run** tests manually or on a schedule, **report** results, **alert** on failures.
 
 ## Components
@@ -46,9 +46,11 @@ _Phase 0 version. Written so one person can maintain the whole system. Update it
 | 3 | Connector behind an interface | Lets us ship a self-hosted runner later without touching api/worker | A security team asks for the runner |
 | 4 | Metadata, hashes and aggregates only; no raw rows by default | Security reviews and GDPR (HR data at the first client) | A customer opts in to store N differing rows |
 | 5 | Scenario spec is YAML validated by Zod; visual builder emits the same YAML | One artefact for devs and non-devs; Git-friendly | Never |
-| 6 | Test copies deployed into the customer's own test space | Data never leaves their tenant; CU cost stays theirs and visible | CLI can't deploy a type (then: snapshot-only for that step) |
+| 6 | **Strictly read-only.** The connector allows only CLI `list`/`read` (enforced in `packages/connector/src/readonly.ts`) and SQL `SELECT` | Product promise to customers and Issam's requirement (2026-10-15); easiest possible security review | Never without an explicit product decision |
 | 7 | Hosted in the EU (Hetzner or Scaleway), Docker Compose, Caddy | Budget under €200/month, GDPR | Beyond ~30 tenants, move to managed Postgres and two VMs |
 | 8 | Email + TOTP auth in v1, SSO in v2 | Keep v1 small; SSO is a known enterprise ask | First enterprise procurement |
+| 9 | Scenario tests are **read-only simulations**: fixture rows are inlined into a single `SELECT` that reproduces the pipeline's SQL logic | Keeps decision 6 for scenarios too (chosen by Issam, 2026-10-15) | Customers ask for coverage of flow types that can't be expressed as SQL |
+| 10 | Lineage is found by scanning definitions for names of known objects, with role rules per type, not by a parser per object format | Flow and task chain JSON differs between CLI releases; this survives format changes | Real samples show false or missing edges |
 
 ## Data model (first cut)
 
@@ -63,26 +65,36 @@ _Phase 0 version. Written so one person can maintain the whole system. Update it
 
 Credentials are encrypted with a master key held only in the worker/API environment (libsodium secretbox). Rotating the master key re-encrypts rows in a migration.
 
-## How a scenario run works (phase 3 target)
+## How discovery works (phase 1)
 
-1. Worker loads the scenario YAML and the pipeline graph.
-2. For each entry table, creates or truncates a fixture table `YST_<name>` in the test space and inserts the rows (SQL).
-3. Walks the pipeline top-down; for each deployable step, writes a copy `YST_<name>` whose sources are remapped to the `YST_` copies (CSN rewrite) and deploys it via CLI. Non-deployable steps are marked and the chain stops there with a clear message.
-4. Triggers the flows or task chains listed under `run:` (CLI) and polls until done.
-5. For each checkpoint, runs the assertions as SQL against the `YST_` copy; stores pass/fail, measured value and a key-only sample of mismatches.
-6. Tears down the copies unless the user asked to keep them for debugging.
+1. For each space and each object kind, `list` then `read` every object (CLI, read-only, a few in parallel). One unreadable object becomes a warning; the scan carries on.
+2. Classify each object (`views` is split back into SQL and graphical views) and hash its definition so re-scans show what changed.
+3. Find references: walk each definition and match strings, and identifiers inside SQL text, against the names of all scanned objects. Role rules: in flows, references under a key containing "target" are writes, the rest are reads; in task chains, references are steps; in tables, views and analytic models, references are reads. When a `read` bundles dependency definitions, only the object's own entry is scanned.
+4. Build edges that point the way data moves (`reads_from`, `writes_to`) plus control edges (`triggers`) from task chains.
+5. A **pipeline** for an output object = everything upstream of it through data edges, in dependency order. **Entry points** are tables with no other table upstream (where fixtures go). **Orchestrators** are task chains that run any step.
+
+Try it locally: `npm run scan -- --space <SPACE> --output <OBJECT>` writes a Mermaid lineage diagram to `tools/scan/output/`.
+
+## How a scenario run works (phase 3 target, read-only simulation)
+
+Nothing is written to the tenant and no flow or task chain is run. Instead the platform tests the **logic** of the pipeline:
+
+1. Load the scenario YAML and the pipeline.
+2. Turn each entry table's fixture rows into an inline data set (`SELECT ... FROM DUMMY UNION ALL ...`).
+3. Walk the pipeline from the entry points to each checkpoint and compose one `WITH` query: every view and SQL-based transformation flow becomes a CTE, with its references to upstream objects rewritten to the CTEs that replace them. A table loaded by a transformation flow is represented by that flow's `SELECT` (full-load semantics).
+4. Run the composed `SELECT` through the read-only database user and evaluate the assertions on the result.
+5. Steps that cannot be expressed as SQL (data flows with script operators, replication flows, remote sources) stop the simulation at that point with a clear message; those parts of the chain are covered by snapshot tests instead.
+
+Open questions for phase 3: how delta loads and upserts in transformation flows should be simulated, and how graphical views' query model maps to SQL (likely via the CSN `query` that Datasphere also stores).
 
 ## Security posture (short form for the security pack)
 
-- Least-privilege OAuth client; DB user scoped to the test space.
+- Read-only by design: CLI limited to `list`/`read` in code, database user with `SELECT` rights only, no writes, deploys or task runs.
 - Secrets encrypted at rest, TLS in transit, EU hosting, daily encrypted backups, 30-day retention of results by default.
 - No customer row data stored unless explicitly enabled per account.
 - Full audit log of connections, scans, runs and user actions.
 - Self-hosted runner available when required (same connector interface).
 
-## Open questions tracked by the spike (`tools/spike`)
+## Feasibility spike results (2026-10-15)
 
-- Exact CLI subcommand names per object type in the installed version.
-- Which types can be created via CLI (analytic models and task chains are the uncertain ones).
-- Whether task chains can be started via CLI and how completion is observed.
-- Export time per space (sizing for scheduled re-scans).
+The spike ran successfully against the partner tenant with Datasphere CLI 2026.x. Findings already reflected in the connector: `list`/`read` always return JSON (no `--output` flag), `list` needs `--top` beyond 25 items, and SQL and graphical views share the `views` command.
