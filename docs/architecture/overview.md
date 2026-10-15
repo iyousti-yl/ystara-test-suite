@@ -54,6 +54,7 @@ _Phase 1 version. Written so one person can maintain the whole system. Update it
 | 10 | Lineage is found by scanning definitions for names of known objects, with role rules per type, not by a parser per object format | Flow and task chain JSON differs between CLI releases; this survives format changes | Real samples show false or missing edges |
 | 11 | Plain SQL (node-postgres) with numbered SQL migrations, no ORM; tests run on PGlite (Postgres in WebAssembly) | Every query readable as written; tests need no database server, on Windows too | Queries get repetitive enough that a query builder pays off |
 | 12 | Pipelines are stored as an output plus writer exclusions; their steps are computed from the latest successful scan | Steps follow the tenant as it changes, and nothing goes stale | Tests attach to steps (phase 2), which may need stored step lists per scan |
+| 13 | Local settings: app settings and secrets in `.env.local`; `.env` holds only the `YSTARA_*` host ports (Postgres 55432, API 4000) that Compose substitutes. Programs refuse a database without Ystara's migrations | Compose never sees a secret, and no tool silently uses another Postgres on the machine | Hosting (decision 7) brings a secrets store |
 
 ## Data model
 

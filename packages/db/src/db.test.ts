@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { LineageGraph } from "@ystara/shared";
-import type { Db } from "./db.js";
-import { migrate } from "./migrate.js";
+import { connect, type Db } from "./db.js";
+import { assertYstaraDatabase, migrate } from "./migrate.js";
 import { createPipeline, deletePipeline, getPipeline, listPipelines } from "./pipelines.js";
 import {
   createScan,
@@ -131,5 +131,28 @@ describe("pipelines", () => {
     expect(await deletePipeline(db, p.id)).toBe(true);
     expect(await getPipeline(db, p.id)).toBeUndefined();
     expect(await deletePipeline(db, p.id)).toBe(false);
+  });
+});
+
+describe("the wrong database", () => {
+  it("is refused by migrate when it already holds someone else's tables", async () => {
+    const other = await createTestDb({ migrated: false });
+    await other.exec("create table invoices (id int)");
+    await expect(migrate(other)).rejects.toThrow(/in-memory test database is not Ystara's: it has 1 tables but no schema_migrations/);
+    await other.close();
+  });
+
+  it("stops the API, worker and tools before they touch it", async () => {
+    const empty = await createTestDb({ migrated: false });
+    await expect(assertYstaraDatabase(empty)).rejects.toThrow(/not a Ystara database.*db:migrate/);
+    await migrate(empty);
+    await expect(assertYstaraDatabase(empty)).resolves.toBeUndefined();
+    await empty.query("delete from schema_migrations");
+    await expect(assertYstaraDatabase(empty)).rejects.toThrow(/needs migrations 001_discovery\.sql/);
+    await empty.close();
+  });
+
+  it("is named in errors without its password", () => {
+    expect(connect("postgres://ystara:hunter2@db.example.com:55432/ystara").where).toBe("db.example.com:55432/ystara");
   });
 });

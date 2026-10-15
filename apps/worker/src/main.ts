@@ -10,19 +10,19 @@
  * credentials, scans use the Datasphere CLI's own login on the machine the
  * worker runs on (`datasphere login`). Everything stays read-only.
  */
-import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import PgBoss from "pg-boss";
 import { DatasphereCli } from "@ystara/connector";
-import { connect, DEFAULT_DATABASE_URL } from "@ystara/db";
+import { assertYstaraDatabase, connect, databaseUrl } from "@ystara/db";
 import { JOBS, type ScanJobData } from "@ystara/shared";
+import { loadLocalEnv } from "@ystara/shared/env";
 import { runScan } from "./jobs/scan.js";
 
-const envFile = fileURLToPath(new URL("../../../.env", import.meta.url));
-if (existsSync(envFile)) process.loadEnvFile(envFile);
+loadLocalEnv(fileURLToPath(new URL("../../../", import.meta.url)));
 
-const url = process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL;
+const url = databaseUrl();
 const db = connect(url);
+await assertYstaraDatabase(db); // before pg-boss creates its own tables in someone else's database
 const boss = new PgBoss(url);
 boss.on("error", (err) => console.error("[worker] queue error", err));
 

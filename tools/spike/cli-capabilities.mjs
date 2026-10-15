@@ -9,18 +9,18 @@
  * Strictly read-only: it only runs `list` and `read`. Ystara never creates,
  * changes, deletes or runs anything in a tenant (see docs/architecture).
  *
- * Usage: fill DSP_* in .env, then `npm run spike:cli`.
+ * Usage: fill DSP_* in .env.local, then `npm run spike:cli`.
  * Output: tools/spike/output/<timestamp>.json plus a console summary.
  */
 import { execa } from "execa";
-import { mkdir, writeFile, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadLocalEnv } from "@ystara/shared/env";
 
 // fileURLToPath, not URL.pathname: on Windows pathname is "/C:/...", which resolves to C:\C:\...
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-await loadDotEnv(path.join(root, ".env"));
+loadLocalEnv(root);
 
 const HOST = must("DSP_HOST");
 const SPACE = must("DSP_SPACE");
@@ -83,15 +83,8 @@ async function tryRun(args) {
 }
 function must(name) {
   const v = process.env[name];
-  if (!v) { console.error(`Missing ${name} in .env`); process.exit(1); }
+  if (!v) { console.error(`Missing ${name} in .env.local`); process.exit(1); }
   return v;
 }
 function mark(v) { return v === true ? "yes" : v === false ? "no" : "-"; }
 function firstLine(s) { return (s ?? "").split("\n").find((l) => l.trim()) ?? ""; }
-async function loadDotEnv(file) {
-  if (!existsSync(file)) return;
-  for (const line of (await readFile(file, "utf8")).split("\n")) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
-  }
-}

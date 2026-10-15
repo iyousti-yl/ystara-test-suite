@@ -3,20 +3,19 @@
  * queues. `npm run db:migrate` on your machine, and the one-shot `migrate`
  * service in docker-compose.yml. Run it before starting the API or worker.
  */
-import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { connect, DEFAULT_DATABASE_URL } from "./db.js";
+import { loadLocalEnv } from "@ystara/shared/env";
+import { connect, databaseUrl } from "./db.js";
 import { migrate } from "./migrate.js";
 import { prepareQueues } from "./queues.js";
 
-const envFile = fileURLToPath(new URL("../../../.env", import.meta.url));
-if (existsSync(envFile)) process.loadEnvFile(envFile);
+loadLocalEnv(fileURLToPath(new URL("../../../", import.meta.url)));
 
-const url = process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL;
+const url = databaseUrl();
 const db = connect(url);
 try {
   const applied = await migrate(db);
-  console.log(applied.length ? `Applied ${applied.join(", ")}` : "Database is up to date");
+  console.log(`${applied.length ? `Applied ${applied.join(", ")}` : "Up to date"} (${db.where})`);
 } finally {
   await db.close();
 }

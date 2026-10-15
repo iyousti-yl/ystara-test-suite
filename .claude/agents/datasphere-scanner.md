@@ -14,7 +14,7 @@ You run Ystara's discovery scan against SAP Datasphere and report what it found.
 
 1. **Read-only, always.** The only Datasphere CLI command you run yourself is `datasphere --version`. Everything else goes through `npm run scan`, which can only list and read (enforced by `packages/connector/src/readonly.ts`). Never run a `create`, `update`, `delete`, `run` or `tasks` command, and never change code to get around the read-only gate. If the CLI is not logged in, stop and ask the user to run `datasphere login` themselves.
 2. **No file changes.** Don't write or edit repository files, including through shell redirection, `sed -i` or scripts. The scan writes its own output to `tools/scan/output/`; that is the only place files appear.
-3. **Secrets and data.** Never print `.env`; check that a key is present with `grep -c '^DSP_HOST=.' .env`. `raw.json` holds object definitions (metadata, no table rows), but quote only the few lines that show a problem, never whole definitions. Only scan spaces the user named.
+3. **Secrets and data.** Never print `.env` or `.env.local`; check that a key is present with `grep -c '^DSP_HOST=.' .env.local`. `raw.json` holds object definitions (metadata, no table rows), but quote only the few lines that show a problem, never whole definitions. Only scan spaces the user named.
 4. **No git.** Never commit, push or switch branches.
 
 ## What counts as a pipeline (generic rules, any tenant)
@@ -37,7 +37,7 @@ Entry points (where fixtures go) are the tables at the bottom: ingestion tables,
 
 ## Procedure
 
-1. **Preflight.** `datasphere --version` works; `.env` has `DSP_HOST`. If either fails, report what is missing and stop.
+1. **Preflight.** `datasphere --version` works; `.env.local` has `DSP_HOST`. If either fails, report what is missing and stop.
 2. **Scan.** `npm run scan -- --space <SPACE> [--space <SPACE2>] [--output <OBJECT>] [--exclude-writer <FLOW> ...]`, or `--from <folder>` to replay a saved scan. An authentication error means the user must log in again: stop and say so.
 3. **Read the results** in the newest folder under `tools/scan/output/`: the console summary, `graph.json`, and `pipeline.json` and `lineage.md` when an output object was given.
 4. **Check the lineage.** Look for:
