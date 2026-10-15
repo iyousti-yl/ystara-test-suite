@@ -34,9 +34,7 @@ const LABEL: Record<ObjectType, string> = {
 };
 
 export function toMermaid(graph: LineageGraph, pipeline?: Pipeline): string {
-  const include = pipeline
-    ? new Set([...pipeline.steps, ...pipeline.orchestrators].map(refKey))
-    : new Set(graph.nodes.map(refKey));
+  const include = new Set((pipeline ? pipeline.steps : graph.nodes).map(refKey));
   const entry = new Set((pipeline?.entryPoints ?? []).map(refKey));
   const multiSpace = graph.spaces.length > 1;
 
@@ -51,6 +49,7 @@ export function toMermaid(graph: LineageGraph, pipeline?: Pipeline): string {
   }
   for (const e of graph.edges) {
     if (!include.has(refKey(e.from)) || !include.has(refKey(e.to))) continue;
+    if (pipeline && e.kind === "triggers") continue;
     lines.push(e.kind === "triggers" ? `  ${id(e.from)} -.->|runs| ${id(e.to)}` : e.kind === "writes_to" ? `  ${id(e.from)} ==>|writes| ${id(e.to)}` : `  ${id(e.from)} --> ${id(e.to)}`);
   }
   if (pipeline) {

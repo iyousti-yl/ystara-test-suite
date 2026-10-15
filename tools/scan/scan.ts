@@ -10,12 +10,22 @@
  *   npm run scan -- --space HR
  *   npm run scan -- --space HR --space SHARED --output V_HEADCOUNT_OUT
  *   npm run scan -- --from tools/scan/output/<run> --output V_HEADCOUNT_OUT   (replay a saved scan, no tenant needed)
+ *   npm run scan -- --from <run> --output V_HEADCOUNT_OUT --exclude-writer DF_OTHER_LOAD --exclude-writer "TF_ARCHIVE_*"
+ *
+ * When a table in the pipeline has several writers, only the one that belongs
+ * to the pipeline should be followed. Name the others with --exclude-writer
+ * (repeatable; wildcards * and ?; NAME or SPACE.NAME) or in a git-ignored
+ * tools/scan/scan.local.json (another file with --config):
+ *   { "excludeWriters": ["DF_OTHER_LOAD"], "pipelines": { "V_HEADCOUNT_OUT": { "excludeWriters": ["TF_*"] } } }
+ * The top-level list applies to every pipeline, the `pipelines` lists to that
+ * output only. Without exclusions, every writer is followed and the table is
+ * reported as ambiguous.
  *
  * Output in tools/scan/output/<timestamp>/ (git-ignored):
  *   raw.json        every definition as the CLI returned it (metadata only, no table rows)
  *   graph.json      nodes (without definitions), edges and warnings
  *   lineage.md      Mermaid diagram (the pipeline if --output is given, otherwise the whole space)
- *   pipeline.json   steps, entry points and task chains (with --output)
+ *   pipeline.json   steps, entry points, excluded and ambiguous writers, cycles (with --output)
  */
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -34,6 +44,8 @@ const { values } = parseArgs({
     output: { type: "string" },
     from: { type: "string" },
     concurrency: { type: "string" },
+    "exclude-writer": { type: "string", multiple: true },
+    config: { type: "string" },
   },
 });
 
@@ -65,9 +77,13 @@ if (values.from) {
 
 const graph = graphFromRaw(raw, spaces, warnings);
 let pipeline: Pipeline | undefined;
+let excludeWriters: string[] = [];
 if (values.output) {
   const [space, name] = values.output.includes(".") ? values.output.split(".", 2) : [spaces[0], values.output];
-  pipeline = buildPipeline(graph, { space, technicalName: name });
+  const config = await loadConfig(values.config ? path.resolve(values.config) : path.join(root, "tools", "scan", "scan.local.json"), Boolean(values.config));
+  const forOutput = config.pipelines?.[`${space}.${name}`] ?? config.pipelines?.[name];
+  excludeWriters = [...(config.excludeWriters ?? []), ...(forOutput?.excludeWriters ?? []), ...(values["exclude-writer"] ?? [])];
+  pipeline = buildPipeline(graph, { space, technicalName: name }, { excludeWriters });
 }
 
 const outDir = path.join(root, "tools", "scan", "output", new Date().toISOString().replace(/[:.]/g, "-"));
@@ -75,7 +91,7 @@ await mkdir(outDir, { recursive: true });
 await writeFile(path.join(outDir, "raw.json"), JSON.stringify({ spaces, raw, warnings }, null, 2));
 await writeFile(path.join(outDir, "graph.json"), JSON.stringify(summary(graph), null, 2));
 await writeFile(path.join(outDir, "lineage.md"), `# Lineage${pipeline ? `: ${pipeline.name}` : ""}\n\n\`\`\`mermaid\n${toMermaid(graph, pipeline)}\n\`\`\`\n`);
-if (pipeline) await writeFile(path.join(outDir, "pipeline.json"), JSON.stringify(pipeline, null, 2));
+if (pipeline) await writeFile(path.join(outDir, "pipeline.json"), JSON.stringify({ ...pipeline, excludeWriterPatterns: excludeWriters }, null, 2));
 
 printSummary(graph, pipeline);
 console.log(`\nSaved to ${path.relative(root, outDir)}`);
@@ -103,8 +119,36 @@ function printSummary(g: LineageGraph, p?: Pipeline) {
       const mark = p.entryPoints.some((e) => e.technicalName === s.technicalName && e.space === s.space) ? "  <- entry" : "";
       console.log(`  ${String(i + 1).padStart(2)}. ${s.technicalName} (${s.type})${mark}`);
     });
-    if (p.orchestrators.length) console.log(`  Run by: ${p.orchestrators.map((o) => o.technicalName).join(", ")}`);
+    if (p.excludedWriters.length) {
+      console.log(`Other writers (excluded): ${p.excludedWriters.map((x) => `${x.writer.technicalName} -> ${x.table.technicalName}`).join(", ")}`);
+    }
+    for (const a of p.ambiguousWriters) {
+      console.log(`Ambiguous: ${a.table.technicalName} has ${a.writers.length} writers (${a.writers.map((w) => w.technicalName).join(", ")}); all were followed.`);
+    }
+    if (p.ambiguousWriters.length) console.log("  Exclude the writers that belong to other processes with --exclude-writer or tools/scan/scan.local.json.");
+    for (const c of p.cycles) {
+      console.log(`Cycle: ${c.map((s) => s.technicalName).join(", ")} depend on each other; their order above is by name.`);
+    }
   }
+}
+
+interface ScanConfig {
+  excludeWriters?: string[];
+  pipelines?: Record<string, { excludeWriters?: string[] }>;
+}
+
+async function loadConfig(file: string, required: boolean): Promise<ScanConfig> {
+  if (!existsSync(file)) {
+    if (required) throw new Error(`Config file not found: ${file}`);
+    return {};
+  }
+  const config = JSON.parse(await readFile(file, "utf8")) as ScanConfig;
+  const lists = [config.excludeWriters, ...Object.values(config.pipelines ?? {}).map((p) => p.excludeWriters)];
+  if (!lists.every((l) => l === undefined || (Array.isArray(l) && l.every((x) => typeof x === "string")))) {
+    throw new Error(`${file}: excludeWriters must be a list of names or patterns.`);
+  }
+  console.log(`Using ${path.relative(root, file)}`);
+  return config;
 }
 
 async function loadDotEnv(file: string) {

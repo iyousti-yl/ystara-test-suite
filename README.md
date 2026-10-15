@@ -39,9 +39,12 @@ Builds the lineage of a space and, optionally, the pipeline behind one output ob
 npm run scan -- --space HR --output V_HEADCOUNT_OUT
 npm run scan -- --space HR --space SHARED            # several spaces, cross-space lineage
 npm run scan -- --from tools/scan/output/<run> --output OTHER_VIEW   # replay a saved scan offline
+npm run scan -- --space HR --output V_HEADCOUNT_OUT --exclude-writer DF_OTHER_LOAD   # leave out a writer from another process
 ```
 
-Results land in `tools/scan/output/<timestamp>/` (git-ignored): `lineage.md` (Mermaid diagram), `pipeline.json`, `graph.json` and `raw.json`. `raw.json` holds object definitions only, never table rows.
+A pipeline is traced backwards from the output: what it reads (main chain and side inputs such as config tables and control views), the flow that writes each table, and so on down to the tables nothing upstream writes. Task chains are never part of it, and names in SQL comments don't count. When a table has several writers, name the ones that belong to other processes with `--exclude-writer` (repeatable, `*` wildcards) or in a git-ignored `tools/scan/scan.local.json` (format in the header of `tools/scan/scan.ts`); otherwise every writer is followed and the table is reported as ambiguous.
+
+Results land in `tools/scan/output/<timestamp>/` (git-ignored): `lineage.md` (Mermaid diagram), `pipeline.json` (steps, entry points, excluded and ambiguous writers, cycles), `graph.json` and `raw.json`. `raw.json` holds object definitions only, never table rows.
 
 In Claude Code, `/datasphere-scan HR --output V_HEADCOUNT_OUT` hands the scan to the dedicated `datasphere-scanner` agent (`.claude/agents/`), which runs it read-only, checks the lineage for gaps and returns a short report. See `CLAUDE.md` for the agent-and-skill convention.
 
