@@ -1,0 +1,11 @@
+# Never send secrets, tenant notes or scan output into an image.
+.env
+.env.*
+*.local.md
+*.local.json
+tools/scan/output
+tools/spike/output
+.git
+**/node_modules
+**/dist
+**/*.tsbuildinfo

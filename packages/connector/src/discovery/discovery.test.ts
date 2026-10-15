@@ -207,3 +207,20 @@ describe("readSpaces", () => {
     expect(calls.every((c) => c.startsWith("list ") || c.startsWith("read "))).toBe(true);
   });
 });
+
+describe("scan warnings", () => {
+  it("keep the CLI's own error line, not the command or its warnings", async () => {
+    const failing: ObjectSource = {
+      async listObjects() {
+        throw Object.assign(new Error("Command failed with exit code 1: datasphere objects views list"), {
+          stderr: "WARNING: some config notice\nerror: unknown command 'objects'\n\nMake sure to define the host.",
+        });
+      },
+      async readObject() {
+        return {};
+      },
+    };
+    const { warnings } = await readSpaces(failing, ["HR"]);
+    expect(warnings[0]).toBe("HR: could not list remote-tables: error: unknown command 'objects'");
+  });
+});

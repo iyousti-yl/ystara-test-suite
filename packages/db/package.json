@@ -1,0 +1,28 @@
+{
+  "name": "@ystara/db",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ystara/shared": "*",
+    "pg": "^8.13.1",
+    "pg-boss": "^10.4.2"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}

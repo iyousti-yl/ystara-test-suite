@@ -1,6 +1,6 @@
 # Ystara Test Suite: architecture overview
 
-_Phase 0 version. Written so one person can maintain the whole system. Update it whenever a decision changes; the "Decisions" table is the log._
+_Phase 1 version. Written so one person can maintain the whole system. Update it whenever a decision changes; the "Decisions" table is the log._
 
 ## What the system does
 
@@ -35,6 +35,7 @@ _Phase 0 version. Written so one person can maintain the whole system. Update it
 | `apps/api` | Auth, accounts, roles, CRUD for tenants/pipelines/scenarios, enqueue jobs, serve results | Talk to Datasphere directly |
 | `apps/worker` | Run jobs: scans, snapshots, scenario runs, alerts | Hold secrets longer than a job |
 | `packages/connector` | The only code that talks to Datasphere (CLI wrapper, SQL client, discovery parser) | Persist anything |
+| `packages/db` | The platform's own Postgres: SQL migrations, job queue setup, queries for tenants, scans and pipelines | Talk to Datasphere |
 | `packages/shared` | Types, scenario YAML schema (Zod), role model | Depend on any app |
 
 ## Key design decisions
@@ -51,13 +52,23 @@ _Phase 0 version. Written so one person can maintain the whole system. Update it
 | 8 | Email + TOTP auth in v1, SSO in v2 | Keep v1 small; SSO is a known enterprise ask | First enterprise procurement |
 | 9 | Scenario tests are **read-only simulations**: fixture rows are inlined into a single `SELECT` that reproduces the pipeline's SQL logic | Keeps decision 6 for scenarios too (chosen by Issam, 2026-10-15) | Customers ask for coverage of flow types that can't be expressed as SQL |
 | 10 | Lineage is found by scanning definitions for names of known objects, with role rules per type, not by a parser per object format | Flow and task chain JSON differs between CLI releases; this survives format changes | Real samples show false or missing edges |
+| 11 | Plain SQL (node-postgres) with numbered SQL migrations, no ORM; tests run on PGlite (Postgres in WebAssembly) | Every query readable as written; tests need no database server, on Windows too | Queries get repetitive enough that a query builder pays off |
+| 12 | Pipelines are stored as an output plus writer exclusions; their steps are computed from the latest successful scan | Steps follow the tenant as it changes, and nothing goes stale | Tests attach to steps (phase 2), which may need stored step lists per scan |
 
-## Data model (first cut)
+## Data model
 
-- `accounts` (customer organisations) → `memberships` (user, role, optional space scope) → `users`
-- `tenants` (host, encrypted OAuth and DB credentials) → `spaces`
-- `objects` (type, technical name, definition JSONB, definition hash, deployable) and `edges` (from, to, kind)
-- `pipelines` → `pipeline_steps`
+In place (`packages/db/migrations/`):
+
+- `tenants` (name, host). Credentials arrive with the connection wizard.
+- `scans` (tenant, spaces, source tenant/import, status queued/running/succeeded/failed, counts, warnings, error) → `scan_objects` (space, name, type, CLI kind, definition hash) and `scan_edges` (from, to, kind)
+- `object_definitions` (tenant, hash, definition JSONB): each distinct definition once per tenant
+- `pipelines` (tenant, name, output, writer exclusions)
+
+Planned:
+
+- `accounts` (customer organisations) → `memberships` (user, role, optional space scope) → `users`; tenants then belong to an account
+- encrypted OAuth and DB credentials on `tenants`
+- `pipeline_steps` if tests need stored step lists
 - `snapshots` (object, metrics JSONB, captured at, run id)
 - `scenarios` (pipeline, YAML text, version) → `fixtures`
 - `runs` → `run_steps` → `assertion_results`

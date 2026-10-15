@@ -82,7 +82,10 @@ async function pool<T>(items: T[], size: number, fn: (item: T) => Promise<void>)
   await Promise.all(workers);
 }
 
+/** The line that says what went wrong: the CLI's own "error:" line when it printed one, not the command or its warnings. */
 function firstLine(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e);
-  return msg.split("\n").find((l) => l.trim()) ?? msg;
+  const stderr = (e as { stderr?: unknown } | undefined)?.stderr;
+  const text = `${typeof stderr === "string" ? stderr : ""}\n${e instanceof Error ? e.message : String(e)}`;
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  return lines.find((l) => /^error\b/i.test(l)) ?? lines.find((l) => !/^warning\b/i.test(l)) ?? "unknown error";
 }
