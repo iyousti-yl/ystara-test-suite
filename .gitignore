@@ -11,3 +11,6 @@ tools/scan/output/
 
 # Tenant-specific notes (naming conventions, process rules). Never committed.
 *.local.md
+
+# Local scan settings (writer exclusions). Never committed.
+*.local.json

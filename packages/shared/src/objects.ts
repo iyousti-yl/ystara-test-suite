@@ -73,6 +73,8 @@ export interface LineageGraph {
 /**
  * A pipeline is the unit tests attach to: one output object plus every upstream
  * step needed to produce it, ordered so each step comes after everything it depends on.
+ * Side inputs (config and control tables or views) are steps like any other.
+ * Task chains are orchestration and never part of a pipeline.
  */
 export interface Pipeline {
   name: string;
@@ -81,8 +83,21 @@ export interface Pipeline {
   entryPoints: DspObjectRef[];
   /** Every object in the chain, upstream first, output last. */
   steps: DspObjectRef[];
-  /** Task chains that run one or more of the steps. Not part of the data path. */
-  orchestrators: DspObjectRef[];
+  /** Writers of a pipeline table that belong to other processes (by configuration). Listed, not followed upstream. */
+  excludedWriters: WriterLink[];
+  /**
+   * Tables that still have more than one writer after exclusions. Every one of
+   * those writers was followed, so the steps may include another process; add
+   * exclusions until only the writer that belongs is left.
+   */
+  ambiguousWriters: { table: DspObjectRef; writers: DspObjectRef[] }[];
+  /** Groups of steps that depend on each other in a loop. Empty when the order is sound. */
+  cycles: DspObjectRef[][];
+}
+
+export interface WriterLink {
+  writer: DspObjectRef;
+  table: DspObjectRef;
 }
 
 export function refKey(ref: Pick<DspObjectRef, "space" | "technicalName">): string {
