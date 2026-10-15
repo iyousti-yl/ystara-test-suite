@@ -1,10 +1,12 @@
 import {
   TABLE_TYPES,
+  globToRegExp,
   refKey,
   toRef,
   type DspEdge,
   type DspObject,
   type DspObjectRef,
+  type GraphNode,
   type LineageGraph,
   type Pipeline,
   type WriterLink,
@@ -150,6 +152,26 @@ export function buildPipeline(
 }
 
 /**
+ * What to draw for a pipeline: its steps plus the excluded writers (so the
+ * picture shows what was left out and where), and the data edges between them.
+ * Task chains are never part of it.
+ */
+export function pipelineGraph(graph: LineageGraph, pipeline: Pipeline): { nodes: GraphNode[]; edges: DspEdge[] } {
+  const steps = new Set(pipeline.steps.map(refKey));
+  const excludedLinks = new Set(pipeline.excludedWriters.map((x) => `${refKey(x.writer)}>${refKey(x.table)}`));
+  const nodes = graph.nodes
+    .filter((n) => steps.has(refKey(n)) || pipeline.excludedWriters.some((x) => refKey(x.writer) === refKey(n)))
+    .map((n): GraphNode => ({ ...toRef(n), ...(n.businessName ? { businessName: n.businessName } : {}) }));
+  // Between steps, every data edge; for an excluded writer, only its link to the pipeline table it writes.
+  const edges = graph.edges.filter(
+    (e) =>
+      e.kind !== "triggers" &&
+      ((steps.has(refKey(e.from)) && steps.has(refKey(e.to))) || excludedLinks.has(`${refKey(e.from)}>${refKey(e.to)}`)),
+  );
+  return { nodes, edges };
+}
+
+/**
  * Orders steps so each one comes after everything it depends on (Kahn's
  * algorithm, ties broken by name so the order is stable between scans).
  *
@@ -223,14 +245,6 @@ function stronglyConnected(keys: string[], edges: [string, string][]): string[][
 
   for (const k of keys) if (!index.has(k)) visit(k);
   return groups;
-}
-
-function globToRegExp(pattern: string): RegExp {
-  const body = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*/g, ".*")
-    .replace(/\?/g, ".");
-  return new RegExp(`^${body}$`, "i");
 }
 
 function byName(a: string, b: string): number {

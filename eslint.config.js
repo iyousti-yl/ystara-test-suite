@@ -1,3 +1,4 @@
+import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
@@ -8,4 +9,6 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
+  // The web app: the rules of React hooks (call them unconditionally, list every dependency).
+  { files: ["apps/web/**/*.{ts,tsx}"], ...reactHooks.configs.flat.recommended },
 );

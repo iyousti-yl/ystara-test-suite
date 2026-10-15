@@ -1,19 +1,8 @@
+import type { PipelineDefinition } from "@ystara/shared";
 import type { Queryable } from "./db.js";
 
-/**
- * A saved pipeline: an output object plus the writers that belong to other
- * processes. The steps are not stored; they are computed from the tenant's
- * latest successful scan with the connector's buildPipeline.
- */
-export interface PipelineDefinition {
-  id: string;
-  tenantId: string;
-  name: string;
-  output: { space: string; technicalName: string };
-  /** Patterns as for `npm run scan -- --exclude-writer`: NAME or SPACE.NAME, `*` and `?` wildcards. */
-  excludeWriters: string[];
-  createdAt: Date;
-}
+/** Saved pipelines: an output plus writer exclusions; steps are computed from the latest successful scan. */
+export type { PipelineDefinition };
 
 interface Row {
   id: string;

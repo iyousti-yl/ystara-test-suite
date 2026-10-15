@@ -1,4 +1,4 @@
-# One image for the API and the worker; docker-compose.yml picks the command.
+# One image for the API (which also serves the web app) and the worker; docker-compose.yml picks the command.
 # Build:  docker compose build      Run: docker compose up -d
 
 FROM node:22-alpine AS build
@@ -7,7 +7,8 @@ COPY package.json package-lock.json tsconfig.json tsconfig.base.json ./
 COPY packages ./packages
 COPY apps ./apps
 RUN npm ci
-RUN npx tsc -b && npm prune --omit=dev
+# The web app is bundled into apps/web/dist; its packages are build-time only and pruned with the rest.
+RUN npm run build && npm prune --omit=dev
 
 FROM node:22-alpine
 WORKDIR /app

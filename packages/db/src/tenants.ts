@@ -1,13 +1,8 @@
+import type { Tenant } from "@ystara/shared";
 import type { Queryable } from "./db.js";
 
 /** A customer's Datasphere tenant. Credentials come with the connection wizard; until then the worker uses the CLI's own login. */
-export interface Tenant {
-  id: string;
-  name: string;
-  /** Datasphere URL. Null for a tenant that only has imported scans. */
-  host: string | null;
-  createdAt: Date;
-}
+export type { Tenant };
 
 interface Row {
   id: string;

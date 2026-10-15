@@ -32,7 +32,7 @@ try {
   const scan = await createScan(db, tenant.id, saved.spaces, "import");
   const stored = await saveScanResult(db, scan.id, saved.raw, graphFromRaw(saved.raw, saved.spaces, saved.warnings));
   console.log(`Imported ${stored.objectCount} objects and ${stored.edgeCount} edges into tenant "${tenant.name}".`);
-  console.log(`Scan ${stored.id}. Try: curl "http://127.0.0.1:${process.env.YSTARA_API_PORT ?? 4000}/scans/${stored.id}/pipeline?output=<SPACE.VIEW>"`);
+  console.log(`Scan ${stored.id}. Try: curl "http://127.0.0.1:${process.env.YSTARA_API_PORT ?? 4000}/api/scans/${stored.id}/pipeline?output=<SPACE.VIEW>"`);
 } finally {
   await db.close();
 }

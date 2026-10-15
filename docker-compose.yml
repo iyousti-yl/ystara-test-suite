@@ -1,5 +1,5 @@
 # Runs Ystara locally: Postgres, the API and the worker.
-#   docker compose up -d --build     start everything (API on http://127.0.0.1:4000)
+#   docker compose up -d --build     start everything (web app and API on http://127.0.0.1:4000)
 #   docker compose up -d postgres migrate    only the database, to run the API or worker with npm on your machine
 #   docker compose down              stop (add -v to also delete the database)
 #

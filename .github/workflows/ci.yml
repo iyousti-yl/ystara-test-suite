@@ -16,6 +16,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - run: npm run build -w @ystara/web
       # A secret with a `$` in .env.local must never show up in what Compose prints
       # (it would if docker-compose.yml loaded the file or substituted app settings).
       - name: Compose never sees app settings

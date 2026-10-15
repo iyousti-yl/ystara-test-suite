@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { buildPipeline, toMermaid } from "@ystara/connector";
+import { buildPipeline, pipelineGraph, toMermaid } from "@ystara/connector";
 import {
   createPipeline,
   createScan,
@@ -14,13 +14,15 @@ import {
   listScans,
   listTenants,
   loadGraph,
+  loadObject,
   type Db,
 } from "@ystara/db";
-import { JOBS, type ScanJobData } from "@ystara/shared";
+import { JOBS, type PipelineResult, type ScanGraph, type ScanJobData } from "@ystara/shared";
 import type { JobQueue } from "../server.js";
 
 /**
- * Tenants, discovery scans, lineage and pipelines.
+ * Tenants, discovery scans, lineage and pipelines, under /api (see server.ts).
+ * Response shapes are the types in packages/shared/src/api.ts.
  *
  * The API never talks to Datasphere: a scan request is queued and the worker
  * runs it. Lineage and pipelines are computed here from stored scans, using
@@ -28,6 +30,7 @@ import type { JobQueue } from "../server.js";
  */
 const id = z.object({ id: z.string().uuid() });
 const spaceId = z.string().regex(/^[A-Za-z0-9_]{1,64}$/, "Space IDs contain only letters, digits and underscores");
+const objectName = z.object({ id: z.string().uuid(), space: spaceId, name: z.string().regex(/^[A-Za-z0-9_]{1,128}$/, "Technical names contain only letters, digits and underscores") });
 const objectRef = z.string().regex(/^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)?$/, "Use NAME or SPACE.NAME");
 const patterns = z.array(z.string().min(1).max(200)).max(50);
 
@@ -55,6 +58,11 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
       return reply.code(201).send(tenant);
     });
 
+    app.get("/tenants/:id", async (req, reply) => {
+      const tenant = await getTenant(db, id.parse(req.params).id);
+      return tenant ?? reply.code(404).send({ error: "Tenant not found" });
+    });
+
     app.get("/tenants/:id/scans", async (req, reply) => {
       const tenant = await getTenant(db, id.parse(req.params).id);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
@@ -80,7 +88,14 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
       if (!scan) return reply.code(404).send({ error: "Scan not found" });
       if (scan.status !== "succeeded") return reply.code(409).send({ error: `Scan is ${scan.status}` });
       const graph = await loadGraph(db, scan.id);
-      return { ...graph, nodes: graph.nodes.map(({ definition: _definition, ...node }) => node) };
+      return { ...graph, nodes: graph.nodes.map(({ definition: _definition, ...node }) => node) } satisfies ScanGraph;
+    });
+
+    // One object with its definition (as the CLI returned it) and every edge that touches it.
+    app.get("/scans/:id/objects/:space/:name", async (req, reply) => {
+      const params = objectName.parse(req.params);
+      const details = await loadObject(db, params.id, params.space, params.name);
+      return details ?? reply.code(404).send({ error: `${params.space}.${params.name} is not in this scan` });
     });
 
     // Try a pipeline on one scan before saving it: ?output=SPACE.NAME&excludeWriter=DF_X&excludeWriter=TF_*
@@ -142,9 +157,14 @@ function toOutput(output: string, spaces: string[]): { space: string; technicalN
 }
 
 /** The pipeline behind `output` in one scan, or undefined when the scan doesn't contain `output`. */
-async function computePipeline(db: Db, scanId: string, output: { space: string; technicalName: string }, excludeWriters: string[]) {
+async function computePipeline(
+  db: Db,
+  scanId: string,
+  output: { space: string; technicalName: string },
+  excludeWriters: string[],
+): Promise<PipelineResult | undefined> {
   const graph = await loadGraph(db, scanId);
   if (!graph.nodes.some((n) => n.space === output.space && n.technicalName === output.technicalName)) return undefined;
   const pipeline = buildPipeline(graph, output, { excludeWriters });
-  return { scanId, excludeWriters, pipeline, mermaid: toMermaid(graph, pipeline) };
+  return { scanId, excludeWriters, pipeline, graph: pipelineGraph(graph, pipeline), mermaid: toMermaid(graph, pipeline) };
 }

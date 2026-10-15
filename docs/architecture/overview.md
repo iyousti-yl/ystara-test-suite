@@ -31,8 +31,8 @@ _Phase 1 version. Written so one person can maintain the whole system. Update it
 
 | Component | Responsibility | Must not |
 |---|---|---|
-| `apps/web` | UI: Fiori-like (UI5 Web Components for React), light and fast | Enforce permissions (server does) |
-| `apps/api` | Auth, accounts, roles, CRUD for tenants/pipelines/scenarios, enqueue jobs, serve results | Talk to Datasphere directly |
+| `apps/web` | UI: Fiori-like (UI5 Web Components for React), light and fast. Lineage pictures with React Flow, laid out by dagre. Built into `apps/web/dist` and served by the API | Enforce permissions (server does); load anything from a third-party server |
+| `apps/api` | Auth, accounts, roles, CRUD for tenants/pipelines/scenarios, enqueue jobs, serve results (all under `/api`), serve the web app | Talk to Datasphere directly |
 | `apps/worker` | Run jobs: scans, snapshots, scenario runs, alerts | Hold secrets longer than a job |
 | `packages/connector` | The only code that talks to Datasphere (CLI wrapper, SQL client, discovery parser) | Persist anything |
 | `packages/db` | The platform's own Postgres: SQL migrations, job queue setup, queries for tenants, scans and pipelines | Talk to Datasphere |
@@ -55,6 +55,8 @@ _Phase 1 version. Written so one person can maintain the whole system. Update it
 | 11 | Plain SQL (node-postgres) with numbered SQL migrations, no ORM; tests run on PGlite (Postgres in WebAssembly) | Every query readable as written; tests need no database server, on Windows too | Queries get repetitive enough that a query builder pays off |
 | 12 | Pipelines are stored as an output plus writer exclusions; their steps are computed from the latest successful scan | Steps follow the tenant as it changes, and nothing goes stale | Tests attach to steps (phase 2), which may need stored step lists per scan |
 | 13 | Local settings: app settings and secrets in `.env.local`; `.env` holds only the `YSTARA_*` host ports (Postgres 55432, API 4000) that Compose substitutes. Programs refuse a database without Ystara's migrations | Compose never sees a secret, and no tool silently uses another Postgres on the machine | Hosting (decision 7) brings a secrets store |
+| 14 | One origin: the API serves the web app at `/` and itself under `/api` (Vite forwards `/api` in development). No CORS | No cross-origin calls to secure; one port to publish and, later, to put behind sign-in | The web app needs a CDN or its own host |
+| 15 | The web app loads nothing from third parties: SAP's 72 font is bundled from `@sap-theming/theming-base-content` instead of UI5's default CDN | GDPR (no visitor IPs to a CDN) and works offline | Never |
 
 ## Data model
 

@@ -9,6 +9,7 @@ import {
   latestSucceededScan,
   listScans,
   loadGraph,
+  loadObject,
   loadRaw,
   markScanFailed,
   markScanRunning,
@@ -89,6 +90,14 @@ describe("scans", () => {
     expect(g.edges).toEqual(graph({}).edges.sort((a, b) => (a.from.technicalName < b.from.technicalName ? -1 : 1)));
     expect((await loadGraph(db, queued.id, { definitions: true })).nodes[2].definition).toEqual(raw[2].definition);
     expect(await loadRaw(db, queued.id)).toEqual(raw);
+
+    const lt = await loadObject(db, queued.id, "S", "LT_DATA");
+    expect(lt?.object).toMatchObject({ technicalName: "LT_DATA", type: "local_table", businessName: "Data", definition: raw[1].definition, definitionHash: "h-lt" });
+    expect(lt?.edges.map((e) => `${e.from.technicalName} ${e.kind} ${e.to.technicalName} (${e.to.type})`)).toEqual([
+      "LT_DATA reads_from V_OUT (sql_view)",
+      "DF_LOAD writes_to LT_DATA (local_table)",
+    ]);
+    expect(await loadObject(db, queued.id, "S", "NOPE")).toBeUndefined();
   });
 
   it("store each definition once per tenant, however often it is scanned", async () => {
