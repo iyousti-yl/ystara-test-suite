@@ -61,6 +61,8 @@ const EXAMPLE_DOMAIN = /(^|\.)(example\.(com|org|net)|example|invalid|test|local
 const OWN_ADDRESS = /^(noreply@anthropic\.com|.*@users\.noreply\.github\.com)$/i;
 const NEVER_COMMIT = [/(^|\/)\.env$/, /(^|\/)\.env\.(?!example$)[^/]+$/, /\.local\.(md|json)$/, /^tools\/(scan|spike|check)\/output\//];
 const IMAGE = /\.(png|jpe?g|gif|webp|svg|bmp|pdf)$/i;
+/** "page@1440.png" looks like an address but is a file name. */
+const FILE_NAME = /\.(png|jpe?g|gif|webp|svg|pdf|json|md|ts|tsx|js|mjs|css|html|txt|log|csv)$/i;
 const GENERIC = [
   { source: "Datasphere host", pattern: /\b[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)*\.(hcs\.cloud\.sap|hanacloud\.ondemand\.com|hana\.ondemand\.com)\b/gi },
   { source: "email address", pattern: /\b[\w.+-]+@[\w-]+(\.[\w-]+)*\.[A-Za-z]{2,}\b/g },
@@ -282,7 +284,7 @@ function findIn(line: Line): Hit[] {
   for (const m of line.text.matchAll(matcher.texts)) out.push({ ...line, match: m[0], source: matcher.sourceOf(m[0].toLowerCase()) });
   for (const g of GENERIC) {
     for (const m of line.text.matchAll(g.pattern)) {
-      if (g.source === "email address" && (EXAMPLE_DOMAIN.test(m[0].split("@")[1]) || OWN_ADDRESS.test(m[0]))) continue;
+      if (g.source === "email address" && (EXAMPLE_DOMAIN.test(m[0].split("@")[1]) || OWN_ADDRESS.test(m[0]) || FILE_NAME.test(m[0]))) continue;
       if (g.source === "Datasphere host" && /^(example|your|my|tenant)[.-]/i.test(m[0])) continue;
       if (!out.some((h) => h.match.toLowerCase() === m[0].toLowerCase())) out.push({ ...line, match: m[0], source: g.source });
     }
