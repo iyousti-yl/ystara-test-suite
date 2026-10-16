@@ -1,6 +1,7 @@
 import {
   TABLE_TYPES,
   globToRegExp,
+  isDataEdge,
   refKey,
   toRef,
   type DspEdge,
@@ -40,7 +41,9 @@ export function buildGraph(objects: DspObject[], spaces: string[], warnings: str
           ? { from: toRef(obj), to: toRef(other), kind: "writes_to" }
           : ref.role === "step"
             ? { from: toRef(obj), to: toRef(other), kind: "triggers" }
-            : { from: toRef(other), to: toRef(obj), kind: "reads_from" };
+            : ref.role === "clear"
+              ? { from: toRef(obj), to: toRef(other), kind: "clears" }
+              : { from: toRef(other), to: toRef(obj), kind: "reads_from" };
       const id = `${refKey(edge.from)}>${refKey(edge.to)}>${edge.kind}`;
       if (!seen.has(id)) {
         seen.add(id);
@@ -93,7 +96,7 @@ export function buildPipeline(
   const patterns = (opts.excludeWriters ?? []).map(globToRegExp);
   const isExcluded = (ref: DspObjectRef) => patterns.some((re) => re.test(ref.technicalName) || re.test(refKey(ref)));
 
-  const dataEdges = graph.edges.filter((e) => e.kind !== "triggers");
+  const dataEdges = graph.edges.filter(isDataEdge);
   const incoming = new Map<string, DspEdge[]>();
   for (const e of dataEdges) incoming.set(refKey(e.to), [...(incoming.get(refKey(e.to)) ?? []), e]);
 
@@ -165,7 +168,7 @@ export function pipelineGraph(graph: LineageGraph, pipeline: Pipeline): { nodes:
   // Between steps, every data edge; for an excluded writer, only its link to the pipeline table it writes.
   const edges = graph.edges.filter(
     (e) =>
-      e.kind !== "triggers" &&
+      isDataEdge(e) &&
       ((steps.has(refKey(e.from)) && steps.has(refKey(e.to))) || excludedLinks.has(`${refKey(e.from)}>${refKey(e.to)}`)),
   );
   return { nodes, edges };

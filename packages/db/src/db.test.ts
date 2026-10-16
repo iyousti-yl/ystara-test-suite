@@ -118,6 +118,18 @@ describe("scans", () => {
     expect((await loadGraph(db, scan.id)).nodes).toHaveLength(3);
   });
 
+  it("keep the task chain edges that run a step and that clear a table", async () => {
+    const tenant = await createTenant(db, { name: "Chained", host: null });
+    const scan = await createScan(db, tenant.id, ["S"], "import");
+    const tc = { space: "S", technicalName: "TC_DAILY", type: "task_chain" as const };
+    const g = graph({});
+    g.nodes.push({ ...tc, definition: {}, definitionHash: "h-tc" });
+    g.edges.push({ from: tc, to: g.edges[0].from, kind: "triggers" }, { from: tc, to: g.edges[0].to, kind: "clears" });
+    await saveScanResult(db, scan.id, [...raw, { space: "S", kind: "task-chains", technicalName: "TC_DAILY", definition: {} }], g);
+    const kinds = (await loadGraph(db, scan.id)).edges.filter((e) => e.from.technicalName === "TC_DAILY").map((e) => `${e.kind} ${e.to.technicalName}`);
+    expect(kinds).toEqual(["triggers DF_LOAD", "clears LT_DATA"]);
+  });
+
   it("record why they failed, and only succeeded scans count as latest", async () => {
     const tenant = await createTenant(db, { name: "Failing", host: null });
     const ok = await createScan(db, tenant.id, ["S"]);

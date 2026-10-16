@@ -52,8 +52,12 @@ export interface DspObject extends DspObjectRef {
  *  - reads_from: `from` is the source, `to` is the object that reads it (table -> view, view -> flow)
  *  - writes_to:  `from` is a flow, `to` is the table it loads
  *  - triggers:   `from` is a task chain, `to` is a step it runs (control only, no data)
+ *  - clears:     `from` is a task chain, `to` is a table one of its steps empties (control only)
  */
-export type EdgeKind = "reads_from" | "writes_to" | "triggers";
+export type EdgeKind = "reads_from" | "writes_to" | "triggers" | "clears";
+
+/** Whether data moves along the edge (a read or a write), rather than a task chain acting on a step. */
+export const isDataEdge = (e: { kind: EdgeKind }): boolean => e.kind === "reads_from" || e.kind === "writes_to";
 
 export interface DspEdge {
   from: DspObjectRef;

@@ -35,7 +35,19 @@ export interface ServerOptions {
 
 export async function buildServer(deps: { db: Db; queue: JobQueue }, opts: ServerOptions = {}) {
   const app = Fastify({ logger: opts.logger ?? true });
-  await app.register(helmet);
+  await app.register(helmet, {
+    contentSecurityPolicy: {
+      directives: {
+        // The web app bundles everything it shows (decision 15), so the browser may only load fonts and
+        // styles from Ystara itself: a change that brings back a CDN fails visibly instead of leaking.
+        "font-src": ["'self'", "data:"],
+        // 'unsafe-inline': UI5 and React Flow set styles from script (style attributes, <style> elements).
+        "style-src": ["'self'", "'unsafe-inline'"],
+        // Served over plain http on 127.0.0.1 until it is hosted; Safari applies the upgrade there and breaks.
+        "upgrade-insecure-requests": null,
+      },
+    },
+  });
 
   app.setErrorHandler((err: FastifyError | ZodError, _req, reply) => {
     if (err instanceof ZodError) return reply.code(400).send({ error: "Invalid request", issues: err.issues });

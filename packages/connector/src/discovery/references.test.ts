@@ -54,6 +54,23 @@ describe("extractReferences", () => {
     );
   });
 
+  it("tells a task chain step that empties a table from one that runs an object", () => {
+    const chain = {
+      taskchains: {
+        TC: {
+          nodes: [
+            { id: 1, taskIdentifier: { applicationId: "LOCAL_TABLE", activity: "DELETE_DATA", objectId: "T_OUT" } },
+            { id: 2, taskIdentifier: { applicationId: "DATAFLOWS", objectId: "T_IN" } },
+          ],
+        },
+      },
+    };
+    expect(extractReferences(chain, "TC", "task_chain", known)).toEqual([
+      { name: "T_OUT", role: "clear" },
+      { name: "T_IN", role: "step" },
+    ]);
+  });
+
   it("does not see names in commented-out SQL", () => {
     const view = { definitions: { V: { "@DataWarehouse.sqlEditor.query": 'SELECT * FROM "T_IN" -- JOIN "T_OLD"' } } };
     expect(extractReferences(view, "V", "sql_view", known)).toEqual([{ name: "T_IN", role: "source" }]);

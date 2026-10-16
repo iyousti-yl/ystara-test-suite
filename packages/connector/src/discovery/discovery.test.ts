@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { refKey } from "@ystara/shared";
+import { isDataEdge, refKey } from "@ystara/shared";
 import { HR_SPACE } from "./fixtures/hr-space.js";
 import { buildPipeline, pipelineGraph } from "./graph.js";
 import { toMermaid } from "./mermaid.js";
@@ -59,8 +59,12 @@ describe("lineage graph", () => {
 
   it("records task chain steps as control edges, not data edges", () => {
     expect(edge("TC_HR_DAILY", "DF_SF_EMPLOYEE", "triggers")).toBe(true);
-    expect(edge("TC_HR_DAILY", "LT_EMPLOYEE_ENRICHED", "triggers")).toBe(true);
-    expect(graph.edges.filter((e) => e.from.technicalName === "TC_HR_DAILY").every((e) => e.kind === "triggers")).toBe(true);
+    expect(graph.edges.filter((e) => e.from.technicalName === "TC_HR_DAILY").every((e) => !isDataEdge(e))).toBe(true);
+  });
+
+  it("records a step that empties a table as clearing it, not running it", () => {
+    expect(edge("TC_HR_DAILY", "LT_EMPLOYEE_ENRICHED", "clears")).toBe(true);
+    expect(edge("TC_HR_DAILY", "LT_EMPLOYEE_ENRICHED", "triggers")).toBe(false);
   });
 
   it("ignores dependency definitions bundled into a read", () => {
@@ -114,7 +118,7 @@ describe("pipeline with the other writer excluded", () => {
   it("orders every step after the steps it depends on, output last, no cycles", () => {
     expect(p.cycles).toEqual([]);
     expect(names.at(-1)).toBe("V_HEADCOUNT_OUT");
-    for (const e of graph.edges.filter((e) => e.kind !== "triggers")) {
+    for (const e of graph.edges.filter(isDataEdge)) {
       const a = names.indexOf(e.from.technicalName);
       const b = names.indexOf(e.to.technicalName);
       if (a >= 0 && b >= 0) expect(a).toBeLessThan(b);
@@ -140,7 +144,7 @@ describe("pipeline with the other writer excluded", () => {
     expect(drawn).toContain("DF_EMPLOYEE_BACKFILL writes_to LT_EMPLOYEE_RAW");
     expect(drawn).toContain("LT_EMPLOYEE_RAW reads_from V_EMPLOYEE_CLEAN");
     expect(drawn.filter((d) => d.includes("DF_EMPLOYEE_BACKFILL"))).toEqual(["DF_EMPLOYEE_BACKFILL writes_to LT_EMPLOYEE_RAW"]);
-    expect(g.edges.every((e) => e.kind !== "triggers")).toBe(true);
+    expect(g.edges.every(isDataEdge)).toBe(true);
   });
 
   it("renders a Mermaid diagram with only the pipeline's steps", () => {
@@ -148,7 +152,7 @@ describe("pipeline with the other writer excluded", () => {
     expect(m.startsWith("flowchart LR")).toBe(true);
     expect(m).toContain("==>|writes|");
     expect(m).toContain("class n_HR_V_HEADCOUNT_OUT output");
-    for (const absent of ["V_UNRELATED", "TC_HR_DAILY", "DF_EMPLOYEE_BACKFILL", "LT_LEGACY_ORG", "|runs|"]) expect(m).not.toContain(absent);
+    for (const absent of ["V_UNRELATED", "TC_HR_DAILY", "DF_EMPLOYEE_BACKFILL", "LT_LEGACY_ORG", "|runs|", "|clears|"]) expect(m).not.toContain(absent);
   });
 });
 

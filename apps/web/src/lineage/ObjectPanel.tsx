@@ -1,5 +1,5 @@
 import { Button, MessageStrip, Panel, Tag, Text, Title } from "@ui5/webcomponents-react";
-import { refKey, type DspEdge, type DspObjectRef } from "@ystara/shared";
+import { refKey, type DspObjectRef } from "@ystara/shared";
 import { useObject } from "../api";
 import { typeColor, typeLabel } from "../objectTypes";
 import type { LineageNode } from "./model";
@@ -76,7 +76,8 @@ export function ObjectPanel(props: {
       <Links title="Read by" refs={edges.filter((e) => e.kind === "reads_from" && refKey(e.from) === key).map((e) => e.to)} />
       <Links title="Written by" refs={edges.filter((e) => e.kind === "writes_to" && refKey(e.to) === key).map((e) => e.from)} />
       <Links title="Writes to" refs={edges.filter((e) => e.kind === "writes_to" && refKey(e.from) === key).map((e) => e.to)} />
-      <Links title="Run by task chains" refs={edges.filter((e: DspEdge) => e.kind === "triggers" && refKey(e.to) === key).map((e) => e.from)} />
+      <Links title="Run by task chains" refs={edges.filter((e) => e.kind === "triggers" && refKey(e.to) === key).map((e) => e.from)} />
+      <Links title="Cleared by task chains" refs={edges.filter((e) => e.kind === "clears" && refKey(e.to) === key).map((e) => e.from)} />
 
       <Panel headerText="Definition (as the CLI returned it)" collapsed fixed={false} className="object-panel-definition">
         {details.isPending ? <Text>Loading…</Text> : <pre className="mono">{JSON.stringify(details.data?.object.definition, null, 2)}</pre>}
