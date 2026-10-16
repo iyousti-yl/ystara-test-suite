@@ -14,7 +14,7 @@ You run Ystara's discovery scan against SAP Datasphere and report what it found.
 
 1. **Read-only, always.** The only Datasphere CLI command you run yourself is `datasphere --version`. Everything else goes through `npm run scan`, which can only list and read (enforced by `packages/connector/src/readonly.ts`). Never run a `create`, `update`, `delete`, `run` or `tasks` command, and never change code to get around the read-only gate. The scan logs in with the technical OAuth client in `.env.local` when `DSP_CLIENT_ID`, `DSP_CLIENT_SECRET` and `DSP_TOKEN_URL` are set (check with `grep -c '^DSP_CLIENT_ID=.' .env.local`), otherwise with the user's own CLI login. If that login is missing or expired, stop and ask the user to run `datasphere login` themselves.
 2. **No file changes.** Don't write or edit repository files, including through shell redirection, `sed -i` or scripts. The scan writes its own output to `tools/scan/output/`; that is the only place files appear.
-3. **Secrets and data.** Never print `.env` or `.env.local`; check that a key is present with `grep -c '^DSP_HOST=.' .env.local`. `raw.json` holds object definitions (metadata, no table rows), but quote only the few lines that show a problem, never whole definitions. Only scan spaces the user named.
+3. **Secrets and data.** Never print `.env` or `.env.local`; check that a key is present with `grep -c '^DSP_HOST=.' .env.local`. `raw.json` holds object definitions (metadata, no table rows), but quote only the few lines that show a problem, never whole definitions. Only scan spaces the user named, by their IDs. Ystara never lists a tenant's spaces (that needs a tenant-wide privilege a technical client shouldn't have), so ask for the IDs instead of guessing.
 4. **No git.** Never commit, push or switch branches.
 
 ## What counts as a pipeline (generic rules, any tenant)
@@ -38,7 +38,7 @@ Entry points (where fixtures go) are the tables at the bottom: ingestion tables,
 ## Procedure
 
 1. **Preflight.** `datasphere --version` works; `.env.local` has `DSP_HOST`. If either fails, report what is missing and stop.
-2. **Scan.** `npm run scan -- --space <SPACE> [--space <SPACE2>] [--output <OBJECT>] [--exclude-writer <FLOW> ...]`, or `--from <folder>` to replay a saved scan. An authentication error means the user must log in again: stop and say so.
+2. **Scan.** `npm run scan -- --space <SPACE> [--space <SPACE2>] [--output <OBJECT>] [--exclude-writer <FLOW> ...]`, or `--from <folder>` to replay a saved scan. An authentication error means the user must log in again: stop and say so. So does a warning that the CLI asked a question instead of answering (e.g. `asked "URL of the system to connect to"`): the host or the login is missing, and running the scan again won't help.
 3. **Read the results** in the newest folder under `tools/scan/output/`: the console summary, `graph.json`, and `pipeline.json` and `lineage.md` when an output object was given.
 4. **Check the lineage.** Look for:
    - Warnings, grouped by cause (permissions, timeouts, unknown kinds).

@@ -3,31 +3,61 @@ import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DatasphereCli } from "./cli.js";
+import { CliOutputError, DatasphereCli } from "./cli.js";
 import { WriteAttemptError } from "./readonly.js";
 
-// A stand-in for the Datasphere CLI that prints what it was started with. A shell script, so not on Windows.
+// Stand-ins for the Datasphere CLI, written in Node. Shell scripts, so not on Windows.
 describe.skipIf(process.platform === "win32")("Datasphere CLI wrapper", () => {
   let dir: string;
   let bin: string;
+  let asks: string;
+  let plain: string;
   const host = "https://synthetic.example.com";
   const client = { clientId: "client-id", clientSecret: "client-secret", tokenUrl: "https://synthetic.example.com/oauth/token" };
 
-  beforeAll(async () => {
-    dir = await mkdtemp(path.join(tmpdir(), "ystara-cli-"));
-    bin = path.join(dir, "fake-datasphere");
+  /** Writes a stand-in that runs `body` with `fs`, `args` (its arguments) and `secrets` (the secrets file, if given). */
+  async function standIn(name: string, body: string): Promise<string> {
+    const file = path.join(dir, name);
     await writeFile(
-      bin,
+      file,
       `#!/usr/bin/env node
 const fs = require("node:fs");
-fs.writeFileSync(${JSON.stringify(path.join(dir, "called"))}, "yes");
 const args = process.argv.slice(2);
 const i = args.indexOf("--secrets-file");
-const file = i >= 0 ? args[i + 1] : null;
-console.log(JSON.stringify({ args, home: process.env.HOME, secrets: file && JSON.parse(fs.readFileSync(file, "utf8")) }));
+const secrets = i >= 0 ? JSON.parse(fs.readFileSync(args[i + 1], "utf8")) : null;
+${body}
 `,
     );
-    await chmod(bin, 0o755);
+    await chmod(file, 0o755);
+    return file;
+  }
+
+  beforeAll(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "ystara-cli-"));
+    // Like the real CLI: a --host before the command words is ignored, and without a host it asks for one and exits 0.
+    // Otherwise it prints what it was started with.
+    bin = await standIn(
+      "fake-datasphere",
+      `fs.writeFileSync(${JSON.stringify(path.join(dir, "called"))}, "yes");
+let start = 0;
+while (args[start] && args[start].startsWith("--")) start += 2;
+if (!args.slice(start).includes("--host")) {
+  console.log("? URL of the system to connect to");
+  process.exit(0);
+}
+console.log(JSON.stringify({ args, home: process.env.HOME, secrets }));`,
+    );
+    // A CLI that asks a question whatever it is given and waits for the answer until its input ends, like a real prompt.
+    // It logs the secret on stderr while doing so.
+    asks = await standIn(
+      "asks",
+      `console.error("token request for " + (secrets && secrets.client_secret));
+console.log("? URL of the system to connect to");
+process.stdin.resume();
+process.stdin.on("end", () => process.exit(0));`,
+    );
+    // A CLI that answers in words instead of JSON, with the secret in them.
+    plain = await standIn("plain", `console.log("Signed in with " + (secrets && secrets.client_secret) + ". No objects.");`);
   });
   afterAll(() => rm(dir, { recursive: true, force: true }));
 
@@ -37,7 +67,7 @@ console.log(JSON.stringify({ args, home: process.env.HOME, secrets: file && JSON
     const run = JSON.parse(await cli.exec({ group: "objects", kind: "views", verb: "list" }, { space: "SALES" }));
 
     const file = path.join(configDir, "ystara-client.json");
-    expect(run.args).toEqual(["--host", host, "objects", "views", "list", "--space", "SALES", "--secrets-file", file]);
+    expect(run.args).toEqual(["objects", "views", "list", "--space", "SALES", "--host", host, "--secrets-file", file]);
     expect(run.home).toBe(configDir);
     expect(run.secrets).toEqual({
       client_id: "client-id",
@@ -54,19 +84,49 @@ console.log(JSON.stringify({ args, home: process.env.HOME, secrets: file && JSON
     const cli = new DatasphereCli({ host, bin, client, configDir });
     await expect(cli.initCache()).resolves.toBeUndefined();
     const run = JSON.parse(await cli.exec({ group: "config", verb: "cache-init" }));
-    expect(run.args.slice(0, 5)).toEqual(["config", "cache", "init", "--host", host]);
-    expect(run.args).toContain("--secrets-file");
+    expect(run.args).toEqual(["config", "cache", "init", "--host", host, "--secrets-file", path.join(configDir, "ystara-client.json")]);
   });
 
   it("uses the machine's own login without a client", async () => {
-    const run = JSON.parse(await new DatasphereCli({ host, bin }).exec({ group: "spaces", verb: "list" }));
-    expect(run.args).toEqual(["--host", host, "spaces", "list"]);
+    const cli = new DatasphereCli({ host, bin });
+    const run = JSON.parse(await cli.exec({ group: "objects", kind: "local-tables", verb: "list" }, { space: "HR", top: "1000" }));
+    expect(run.args).toEqual(["objects", "local-tables", "list", "--space", "HR", "--top", "1000", "--host", host]);
     expect(run.home).toBe(process.env.HOME);
+    await expect(cli.listObjects("HR", "views", 1)).resolves.toEqual([]);
   });
 
   it("asks the CLI to log its requests when verbose", async () => {
-    const run = JSON.parse(await new DatasphereCli({ host, bin, verbose: true }).exec({ group: "spaces", verb: "list" }));
-    expect(run.args).toEqual(["--host", host, "spaces", "list", "--verbose"]);
+    const cli = new DatasphereCli({ host, bin, verbose: true });
+    const run = JSON.parse(await cli.exec({ group: "objects", kind: "views", verb: "read" }, { space: "HR", "technical-name": "V_HEADCOUNT" }));
+    expect(run.args).toEqual(["objects", "views", "read", "--space", "HR", "--technical-name", "V_HEADCOUNT", "--host", host, "--verbose"]);
+  });
+
+  it("fails when the CLI asks a question instead of answering, even with exit code 0, and never quotes the secret", async () => {
+    // A short timeout: the CLI gets no input, so it must stop at once instead of waiting for an answer.
+    const cli = new DatasphereCli({ host, bin: asks, client, configDir: await mkdtemp(path.join(dir, "tenant-")), timeoutMs: 5_000 });
+    const error = await cli.listObjects("HR", "views").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CliOutputError);
+    const { message, output } = error as CliOutputError;
+    expect(message).toBe(
+      'datasphere objects views list asked "URL of the system to connect to" instead of answering. Ystara gives the CLI no input: check the host and the login.',
+    );
+    expect(output).toContain("token request for <secret>");
+    expect(`${message}\n${output}`).not.toContain(client.clientSecret);
+    // Filling the cache prints no JSON, but a question is a failure there too.
+    await expect(cli.initCache()).rejects.toThrow(/^datasphere config cache init asked "URL of the system to connect to" instead of answering/);
+  });
+
+  it("fails when a list or read prints something other than JSON, even with exit code 0, and never quotes the secret", async () => {
+    const cli = new DatasphereCli({ host, bin: plain, client, configDir: await mkdtemp(path.join(dir, "tenant-")) });
+    for (const run of [() => cli.listObjects("HR", "local-tables"), () => cli.readObject("HR", "views", "V_HEADCOUNT")]) {
+      const error = await run().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(CliOutputError);
+      const { message, output } = error as CliOutputError;
+      expect(message).toMatch(/^datasphere objects (local-tables list|views read) printed "Signed in with <secret>\. No objects\." instead of JSON\.$/);
+      expect(`${message}\n${output}`).not.toContain(client.clientSecret);
+    }
+    // Filling the cache needs no JSON.
+    await expect(cli.initCache()).resolves.toBeUndefined();
   });
 
   it("refuses a client without a folder of its own", () => {

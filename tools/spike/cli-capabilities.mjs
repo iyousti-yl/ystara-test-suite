@@ -44,10 +44,10 @@ const results = { startedAt: new Date().toISOString(), host: HOST, space: SPACE,
 results.cliVersion = (await tryRun(["--version"])).stdout?.trim() ?? null;
 console.log(`CLI version: ${results.cliVersion ?? "not found (npm i -g @sap/datasphere-cli)"}`);
 
-// List and read each kind, timing the whole thing
+// List and read each kind, timing the whole thing. The host goes after the command: before it, the CLI ignores it.
 const t0 = Date.now();
 for (const kind of OBJECT_KINDS) {
-  const list = await tryRun(["--host", HOST, "objects", kind, "list", "--space", SPACE, "--top", LIST_TOP]);
+  const list = await tryRun(["objects", kind, "list", "--space", SPACE, "--top", LIST_TOP, "--host", HOST]);
   const entry = { list: list.ok, count: null, read: null, error: list.ok ? null : firstLine(list.stderr) };
   if (list.ok) {
     let items = [];
@@ -55,7 +55,7 @@ for (const kind of OBJECT_KINDS) {
     entry.count = Array.isArray(items) ? items.length : null;
     const first = Array.isArray(items) && items[0] ? (items[0].technicalName ?? items[0].name ?? items[0]) : null;
     if (first) {
-      const read = await tryRun(["--host", HOST, "objects", kind, "read", "--space", SPACE, "--technical-name", String(first)]);
+      const read = await tryRun(["objects", kind, "read", "--space", SPACE, "--technical-name", String(first), "--host", HOST]);
       entry.read = read.ok;
       if (!read.ok) entry.error = firstLine(read.stderr);
     }
@@ -75,7 +75,8 @@ console.log(`\nSaved ${path.relative(root, outFile)}`);
 // ---- helpers ----
 async function tryRun(args) {
   try {
-    const r = await execa(BIN, args, { reject: false, timeout: 120_000 });
+    // No input, so the CLI never waits on a question.
+    const r = await execa(BIN, args, { reject: false, timeout: 120_000, stdin: "ignore" });
     return { ok: r.exitCode === 0, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   } catch (e) {
     return { ok: false, stdout: "", stderr: String(e?.message ?? e) };

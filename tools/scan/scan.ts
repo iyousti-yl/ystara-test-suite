@@ -62,9 +62,10 @@ if (values.from) {
   console.log(`Replaying ${raw.length} objects from ${values.from}`);
 } else {
   const host = process.env.DSP_HOST;
-  spaces = values.space ?? (process.env.DSP_SPACE ? [process.env.DSP_SPACE] : []);
+  // DSP_SPACE holds one or more space IDs separated by commas, as for the technical client spike.
+  spaces = values.space ?? (process.env.DSP_SPACE ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (!host || spaces.length === 0) {
-    console.error("Need DSP_HOST in .env.local and at least one --space (or DSP_SPACE).");
+    console.error("Need DSP_HOST in .env.local and at least one --space (or DSP_SPACE, space IDs separated by commas).");
     process.exit(1);
   }
   // A technical OAuth client in .env.local logs in with nobody present, in a temporary CLI folder; otherwise your own `datasphere login`.
