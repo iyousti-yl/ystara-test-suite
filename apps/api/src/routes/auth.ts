@@ -23,9 +23,9 @@ import {
   type Session,
 } from "@ystara/db";
 import { ROLE_PERMISSIONS, type AuthenticatorSetup, type InvitationOffer, type Me, type ResetOffer } from "@ystara/shared";
+import type { SecretBox } from "@ystara/shared/secrets";
 import { clearSessionCookie, PENDING_MINUTES, SESSION_MINUTES, setSessionCookie, signedIn } from "../auth/access.js";
 import { hashPassword, passwordProblem, verifyPassword } from "../auth/passwords.js";
-import type { SecretBox } from "../auth/secrets.js";
 import { matchTotp, newTotpSecret, otpauthUri } from "../auth/totp.js";
 
 /**

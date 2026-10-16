@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { masterKeyFromEnv, secretBox } from "@ystara/shared/secrets";
 import { hashPassword, passwordProblem, verifyPassword } from "./passwords.js";
-import { masterKeyFromEnv, secretBox } from "./secrets.js";
 import { base32Decode, base32Encode, matchTotp, otpauthUri, totpCode, totpStep } from "./totp.js";
 
 describe("authenticator codes", () => {

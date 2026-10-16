@@ -19,6 +19,35 @@ export interface Tenant {
 }
 
 /**
+ * How the worker logs in to a tenant: a technical OAuth client (purpose
+ * "Technical User") an admin creates in Datasphere and enters in the Connect
+ * wizard. Ystara stores its secret encrypted and never sends it back.
+ *
+ * Lifecycle: checking (saved, or "Check again") -> connected | failed. The
+ * worker checks by listing the spaces the client can see.
+ */
+export type ConnectionStatus = "checking" | "connected" | "failed";
+
+export interface TenantConnection {
+  tenantId: string;
+  clientId: string;
+  tokenUrl: string;
+  status: ConnectionStatus;
+  checkedAt: Date | null;
+  /** Why the last check failed: the CLI's last lines, without the secret. */
+  error: string | null;
+  /** The spaces the client could see at the last successful check. */
+  spaces: string[];
+  /** When the client was entered or last changed. */
+  updatedAt: Date;
+}
+
+/** GET /api/tenants/:id/connection. Null until an admin connects the tenant. */
+export interface ConnectionState {
+  connection: TenantConnection | null;
+}
+
+/**
  * Discovery scans: a request to read some spaces of a tenant, and, once done,
  * what was read (object definitions) and the lineage graph built from it.
  *

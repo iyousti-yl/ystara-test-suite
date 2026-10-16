@@ -1,9 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { acceptInvitation, createAccount, createInvitation, createSession, findAccountByName, findUserByEmail, setOperator, type Db } from "@ystara/db";
 import type { Role } from "@ystara/shared";
+import { secretBox } from "@ystara/shared/secrets";
 import { SESSION_COOKIE } from "./access.js";
 import { hashPassword } from "./passwords.js";
-import { secretBox } from "./secrets.js";
 import { newTotpSecret } from "./totp.js";
 
 /**

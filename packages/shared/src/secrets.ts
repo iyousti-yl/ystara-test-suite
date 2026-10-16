@@ -2,10 +2,11 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
 /**
- * Secrets the platform has to read back later (authenticator secrets now,
- * tenant credentials with the connection wizard) are stored encrypted with
+ * Secrets the platform has to read back later (each user's authenticator
+ * secret, each tenant's technical client secret) are stored encrypted with
  * MASTER_KEY: AES-256-GCM, which also detects any change to the stored text.
- * A copy of the database alone reveals none of them.
+ * A copy of the database alone reveals none of them. The API and the worker
+ * both use it (Node only: import it as @ystara/shared/secrets, never from the web app).
  *
  * Stored as v1.<iv>.<tag>.<ciphertext> (base64url), so the scheme can change later.
  */
@@ -43,7 +44,7 @@ export const MASTER_KEY_COMMAND = `node -e "require('fs').writeFileSync('.master
  * only the containers that need it get. A MASTER_KEY variable works too (a hosting platform's secret
  * store); if both are there, they must hold the same key.
  * Refuses to start without one, rather than run with a weak or shared key. Errors never show the key.
- * Losing the key means every user sets up their authenticator again.
+ * Losing the key means every user sets up their authenticator again, and every tenant's client secret is entered again.
  */
 export function masterKeyFromEnv(env: NodeJS.ProcessEnv = process.env): Buffer {
   const help = `Create one in the repository root with\n  ${MASTER_KEY_COMMAND}\nIt writes .master-key, which git ignores. Keep it secret and keep a copy: losing it means every user sets up their authenticator again.`;
