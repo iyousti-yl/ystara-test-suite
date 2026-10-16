@@ -55,6 +55,16 @@ describe("the operator panel", () => {
     expect(res.json().error).toMatch(/still has an admin/);
   });
 
+  it("can't invite someone who is already a member as the admin", async () => {
+    const created = await call("POST", "/operator/accounts", { payload: { name: "Admin never came", adminEmail: "never.came@example.com" } });
+    const accountId: string = created.json().account.id;
+    const developer = await testUser(db, { account: "Admin never came", email: "dev@never.example.com", role: "developer" });
+    expect(developer.accountId).toBe(accountId);
+    const res = await call("POST", `/operator/accounts/${accountId}/invitations`, { payload: { email: developer.email } });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/already a member/);
+  });
+
   it("can't reset another operator's sign-in", async () => {
     const other = await testUser(db, { account: "Ystara", email: "ops2@ystara.example.com", role: "viewer", operator: true });
     expect((await call("POST", `/operator/users/${other.userId}/reset`)).statusCode).toBe(409);
@@ -67,11 +77,11 @@ describe("the operator panel", () => {
     expect(users.find((u) => u.id === lost.userId)?.accounts.map((a) => `${a.name}: ${a.role}`)).toEqual(["Customer: developer"]);
 
     const admin = await testUser(db, { account: "Customer", email: "admin.sees@customer.example.com", role: "admin" });
-    const resetSeen = async () => ((await call("GET", "/team", { as: admin })).json().members as Member[]).find((m) => m.userId === lost.userId)?.signInReset;
-    expect(await resetSeen()).toBeUndefined();
+    const resetSeen = async () => ((await call("GET", "/team", { as: admin })).json().members as Member[]).find((m) => m.userId === lost.userId)?.signInResets;
+    expect(await resetSeen()).toEqual([]);
 
     const { token } = (await call("POST", `/operator/users/${lost.userId}/reset`)).json();
-    expect(await resetSeen()).toEqual({ madeAt: expect.any(String) });
+    expect(await resetSeen()).toEqual([{ madeAt: expect.any(String), open: true }]);
     expect((await call("GET", `/resets/${token}`, { cookie: "" })).json()).toEqual({ email: "lost.phone@customer.example.com" });
     const accept = (payload: object) => call("POST", `/resets/${token}/accept`, { cookie: "", payload });
     expect((await accept({ password: "a brand new password", code: "123456" })).json().error).toMatch(/Set up the authenticator app first/);
@@ -89,6 +99,6 @@ describe("the operator panel", () => {
     expect((await call("POST", "/auth/login", { cookie: "", payload: { email: lost.email, password: TEST_PASSWORD } })).statusCode).toBe(401);
     expect((await call("POST", "/auth/login", { cookie: "", payload: { email: lost.email, password: "a brand new password" } })).statusCode).toBe(200);
     expect((await call("GET", `/resets/${token}`, { cookie: "" })).statusCode).toBe(404);
-    expect(await resetSeen()).toEqual({ madeAt: expect.any(String), usedAt: expect.any(String) });
+    expect(await resetSeen()).toEqual([{ madeAt: expect.any(String), usedAt: expect.any(String), open: false }]);
   });
 });

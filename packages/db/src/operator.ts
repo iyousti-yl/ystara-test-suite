@@ -110,17 +110,24 @@ export async function useSignInReset(db: Db, token: string, input: { passwordHas
  * admins left the company or lost access). Where an admin is left, they invite people themselves:
  * otherwise the operator could make themselves admin of any customer and see its data. The account
  * stays locked until the invitation exists, so a check and an invitation can't overlap.
+ * Someone who is already a member is refused ("member"): accepting never changes an existing member's
+ * role, so their invitation would be used up and the account would still have no admin.
  */
 export async function inviteAdminWhereNoneLeft(
   db: Db,
   accountId: string,
   email: string,
-): Promise<{ invitation: Invitation; token: string } | "not-found" | "has-admin"> {
+): Promise<{ invitation: Invitation; token: string } | "not-found" | "has-admin" | "member"> {
   return db.transaction(async (tx) => {
     const { rows } = await tx.query("select id from accounts where id = $1 for update", [accountId]);
     if (rows.length === 0) return "not-found";
     const { rows: admins } = await tx.query("select 1 from memberships where account_id = $1 and role = 'admin' limit 1", [accountId]);
     if (admins.length > 0) return "has-admin";
+    const { rows: members } = await tx.query(
+      "select 1 from memberships m join users u on u.id = m.user_id where m.account_id = $1 and u.email = $2",
+      [accountId, email.toLowerCase()],
+    );
+    if (members.length > 0) return "member";
     return createInvitation(tx, { accountId, email, role: "admin" });
   });
 }

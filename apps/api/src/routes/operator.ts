@@ -37,6 +37,9 @@ export function operatorRoutes(db: Db) {
       const created = await inviteAdminWhereNoneLeft(db, accountId, AdminInvitation.parse(req.body).email);
       if (created === "not-found") return reply.code(404).send({ error: "Account not found" });
       if (created === "has-admin") return reply.code(409).send({ error: "This account still has an admin. Its admins invite new people on their Users and roles page." });
+      if (created === "member") {
+        return reply.code(409).send({ error: "This person is already a member of the account. An invitation can't change their role: invite someone who isn't a member yet." });
+      }
       req.log.info({ operator: signedIn(req).userId, accountId, invitationId: created.invitation.id }, "operator invited an admin to an account without one");
       return reply.code(201).send(created satisfies CreatedInvitation);
     });

@@ -91,17 +91,29 @@ describe("reset links", () => {
     ]);
   });
 
-  it("are shown to the user's account admins, open or used", async () => {
+  it("are all shown to the user's account admins for 30 days, so a newer link never hides a used one", async () => {
     const account = await createAccount(db, "Sees resets");
     const opsId = await member(account, "ops@sees.example.com", "viewer");
     const userId = await member(account, "reset.me@example.com", "viewer");
-    const resetOf = async () => (await listMembers(db, account.id)).find((m) => m.userId === userId)!.signInReset;
-    expect(await resetOf()).toBeUndefined();
+    const resetsOf = async () => (await listMembers(db, account.id)).find((m) => m.userId === userId)!.signInResets;
+    expect(await resetsOf()).toEqual([]);
 
-    const { token } = (await createSignInReset(db, userId, opsId)) as { token: string };
-    expect(await resetOf()).toEqual({ madeAt: expect.any(Date) });
-    await useSignInReset(db, token, { passwordHash: "h", totpSecret: "s", totpStep: 1 });
-    expect(await resetOf()).toEqual({ madeAt: expect.any(Date), usedAt: expect.any(Date) });
+    const first = (await createSignInReset(db, userId, opsId)) as { token: string };
+    expect(await resetsOf()).toEqual([{ madeAt: expect.any(Date), open: true }]);
+    await useSignInReset(db, first.token, { passwordHash: "h", totpSecret: "s", totpStep: 1 });
+    await createSignInReset(db, userId, opsId); // replaced by the next one, never used
+    await createSignInReset(db, userId, opsId);
+    const resets = await resetsOf();
+    expect(resets).toEqual([
+      { madeAt: expect.any(Date), open: true },
+      { madeAt: expect.any(Date), open: false },
+      { madeAt: expect.any(Date), usedAt: expect.any(Date), open: false },
+    ]);
+    expect(resets[0].madeAt.getTime()).toBeGreaterThanOrEqual(resets[2].madeAt.getTime());
+
+    // Older than 30 days: no longer listed.
+    await db.query("update sign_in_resets set created_at = now() - interval '31 days' where token_hash <> ''");
+    expect(await resetsOf()).toEqual([]);
   });
 
   it("can't be made for an operator", async () => {
@@ -115,6 +127,13 @@ describe("reset links", () => {
 });
 
 describe("a new admin from the operator", () => {
+  it("is never someone who is already a member, whose role an invitation can't change", async () => {
+    const account = await createAccount(db, "Developer left alone");
+    await member(account, "left.alone@example.com", "viewer");
+    expect(await inviteAdminWhereNoneLeft(db, account.id, "Left.Alone@example.com")).toBe("member");
+    expect((await db.query("select 1 from invitations where account_id = $1 and accepted_at is null", [account.id])).rows).toEqual([]);
+  });
+
   it("is only invited to an account with no admin left", async () => {
     const { account, token } = await createAccountWithAdmin(db, "Admin gone", "first@gone.example.com");
     expect(await findOpenInvitation(db, token)).toMatchObject({ email: "first@gone.example.com", role: "admin", account: { name: "Admin gone" } });

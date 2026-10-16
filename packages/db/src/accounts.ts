@@ -126,26 +126,33 @@ export async function membershipsOf(db: Queryable, userId: string): Promise<(Acc
   return rows;
 }
 
+/** How far back the Users and roles page shows sign-in resets. */
+export const RESET_HISTORY_DAYS = 30;
+
 export async function listMembers(db: Queryable, accountId: string): Promise<Member[]> {
-  // With each member, the latest sign-in reset Ystara's operator made for them that was used or is still open.
-  const { rows } = await db.query<{ user_id: string; email: string; role: Role; created_at: Date; reset_made_at: Date | null; reset_used_at: Date | null }>(
-    `select m.user_id, u.email, m.role, m.created_at, r.created_at as reset_made_at, r.used_at as reset_used_at
+  // With each member, every sign-in reset Ystara's operator made for them in the last RESET_HISTORY_DAYS days, newest
+  // first, so a newer link never hides an earlier one that was used.
+  const { rows } = await db.query<{ user_id: string; email: string; role: Role; created_at: Date; resets: { madeAt: string; usedAt: string | null; open: boolean }[] }>(
+    `select m.user_id, u.email, m.role, m.created_at, r.resets
      from memberships m
      join users u on u.id = m.user_id
-     left join lateral (
-       select created_at, used_at from sign_in_resets
-       where user_id = m.user_id and (used_at is not null or expires_at > now())
-       order by coalesce(used_at, created_at) desc limit 1
-     ) r on true
+     cross join lateral (
+       select coalesce(
+         json_agg(json_build_object('madeAt', created_at, 'usedAt', used_at, 'open', used_at is null and expires_at > now()) order by created_at desc),
+         '[]'
+       ) as resets
+       from sign_in_resets
+       where user_id = m.user_id and created_at > now() - make_interval(days => $2)
+     ) r
      where m.account_id = $1 order by u.email`,
-    [accountId],
+    [accountId, RESET_HISTORY_DAYS],
   );
   return rows.map((r) => ({
     userId: r.user_id,
     email: r.email,
     role: r.role,
     joinedAt: r.created_at,
-    ...(r.reset_made_at && { signInReset: { madeAt: r.reset_made_at, ...(r.reset_used_at && { usedAt: r.reset_used_at }) } }),
+    signInResets: r.resets.map((x) => ({ madeAt: new Date(x.madeAt), ...(x.usedAt && { usedAt: new Date(x.usedAt) }), open: x.open })),
   }));
 }
 
