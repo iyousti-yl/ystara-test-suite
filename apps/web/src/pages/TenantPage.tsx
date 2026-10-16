@@ -131,7 +131,8 @@ export const parseSpaces = (text: string) => [...new Set(text.split(/[\s,;]+/).f
 
 /**
  * Picks the spaces to scan: from the spaces the technical client saw at its
- * last check, or typed in when the tenant has none (the machine's own CLI login).
+ * last check, or typed in when the tenant has none (only a worker started with
+ * YSTARA_WORKER_MACHINE_LOGIN=1 can scan it, with its machine's own CLI login).
  */
 function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => void }) {
   const start = useStartScan(tenantId);
@@ -175,7 +176,7 @@ function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => vo
         ) : (
           <Input id="spaces" className="full-width" value={text} onInput={(e) => setText(e.target.value)} placeholder="HR, SHARED" />
         )}
-        <MessageStrip design={connection?.status === "failed" ? "Critical" : "Information"} hideCloseButton>
+        <MessageStrip design={!connection || connection.status === "failed" ? "Critical" : "Information"} hideCloseButton>
           {scanLogin(connection)} Scan the spaces of one pipeline together to see the links between them.
         </MessageStrip>
         <ErrorStrip error={start.error} />
@@ -187,7 +188,7 @@ function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => vo
 function scanLogin(connection: ConnectionJson | null): string {
   const readOnly = "Read-only: the worker lists and reads object definitions, nothing else.";
   if (!connection) {
-    return `${readOnly} This tenant has no technical client, so the worker uses the Datasphere CLI login of the machine it runs on (datasphere login, then npm run dev:worker).`;
+    return `${readOnly} This tenant is not connected: an admin connects it on the tenant page, and until then the scan fails. (Only a worker started on a developer's computer with YSTARA_WORKER_MACHINE_LOGIN=1 scans it with that computer's own Datasphere CLI login.)`;
   }
   if (connection.status === "failed") return `${readOnly} The technical client's last check failed, so this scan will probably fail too.`;
   return `${readOnly} It logs in with the tenant's technical client.`;

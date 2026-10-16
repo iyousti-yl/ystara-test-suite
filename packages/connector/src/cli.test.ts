@@ -3,7 +3,7 @@ import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CliOutputError, DatasphereCli, describeCliFailure } from "./cli.js";
+import { CliOutputError, cliEnv, DatasphereCli, describeCliFailure } from "./cli.js";
 import { WriteAttemptError } from "./readonly.js";
 
 // Stand-ins for the Datasphere CLI, written in Node. Shell scripts, so not on Windows.
@@ -12,8 +12,8 @@ describe.skipIf(process.platform === "win32")("Datasphere CLI wrapper", () => {
   let bin: string;
   let asks: string;
   let plain: string;
-  const host = "https://synthetic.example.com";
-  const client = { clientId: "client-id", clientSecret: "client-secret", tokenUrl: "https://synthetic.example.com/oauth/token" };
+  const host = "https://synthetic.eu10.hcs.cloud.sap";
+  const client = { clientId: "client-id", clientSecret: "client-secret", tokenUrl: "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token" };
 
   /** Writes a stand-in that runs `body` with `fs`, `args` (its arguments) and `secrets` (the secrets file, if given). */
   async function standIn(name: string, body: string): Promise<string> {
@@ -35,17 +35,17 @@ ${body}
   beforeAll(async () => {
     dir = await mkdtemp(path.join(tmpdir(), "ystara-cli-"));
     // Like the real CLI: a --host before the command words is ignored, and without a host it asks for one and exits 0.
-    // Otherwise it prints what it was started with.
+    // Otherwise (and for --version) it prints what it was started with, and its environment.
     bin = await standIn(
       "fake-datasphere",
       `fs.writeFileSync(${JSON.stringify(path.join(dir, "called"))}, "yes");
 let start = 0;
 while (args[start] && args[start].startsWith("--")) start += 2;
-if (!args.slice(start).includes("--host")) {
+if (args[0] !== "--version" && !args.slice(start).includes("--host")) {
   console.log("? URL of the system to connect to");
   process.exit(0);
 }
-console.log(JSON.stringify({ args, home: process.env.HOME, secrets }));`,
+console.log(JSON.stringify({ args, home: process.env.HOME, env: process.env, secrets }));`,
     );
     // A CLI that asks a question whatever it is given and waits for the answer until its input ends, like a real prompt.
     // It logs the secret on stderr while doing so.
@@ -73,7 +73,7 @@ process.stdin.on("end", () => process.exit(0));`,
       client_id: "client-id",
       client_secret: "client-secret",
       token_url: client.tokenUrl,
-      authorization_url: "https://synthetic.example.com/oauth/authorize",
+      authorization_url: "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/authorize",
       authorization_flow: "client_credentials",
     });
     expect((await stat(file)).mode & 0o777).toBe(0o600);
@@ -93,6 +93,26 @@ process.stdin.on("end", () => process.exit(0));`,
     expect(run.args).toEqual(["objects", "local-tables", "list", "--space", "HR", "--top", "1000", "--host", host]);
     expect(run.home).toBe(process.env.HOME);
     await expect(cli.listObjects("HR", "views", 1)).resolves.toEqual([]);
+  });
+
+  it("gives the CLI none of our own settings, only what it needs to run and reach SAP", async () => {
+    const saved = { ...process.env };
+    Object.assign(process.env, { MASTER_KEY: "synthetic-master-key", DATABASE_URL: "postgres://synthetic", HTTPS_PROXY: "http://proxy.example.com:8080" });
+    try {
+      const configDir = await mkdtemp(path.join(dir, "tenant-"));
+      const withClient = new DatasphereCli({ host, bin, client, configDir });
+      for (const run of [JSON.parse(await withClient.exec({ group: "spaces", verb: "list" })), JSON.parse(await withClient.version())]) {
+        expect(run.env).not.toHaveProperty("MASTER_KEY");
+        expect(run.env).not.toHaveProperty("DATABASE_URL");
+        expect(run.env).toMatchObject({ PATH: process.env.PATH, HTTPS_PROXY: "http://proxy.example.com:8080", HOME: configDir });
+      }
+      const onMachine = JSON.parse(await new DatasphereCli({ host, bin }).exec({ group: "spaces", verb: "list" }));
+      expect(onMachine.env).not.toHaveProperty("MASTER_KEY");
+      expect(onMachine.home).toBe(process.env.HOME);
+    } finally {
+      for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+      Object.assign(process.env, saved);
+    }
   });
 
   it("asks the CLI to log its requests when verbose", async () => {
@@ -150,18 +170,42 @@ process.stdin.on("end", () => process.exit(0));`,
   });
 });
 
+describe("the CLI's environment", () => {
+  const ours = { Path: "/bin", PATHEXT: ".EXE", https_proxy: "http://proxy.example.com", HOME: "/home/me", APPDATA: "/home/me/AppData", MASTER_KEY: "x", DATABASE_URL: "y" };
+
+  it("keeps only what the CLI needs, in the case it is written", () => {
+    expect(cliEnv(undefined, ours)).toEqual({ Path: "/bin", PATHEXT: ".EXE", https_proxy: "http://proxy.example.com", HOME: "/home/me", APPDATA: "/home/me/AppData" });
+  });
+
+  it("points every home folder at the tenant's own folder", () => {
+    const env = cliEnv("/tmp/ystara-tenant-1", ours);
+    expect(env).toMatchObject({ HOME: "/tmp/ystara-tenant-1", USERPROFILE: "/tmp/ystara-tenant-1", APPDATA: "/tmp/ystara-tenant-1", LOCALAPPDATA: "/tmp/ystara-tenant-1" });
+    expect(env).not.toHaveProperty("MASTER_KEY");
+  });
+});
+
 describe("a failed CLI call, described for a person", () => {
   it("keeps the last lines of what the CLI printed, without the secret", () => {
+    const tokenUrl = "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token";
     const failure = Object.assign(new Error("Command failed with exit code 1"), {
       stdout: "",
-      stderr: ["step 1", "step 2", "", "POST https://synthetic.example.com/oauth/token client_secret=hunter2-synthetic", "401 Unauthorized  "].join("\n"),
+      stderr: ["step 1", "step 2", "", `POST ${tokenUrl} secret hunter2-synthetic`, "401 Unauthorized  "].join("\n"),
     });
-    expect(describeCliFailure(failure, ["hunter2-synthetic"], 2)).toBe("POST https://synthetic.example.com/oauth/token client_secret=<secret>\n401 Unauthorized");
+    const client = { clientId: "sb-synthetic", clientSecret: "hunter2-synthetic" };
+    expect(describeCliFailure(failure, client, 2)).toBe(`POST ${tokenUrl} secret <secret>\n401 Unauthorized`);
   });
 
   it("says why the CLI never answered", () => {
     expect(describeCliFailure(Object.assign(new Error("long text"), { shortMessage: "Command timed out after 120000 milliseconds" }))).toBe(
       "Command timed out after 120000 milliseconds",
+    );
+  });
+
+  it("puts the reason first when the CLI ended without answering", () => {
+    const output = ["line 1", "line 2", "token request for hunter2-synthetic", "? URL of the system to connect to"].join("\n");
+    const failure = new CliOutputError('datasphere objects views list asked "URL of the system to connect to" instead of answering.', output);
+    expect(describeCliFailure(failure, { clientId: "sb-synthetic", clientSecret: "hunter2-synthetic" }, 3)).toBe(
+      'datasphere objects views list asked "URL of the system to connect to" instead of answering.\ntoken request for <secret>\n? URL of the system to connect to',
     );
   });
 });

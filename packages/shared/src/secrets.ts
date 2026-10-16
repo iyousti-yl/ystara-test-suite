@@ -9,27 +9,39 @@ import { existsSync, readFileSync } from "node:fs";
  * both use it (Node only: import it as @ystara/shared/secrets, never from the web app).
  *
  * Stored as v1.<iv>.<tag>.<ciphertext> (base64url), so the scheme can change later.
+ *
+ * `context` ties a secret to the row it belongs to (AES-GCM additional data:
+ * not stored, but checked when opening). A tenant's client secret is sealed
+ * with connectionSecretContext(tenantId), so a sealed secret copied into
+ * another tenant's row can't be opened there. Without a context, as for
+ * authenticator secrets, nothing changes.
  */
 export interface SecretBox {
-  seal(plain: string): string;
-  open(sealed: string): string;
+  seal(plain: string, context?: string): string;
+  open(sealed: string, context?: string): string;
 }
+
+/** The context a tenant's technical client secret is sealed and opened with. */
+export const connectionSecretContext = (tenantId: string) => `tenant-connection:${tenantId}`;
+
+const TAG_LENGTH = 16; // bytes; set on both sides, so a shortened tag is refused instead of checked with fewer bits
 
 export function secretBox(key: Buffer): SecretBox {
   if (key.length !== 32) throw new Error("MASTER_KEY must be 32 bytes");
   return {
-    seal(plain) {
+    seal(plain, context) {
       const iv = randomBytes(12);
-      const cipher = createCipheriv("aes-256-gcm", key, iv);
+      const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_LENGTH });
+      if (context !== undefined) cipher.setAAD(Buffer.from(context, "utf8"));
       const ct = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
       return ["v1", iv, cipher.getAuthTag(), ct].map((part) => (typeof part === "string" ? part : part.toString("base64url"))).join(".");
     },
-    open(sealed) {
+    open(sealed, context) {
       const [version, iv, tag, ct] = sealed.split(".");
       if (version !== "v1" || ct === undefined) throw new Error("Unknown secret format");
-      // The full 16-byte tag, or a shortened one (easier to forge) would be accepted too.
-      const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"), { authTagLength: 16 });
+      const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"), { authTagLength: TAG_LENGTH });
       decipher.setAuthTag(Buffer.from(tag, "base64url"));
+      if (context !== undefined) decipher.setAAD(Buffer.from(context, "utf8"));
       return Buffer.concat([decipher.update(Buffer.from(ct, "base64url")), decipher.final()]).toString("utf8");
     },
   };

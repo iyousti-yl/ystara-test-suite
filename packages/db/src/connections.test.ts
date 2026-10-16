@@ -13,10 +13,10 @@ afterAll(async () => {
   await db.close();
 });
 
-const tokenUrl = "https://synthetic.example.com/oauth/token";
+const tokenUrl = "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token";
 async function newTenant(name: string) {
   const account = await createAccount(db, `Account of ${name}`);
-  return createTenant(db, { accountId: account.id, name, host: "https://synthetic.example.com" });
+  return createTenant(db, { accountId: account.id, name, host: "https://synthetic.eu10.hcs.cloud.sap" });
 }
 
 describe("tenant connections", () => {

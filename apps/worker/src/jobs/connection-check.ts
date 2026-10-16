@@ -23,14 +23,14 @@ export async function runConnectionCheck(
   const login = await getConnectionLogin(db, tenantId);
   if (!tenant || !login) return undefined; // removed while queued
 
-  let clientSecret = "";
+  let client: TechnicalClient | undefined;
   try {
     if (!tenant.host) throw new Error("This tenant has no Datasphere URL; it only has imported scans.");
-    clientSecret = openSecret(secrets, login.sealedSecret);
-    const spaces = await listSpaces(tenant.host, { clientId: login.clientId, clientSecret, tokenUrl: login.tokenUrl });
+    client = { clientId: login.clientId, clientSecret: openSecret(secrets, login.sealedSecret, tenantId), tokenUrl: login.tokenUrl };
+    const spaces = await listSpaces(tenant.host, client);
     await recordConnectionCheck(db, login, { ok: true, spaces: [...new Set(spaces)].sort() });
   } catch (e) {
-    await recordConnectionCheck(db, login, { ok: false, error: describeCliFailure(e, [clientSecret]) });
+    await recordConnectionCheck(db, login, { ok: false, error: describeCliFailure(e, client) });
   }
   return getConnection(db, tenantId);
 }

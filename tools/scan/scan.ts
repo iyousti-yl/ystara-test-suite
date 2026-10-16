@@ -34,7 +34,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { DatasphereCli, buildPipeline, graphFromRaw, readSpaces, toMermaid, type RawObject } from "@ystara/connector";
+import { DatasphereCli, buildPipeline, graphFromRaw, maskSecrets, readSpaces, toMermaid, type RawObject } from "@ystara/connector";
 import type { LineageGraph, Pipeline } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 
@@ -81,6 +81,7 @@ if (values.from) {
       concurrency: Number(values.concurrency ?? 4),
       onProgress: (done, total, current) => process.stderr.write(`\r  read ${done}/${total} ${current.padEnd(60).slice(0, 60)}`),
     }));
+    warnings = warnings.map((w) => maskSecrets(w, client)); // saved in raw.json, which db:import loads
   } finally {
     if (configDir) await rm(configDir, { recursive: true, force: true });
   }

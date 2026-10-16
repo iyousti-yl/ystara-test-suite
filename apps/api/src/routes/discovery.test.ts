@@ -54,7 +54,7 @@ const get = (url: string, as = admin) => app.inject({ method: "GET", url: `/api$
 const del = (url: string, as = admin) => app.inject({ method: "DELETE", url: `/api${url}`, headers: { cookie: as.cookie } });
 
 async function tenantWithScan(name: string) {
-  const tenant = (await post("/tenants", { name, host: "https://synthetic.example.com" })).json();
+  const tenant = (await post("/tenants", { name, host: "https://synthetic.eu10.hcs.cloud.sap" })).json();
   const scan = await createScan(db, tenant.id, ["S"], "import");
   await saveScanResult(db, scan.id, RAW, graphFromRaw(RAW, ["S"]));
   return { tenant, scan };
@@ -62,21 +62,25 @@ async function tenantWithScan(name: string) {
 
 describe("tenants", () => {
   it("are created and listed", async () => {
-    const res = await post("/tenants", { name: "Partner", host: "https://partner.example.com" });
+    const res = await post("/tenants", { name: "Partner", host: "https://synthetic.eu10.hcs.cloud.sap" });
     expect(res.statusCode).toBe(201);
     expect((await get("/tenants")).json().map((t: { name: string }) => t.name)).toContain("Partner");
-    expect((await get(`/tenants/${res.json().id}`)).json()).toMatchObject({ name: "Partner", host: "https://partner.example.com" });
+    expect((await get(`/tenants/${res.json().id}`)).json()).toMatchObject({ name: "Partner", host: "https://synthetic.eu10.hcs.cloud.sap" });
   });
 
-  it("need an https URL and a unique name", async () => {
-    expect((await post("/tenants", { name: "Bad", host: "http://plain.example.com" })).statusCode).toBe(400);
-    expect((await post("/tenants", { name: "Partner", host: "https://other.example.com" })).statusCode).toBe(409);
+  it("need a Datasphere URL and a unique name", async () => {
+    for (const host of ["http://synthetic.eu10.hcs.cloud.sap", "https://synthetic.example.com", "https://10.0.0.1", "https://synthetic.eu10.hcs.cloud.sap:8443"]) {
+      const res = await post("/tenants", { name: "Bad", host });
+      expect(res.statusCode, host).toBe(400);
+      expect(res.json().issues[0].message, host).toMatch(/hcs\.cloud\.sap/);
+    }
+    expect((await post("/tenants", { name: "Partner", host: "https://synthetic.eu10.hcs.cloud.sap" })).statusCode).toBe(409);
   });
 });
 
 describe("scans", () => {
   it("are queued for the worker and never run by the API", async () => {
-    const tenant = (await post("/tenants", { name: "To scan", host: "https://scan.example.com" })).json();
+    const tenant = (await post("/tenants", { name: "To scan", host: "https://synthetic.eu10.hcs.cloud.sap" })).json();
     const res = await post(`/tenants/${tenant.id}/scans`, { spaces: ["HR", "SHARED"] });
     expect(res.statusCode).toBe(202);
     expect(res.json()).toMatchObject({ status: "queued", spaces: ["HR", "SHARED"] });
@@ -86,7 +90,7 @@ describe("scans", () => {
   });
 
   it("reject space names that aren't plain IDs", async () => {
-    const tenant = (await post("/tenants", { name: "Strict", host: "https://strict.example.com" })).json();
+    const tenant = (await post("/tenants", { name: "Strict", host: "https://synthetic.eu10.hcs.cloud.sap" })).json();
     expect((await post(`/tenants/${tenant.id}/scans`, { spaces: ["HR; rm -rf"] })).statusCode).toBe(400);
     expect((await post(`/tenants/${tenant.id}/scans`, { spaces: [] })).statusCode).toBe(400);
   });
@@ -165,7 +169,7 @@ describe("pipelines", () => {
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toMatch(/not in the latest scan/);
 
-    const fresh = (await post("/tenants", { name: "Never scanned", host: "https://new.example.com" })).json();
+    const fresh = (await post("/tenants", { name: "Never scanned", host: "https://synthetic.eu10.hcs.cloud.sap" })).json();
     const p = (await post(`/tenants/${fresh.id}/pipelines`, { name: "Early", output: "S.V_OUT" })).json();
     expect((await get(`/pipelines/${p.id}`)).json().error).toMatch(/no successful scan/);
   });
@@ -176,7 +180,7 @@ describe("access", () => {
     for (const url of ["/tenants", "/scans/00000000-0000-4000-8000-000000000000"]) {
       expect((await app.inject({ method: "GET", url: `/api${url}` })).statusCode, url).toBe(401);
     }
-    expect((await app.inject({ method: "POST", url: "/api/tenants", payload: { name: "Anon", host: "https://anon.example.com" } })).statusCode).toBe(401);
+    expect((await app.inject({ method: "POST", url: "/api/tenants", payload: { name: "Anon", host: "https://synthetic.eu10.hcs.cloud.sap" } })).statusCode).toBe(401);
     expect((await app.inject({ method: "GET", url: "/api/tenants", headers: { cookie: "ystara_session=made-up" } })).statusCode).toBe(401);
   });
 
@@ -186,11 +190,11 @@ describe("access", () => {
     const developer = await testUser(db, { account: "Customer", email: "dev@customer.example.com", role: "developer" });
 
     expect((await get(`/scans/${scan.id}/pipeline?output=V_OUT`, viewer)).statusCode).toBe(200);
-    expect((await post("/tenants", { name: "By viewer", host: "https://v.example.com" }, viewer)).statusCode).toBe(403);
+    expect((await post("/tenants", { name: "By viewer", host: "https://synthetic.eu10.hcs.cloud.sap" }, viewer)).statusCode).toBe(403);
     expect((await post(`/tenants/${tenant.id}/scans`, { spaces: ["S"] }, viewer)).statusCode).toBe(403);
     expect((await post(`/tenants/${tenant.id}/pipelines`, { name: "By viewer", output: "S.V_OUT" }, viewer)).json().error).toBe("Your role (viewer) can't do this");
 
-    expect((await post("/tenants", { name: "By developer", host: "https://d.example.com" }, developer)).statusCode).toBe(403);
+    expect((await post("/tenants", { name: "By developer", host: "https://synthetic.eu10.hcs.cloud.sap" }, developer)).statusCode).toBe(403);
     expect((await post(`/tenants/${tenant.id}/scans`, { spaces: ["S"] }, developer)).statusCode).toBe(202);
     const pipeline = await post(`/tenants/${tenant.id}/pipelines`, { name: "By developer", output: "S.V_OUT" }, developer);
     expect(pipeline.statusCode).toBe(201);
@@ -222,6 +226,6 @@ describe("access", () => {
     expect((await get(`/pipelines/${pipeline.id}`)).statusCode).toBe(200);
 
     // The same tenant name is fine in another account.
-    expect((await post("/tenants", { name: "Private", host: "https://other.example.com" }, outsider)).statusCode).toBe(201);
+    expect((await post("/tenants", { name: "Private", host: "https://synthetic.eu10.hcs.cloud.sap" }, outsider)).statusCode).toBe(201);
   });
 });

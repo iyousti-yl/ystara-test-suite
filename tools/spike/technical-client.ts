@@ -34,7 +34,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { CliOutputError, DatasphereCli, parseListing } from "@ystara/connector";
+import { CliOutputError, DatasphereCli, maskSecrets, parseListing } from "@ystara/connector";
 import { loadLocalEnv } from "@ystara/shared/env";
 
 loadLocalEnv(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".."));
@@ -89,7 +89,7 @@ async function step<T>(
 
 /** Why a step failed, in one line, and what the CLI printed. Neither holds the client secret. */
 function explain(e: unknown): { reason: string; printed: string[] } {
-  const hide = (text: string) => text.replaceAll(client.clientSecret, "<secret>");
+  const hide = (text: string) => maskSecrets(text, client);
   const lines = (...texts: (string | undefined)[]) => hide(texts.filter(Boolean).join("\n")).split("\n").filter((l) => l.trim());
   if (e instanceof CliOutputError) return { reason: e.message, printed: lines(e.output) };
   const err = e as { stdout?: string; stderr?: string; exitCode?: number; timedOut?: boolean; message?: string };

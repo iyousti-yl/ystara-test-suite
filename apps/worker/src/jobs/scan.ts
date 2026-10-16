@@ -1,4 +1,4 @@
-import { describeCliFailure, graphFromRaw, readSpaces, type ObjectSource, type ScanOptions } from "@ystara/connector";
+import { describeCliFailure, graphFromRaw, maskSecrets, readSpaces, type ObjectSource, type ScanOptions, type TechnicalClient } from "@ystara/connector";
 import { getScan, getTenant, markScanFailed, markScanRunning, saveScanResult, type Db, type Scan, type Tenant } from "@ystara/db";
 
 /**
@@ -14,8 +14,8 @@ export interface TenantAccess {
   source: ObjectSource;
   /** The tenant's technical client, or the CLI login on the worker's machine: says what to check when nothing can be read. */
   login: "client" | "machine";
-  /** Secrets to mask in error messages. */
-  hide: string[];
+  /** The technical client it logs in with, so its secret is masked in every error and warning. */
+  client?: Pick<TechnicalClient, "clientId" | "clientSecret">;
   close?(): Promise<void>;
 }
 
@@ -39,16 +39,17 @@ export async function runScan(
   let access: TenantAccess | undefined;
   try {
     access = await accessFor(tenant);
-    const { raw, warnings } = await readSpaces(access.source, scan.spaces, opts);
+    const { raw, warnings: found } = await readSpaces(access.source, scan.spaces, opts);
+    const { client } = access;
+    const warnings = found.map((w) => maskSecrets(w, client)); // stored and shown, whether the scan succeeds or not
     if (raw.length === 0 && warnings.length > 0) {
       // Nothing could be listed or read at all, usually a login or missing rights.
-      const hide = (text: string) => access!.hide.reduce((t, secret) => t.replaceAll(secret, "<secret>"), text);
-      await markScanFailed(db, scanId, `Nothing could be read. ${HINTS[access.login]} First problem: ${hide(warnings[0])}`, warnings.map(hide));
+      await markScanFailed(db, scanId, `Nothing could be read. ${HINTS[access.login]} First problem: ${warnings[0]}`, warnings);
       return getScan(db, scanId);
     }
     return await saveScanResult(db, scanId, raw, graphFromRaw(raw, scan.spaces, warnings));
   } catch (e) {
-    await markScanFailed(db, scanId, describeCliFailure(e, access?.hide));
+    await markScanFailed(db, scanId, describeCliFailure(e, access?.client));
     return getScan(db, scanId);
   } finally {
     await access?.close?.();

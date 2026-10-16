@@ -118,7 +118,7 @@ describe("signing in", () => {
 
   it("refuses changes sent from another site", async () => {
     const user = await testUser(db, { account: "Sign-in", email: "csrf@example.com", role: "admin" });
-    const payload = { name: "From elsewhere", host: "https://x.example.com" };
+    const payload = { name: "From elsewhere", host: "https://synthetic.eu10.hcs.cloud.sap" };
     const elsewhere = await call("POST", "/tenants", { cookie: user.cookie, payload, origin: "https://evil.example.com" });
     expect(elsewhere.statusCode).toBe(403);
     expect((await call("POST", "/tenants", { cookie: user.cookie, payload, origin: "http://localhost" })).statusCode).toBe(201);

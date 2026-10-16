@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { TechnicalClient } from "@ystara/connector";
 import { createAccount, createTenant, getConnection, getConnectionLogin, setConnection, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
-import { secretBox } from "@ystara/shared/secrets";
+import { connectionSecretContext, secretBox } from "@ystara/shared/secrets";
 import { runConnectionCheck } from "./connection-check.js";
 
 const secrets = secretBox(randomBytes(32));
@@ -20,8 +20,8 @@ afterAll(async () => {
 });
 
 async function connectedTenant(name: string, secret = "synthetic-secret") {
-  const tenant = await createTenant(db, { accountId, name, host: "https://synthetic.example.com" });
-  await setConnection(db, { tenantId: tenant.id, clientId: "sb-synthetic", sealedSecret: secrets.seal(secret), tokenUrl, updatedBy: null });
+  const tenant = await createTenant(db, { accountId, name, host: "https://synthetic.eu10.hcs.cloud.sap" });
+  await setConnection(db, { tenantId: tenant.id, clientId: "sb-synthetic", sealedSecret: secrets.seal(secret, connectionSecretContext(tenant.id)), tokenUrl, updatedBy: null });
   return tenant;
 }
 
@@ -30,7 +30,7 @@ describe("the connection check", () => {
     const tenant = await connectedTenant("Production");
     let used: TechnicalClient | undefined;
     const done = await runConnectionCheck(db, tenant.id, secrets, async (host, client) => {
-      expect(host).toBe("https://synthetic.example.com");
+      expect(host).toBe("https://synthetic.eu10.hcs.cloud.sap");
       used = client;
       return ["SALES", "FINANCE", "SALES"];
     });
@@ -41,10 +41,12 @@ describe("the connection check", () => {
   it("stores why the login failed, without the secret", async () => {
     const tenant = await connectedTenant("Wrong secret");
     const done = await runConnectionCheck(db, tenant.id, secrets, async (_host, client) => {
-      throw Object.assign(new Error("Command failed"), { stderr: `POST ${tokenUrl} with ${client.clientSecret}\n401 Unauthorized` });
+      const basic = Buffer.from(`${client.clientId}:${client.clientSecret}`).toString("base64");
+      const stderr = [`POST ${tokenUrl} with ${client.clientSecret}`, `Authorization: Basic ${basic}`, '{"access_token":"opaque-synthetic"}', "401 Unauthorized"];
+      throw Object.assign(new Error("Command failed"), { stderr: stderr.join("\n") });
     });
     expect(done).toMatchObject({ status: "failed", spaces: [] });
-    expect(done?.error).toBe(`POST ${tokenUrl} with <secret>\n401 Unauthorized`);
+    expect(done?.error).toBe(`POST ${tokenUrl} with <secret>\nAuthorization: Basic <secret>\n{"access_token":"<secret>"}\n401 Unauthorized`);
   });
 
   it("says what to do when this MASTER_KEY can't open the secret", async () => {
@@ -58,7 +60,7 @@ describe("the connection check", () => {
   it("drops its verdict when the client changed while it ran", async () => {
     const tenant = await connectedTenant("Changed meanwhile");
     const done = await runConnectionCheck(db, tenant.id, secrets, async () => {
-      await setConnection(db, { tenantId: tenant.id, clientId: "sb-newer", sealedSecret: secrets.seal("newer"), tokenUrl, updatedBy: null });
+      await setConnection(db, { tenantId: tenant.id, clientId: "sb-newer", sealedSecret: secrets.seal("newer", connectionSecretContext(tenant.id)), tokenUrl, updatedBy: null });
       return ["SALES"];
     });
     expect(done).toMatchObject({ clientId: "sb-newer", status: "checking", spaces: [] });
@@ -66,7 +68,7 @@ describe("the connection check", () => {
   });
 
   it("does nothing for a client removed while queued", async () => {
-    const tenant = await createTenant(db, { accountId, name: "Never connected", host: "https://synthetic.example.com" });
+    const tenant = await createTenant(db, { accountId, name: "Never connected", host: "https://synthetic.eu10.hcs.cloud.sap" });
     expect(await runConnectionCheck(db, tenant.id, secrets, async () => ["SALES"])).toBeUndefined();
     expect(await getConnection(db, tenant.id)).toBeUndefined();
   });

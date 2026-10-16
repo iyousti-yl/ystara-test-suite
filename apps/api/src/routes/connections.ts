@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { deleteConnection, getConnection, getTenant, markConnectionChecking, setConnection, type Db } from "@ystara/db";
-import { JOBS, type ConnectionCheckJobData, type ConnectionState } from "@ystara/shared";
-import type { SecretBox } from "@ystara/shared/secrets";
+import { isTokenUrl, JOBS, TOKEN_URL_HINT, type ConnectionCheckJobData, type ConnectionState } from "@ystara/shared";
+import { connectionSecretContext, type SecretBox } from "@ystara/shared/secrets";
 import { signedIn } from "../auth/access.js";
 import type { JobQueue } from "../server.js";
 
@@ -13,28 +13,17 @@ import type { JobQueue } from "../server.js";
  * Admins ("tenant.connect") enter, change and remove the client; anyone who
  * can scan may ask for another check. The secret is sealed with MASTER_KEY
  * before it is stored and is never sent back, not even to admins: to change
- * it, they enter it again. As with every route, the API never calls
- * Datasphere itself; the worker checks the client (apps/worker/src/jobs/connection-check.ts).
+ * it, they enter it again. It is sealed for this tenant only, so a sealed
+ * secret copied into another tenant's row doesn't open. As with every route,
+ * the API never calls Datasphere itself; the worker checks the client
+ * (apps/worker/src/jobs/connection-check.ts).
  */
-
-/**
- * Datasphere shows the token URL on the client's page in App Integration, on
- * SAP's sign-in service (hana.ondemand.com). Accepting no other host keeps the
- * worker from sending a client's secret anywhere else.
- */
-const TOKEN_HOST = /\.hana\.ondemand\.com$/;
 
 const ConnectionInput = z.object({
   clientId: z.string().trim().min(1).max(200),
   clientSecret: z.string().trim().min(1).max(500),
-  tokenUrl: z
-    .string()
-    .trim()
-    .url()
-    .refine((value) => {
-      const url = URL.canParse(value) ? new URL(value) : undefined; // zod runs this even when .url() failed
-      return url?.protocol === "https:" && TOKEN_HOST.test(url.hostname) && url.pathname.replace(/\/$/, "") === "/oauth/token" && !url.search;
-    }, "Use the token URL from the App Integration page: https://….hana.ondemand.com/oauth/token"),
+  // Only SAP's sign-in service, where App Integration's token URL points, so the secret is sent nowhere else (urls.ts in @ystara/shared).
+  tokenUrl: z.string().trim().refine(isTokenUrl, TOKEN_URL_HINT),
 });
 const id = z.object({ id: z.string().uuid() });
 
@@ -62,7 +51,7 @@ export function connectionRoutes(db: Db, queue: JobQueue, secrets: SecretBox) {
       const connection = await setConnection(db, {
         tenantId: tenant.id,
         clientId: input.clientId,
-        sealedSecret: secrets.seal(input.clientSecret),
+        sealedSecret: secrets.seal(input.clientSecret, connectionSecretContext(tenant.id)),
         tokenUrl: input.tokenUrl.replace(/\/$/, ""),
         updatedBy: signedIn(req).userId,
       });

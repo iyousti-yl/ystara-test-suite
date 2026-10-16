@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { createTenant, getConnectionLogin, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import { JOBS } from "@ystara/shared";
+import { connectionSecretContext } from "@ystara/shared/secrets";
 import { testSecrets, testUser, type TestUser } from "../auth/testing.js";
 import { buildServer } from "../server.js";
 
@@ -33,7 +34,7 @@ const call = (method: "GET" | "PUT" | "POST" | "DELETE", url: string, as: TestUs
 const client = { clientId: "sb-synthetic-client", clientSecret: "synthetic-secret-value", tokenUrl: "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token" };
 
 async function newTenant(name: string) {
-  return (await call("POST", "/tenants", admin, { name, host: "https://synthetic.example.com" })).json() as { id: string };
+  return (await call("POST", "/tenants", admin, { name, host: "https://synthetic.eu10.hcs.cloud.sap" })).json() as { id: string };
 }
 
 describe("a tenant's technical client", () => {
@@ -47,10 +48,11 @@ describe("a tenant's technical client", () => {
     expect(res.json()).toMatchObject({ clientId: client.clientId, tokenUrl: client.tokenUrl, status: "checking", spaces: [] });
     expect(sent).toEqual([{ name: JOBS.connectionCheck, data: { tenantId: tenant.id } }]);
 
-    // Stored sealed, and opened only with MASTER_KEY.
+    // Stored sealed, and opened only with MASTER_KEY, for this tenant.
     const login = (await getConnectionLogin(db, tenant.id))!;
     expect(login.sealedSecret).not.toContain(client.clientSecret);
-    expect(testSecrets.open(login.sealedSecret)).toBe(client.clientSecret);
+    expect(testSecrets.open(login.sealedSecret, connectionSecretContext(tenant.id))).toBe(client.clientSecret);
+    expect(() => testSecrets.open(login.sealedSecret)).toThrow();
 
     for (const as of [admin, developer, viewer]) {
       const read = await call("GET", `/tenants/${tenant.id}/connection`, as);
@@ -93,6 +95,8 @@ describe("a tenant's technical client", () => {
       "https://synthetic.example.com/oauth/token",
       "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/authorize",
       "https://synthetic.authentication.eu10.hana.ondemand.com.example.com/oauth/token",
+      "https://synthetic.cfapps.eu10.hana.ondemand.com/oauth/token", // an app on SAP's cloud platform, not its sign-in service
+      "https://synthetic.authentication.eu10.hana.ondemand.com:8443/oauth/token",
       "not a url",
     ]) {
       expect((await call("PUT", `/tenants/${tenant.id}/connection`, admin, { ...client, tokenUrl })).statusCode, tokenUrl).toBe(400);

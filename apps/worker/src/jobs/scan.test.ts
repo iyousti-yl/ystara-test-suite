@@ -15,7 +15,8 @@ const SPACE: Record<string, Record<string, unknown>> = {
   views: { V_OUT: { definitions: { V_OUT: { kind: "entity", "@DataWarehouse.sqlEditor.query": 'SELECT * FROM "LT_DATA"' } } } },
 };
 
-const access = (source: ObjectSource, more: Partial<TenantAccess> = {}) => async (): Promise<TenantAccess> => ({ source, login: "client", hide: [], ...more });
+const access = (source: ObjectSource, more: Partial<TenantAccess> = {}) => async (): Promise<TenantAccess> => ({ source, login: "client", ...more });
+const client = { clientId: "sb-synthetic", clientSecret: "synthetic-secret" };
 
 const fakeTenant: ObjectSource = {
   async listObjects(_space, kind) {
@@ -38,7 +39,7 @@ afterAll(async () => {
 
 describe("runScan", () => {
   it("reads the spaces and stores the lineage graph", async () => {
-    const tenant = await createTenant(db, { accountId, name: "Fake", host: "https://fake.example.com" });
+    const tenant = await createTenant(db, { accountId, name: "Fake", host: "https://synthetic.eu10.hcs.cloud.sap" });
     const scan = await createScan(db, tenant.id, ["S"]);
     let closed = false;
     const done = await runScan(db, scan.id, access(fakeTenant, { close: async () => void (closed = true) }));
@@ -57,9 +58,9 @@ describe("runScan", () => {
         throw new Error("unreachable");
       },
     };
-    const tenant = await createTenant(db, { accountId, name: "Logged out", host: "https://fake.example.com" });
+    const tenant = await createTenant(db, { accountId, name: "Logged out", host: "https://synthetic.eu10.hcs.cloud.sap" });
 
-    const withClient = await runScan(db, (await createScan(db, tenant.id, ["S"])).id, access(loggedOut, { hide: ["synthetic-secret"] }));
+    const withClient = await runScan(db, (await createScan(db, tenant.id, ["S"])).id, access(loggedOut, { client }));
     expect(withClient?.status).toBe("failed");
     expect(withClient?.error).toMatch(/Nothing could be read.*technical client.*401 Unauthorized/);
     expect(JSON.stringify(withClient)).not.toContain("synthetic-secret");
@@ -67,6 +68,20 @@ describe("runScan", () => {
 
     const onMachine = await runScan(db, (await createScan(db, tenant.id, ["S"])).id, access(loggedOut, { login: "machine" }));
     expect(onMachine?.error).toMatch(/Nothing could be read.*CLI logged in on the machine/);
+  });
+
+  it("hides the secret and tokens in the warnings of a scan that succeeds", async () => {
+    const leaky: ObjectSource = {
+      ...fakeTenant,
+      async readObject(space, kind, name) {
+        if (name === "V_OUT") throw new Error("403 for Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJzeW50aGV0aWMifQ.c2lnbmF0dXJl, secret synthetic-secret");
+        return fakeTenant.readObject(space, kind, name);
+      },
+    };
+    const tenant = await createTenant(db, { accountId, name: "Partly readable", host: "https://synthetic.eu10.hcs.cloud.sap" });
+    const done = await runScan(db, (await createScan(db, tenant.id, ["S"])).id, access(leaky, { client }));
+    expect(done).toMatchObject({ status: "succeeded", objectCount: 2 });
+    expect(done?.warnings).toEqual(["S.V_OUT (views): could not read: 403 for Bearer <secret>, secret <secret>"]);
   });
 
   it("fails with the reason when the tenant can't be reached at all", async () => {

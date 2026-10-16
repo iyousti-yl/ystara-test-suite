@@ -3,7 +3,7 @@
  * (and later the web app) can serve its lineage and pipelines. No tenant calls:
  * the lineage graph is rebuilt from raw.json with the current parser.
  *
- *   npm run db:import -- --from tools/scan/output/<run> --tenant Partner [--host https://<tenant>.hcs.cloud.sap] [--account <name>]
+ *   npm run db:import -- --from tools/scan/output/<run> --tenant Partner [--host https://<tenant>.<region>.hcs.cloud.sap] [--account <name>]
  *
  * The tenant is created in the account if it doesn't exist yet. --account can
  * be left out while the database has one account. Needs the database running
@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { graphFromRaw, type RawObject } from "@ystara/connector";
 import { assertYstaraDatabase, connect, createScan, createTenant, findTenantByName, listAccounts, saveScanResult } from "@ystara/db";
+import { DATASPHERE_URL_HINT, isDatasphereUrl } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 
 loadLocalEnv(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".."));
@@ -22,6 +23,10 @@ loadLocalEnv(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const { values } = parseArgs({ options: { from: { type: "string" }, tenant: { type: "string" }, host: { type: "string" }, account: { type: "string" } } });
 if (!values.from || !values.tenant) {
   console.error("Usage: npm run db:import -- --from <scan folder> --tenant <name> [--host <https URL>] [--account <name>]");
+  process.exit(1);
+}
+if (values.host && !isDatasphereUrl(values.host)) {
+  console.error(`--host is not a Datasphere tenant URL. ${DATASPHERE_URL_HINT}.`);
   process.exit(1);
 }
 

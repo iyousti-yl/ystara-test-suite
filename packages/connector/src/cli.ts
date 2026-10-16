@@ -2,6 +2,7 @@ import { chmod, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { execa } from "execa";
+import { maskSecrets } from "./mask.js";
 import { assertReadOnly, commandPath, type CliObjectKind, type ReadCommand } from "./readonly.js";
 
 /**
@@ -84,10 +85,9 @@ export class DatasphereCli {
     const args = [...command, ...Object.entries(flags).flatMap(([k, v]) => [`--${k}`, v]), "--host", this.opts.host];
     if (this.opts.client) args.push("--secrets-file", await this.secretsFile());
     if (this.opts.verbose) args.push("--verbose");
-    // The CLI keeps its cache and tokens under the home folder: HOME on Linux and macOS, USERPROFILE on Windows.
-    const env = this.opts.configDir ? { HOME: this.opts.configDir, USERPROFILE: this.opts.configDir } : undefined;
-    // No input, so a question from the CLI gets no answer and ends the call at once instead of waiting until the timeout.
-    const { stdout, stderr } = await execa(this.bin, args, { timeout: this.timeoutMs, env, stdin: "ignore" });
+    // Only an allow-listed environment, with the home folders pointing at configDir (cliEnv). No input, so a question from
+    // the CLI gets no answer and ends the call at once instead of waiting until the timeout.
+    const { stdout, stderr } = await execa(this.bin, args, { timeout: this.timeoutMs, extendEnv: false, env: cliEnv(this.opts.configDir), stdin: "ignore" });
     this.checkAnswer(command, stdout, stderr);
     return stdout;
   }
@@ -110,8 +110,7 @@ export class DatasphereCli {
   }
 
   private withoutSecret(text: string): string {
-    const secret = this.opts.client?.clientSecret;
-    return secret ? text.replaceAll(secret, "<secret>") : text;
+    return maskSecrets(text, this.opts.client);
   }
 
   /** Downloads the tenant's list of CLI commands; the object commands only exist after it. Once per configDir. */
@@ -139,7 +138,7 @@ export class DatasphereCli {
   }
 
   async version(): Promise<string> {
-    const { stdout } = await execa(this.bin, ["--version"], { timeout: this.timeoutMs, stdin: "ignore" });
+    const { stdout } = await execa(this.bin, ["--version"], { timeout: this.timeoutMs, extendEnv: false, env: cliEnv(this.opts.configDir), stdin: "ignore" });
     return stdout.trim();
   }
 
@@ -161,7 +160,8 @@ export class DatasphereCli {
 
 /**
  * The CLI ended without an error but didn't give what the command should: it asked a question, or a `list` or `read`
- * printed something other than JSON. `output` is everything it printed, without the client secret.
+ * printed something other than JSON. `output` is everything it printed, with the client secret and anything else that
+ * looks like a credential masked (maskSecrets).
  */
 export class CliOutputError extends Error {
   constructor(
@@ -186,6 +186,30 @@ function clip(text: string): string {
   return text.length > 120 ? `${text.slice(0, 120)}...` : text;
 }
 
+/** What the CLI may see of our environment, matched ignoring case (Windows has "Path"). */
+const CLI_ENV = new Set(["PATH", "PATHEXT", "SYSTEMROOT", "COMSPEC", "WINDIR", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL"]);
+const NETWORK_ENV = new Set(["HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"]);
+const HOME_ENV = new Set(["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"]);
+
+/**
+ * The environment a CLI process starts with: what it needs to run, to reach SAP
+ * through a company proxy, and its home folder, and nothing else. The rest of
+ * ours (MASTER_KEY, DATABASE_URL, everything in .env.local) is none of its
+ * business, and --verbose output or a crash report could print it.
+ * The CLI keeps its cache and tokens under the home folder: HOME on Linux and
+ * macOS, USERPROFILE on Windows. With `configDir`, those and Windows' APPDATA
+ * folders all point there, so nothing of the login lands in a user's folders.
+ */
+export function cliEnv(configDir?: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    const name = key.toUpperCase();
+    if (value !== undefined && (CLI_ENV.has(name) || NETWORK_ENV.has(name) || (!configDir && HOME_ENV.has(name)))) out[key] = value;
+  }
+  if (configDir) for (const name of HOME_ENV) out[name] = configDir;
+  return out;
+}
+
 /** Accepts the shapes seen so far: an array of strings or of objects with technicalName/name. */
 export function parseListing(stdout: string): ListedObject[] {
   const parsed = JSON.parse(stdout) as unknown;
@@ -207,16 +231,19 @@ export function parseListing(stdout: string): ListedObject[] {
 
 /**
  * What a failed CLI call printed, for a person to read: its last lines (or the
- * reason it never ran, e.g. a timeout), with each of `hide` (secrets) masked.
+ * reason it never ran, e.g. a timeout), with the client's secret and anything
+ * else that looks like a credential masked (maskSecrets). When the CLI ended
+ * without an error but didn't answer (CliOutputError), the reason comes first.
  */
-export function describeCliFailure(e: unknown, hide: string[] = [], lines = 10): string {
+export function describeCliFailure(e: unknown, client?: Pick<TechnicalClient, "clientId" | "clientSecret">, lines = 10): string {
+  const last = (text: string, n: number) =>
+    maskSecrets(text, client)
+      .split("\n")
+      .map((l) => l.trimEnd())
+      .filter((l) => l.trim())
+      .slice(-n);
+  if (e instanceof CliOutputError) return [...last(e.message, 1), ...(lines > 1 ? last(e.output, lines - 1) : [])].join("\n");
   const err = e as { stderr?: string; stdout?: string; shortMessage?: string; message?: string };
-  let text = [err.stdout, err.stderr].filter(Boolean).join("\n") || err.shortMessage || err.message || String(e);
-  for (const secret of hide.filter(Boolean)) text = text.replaceAll(secret, "<secret>");
-  return text
-    .split("\n")
-    .map((l) => l.trimEnd())
-    .filter((l) => l.trim())
-    .slice(-lines)
-    .join("\n");
+  const text = [err.stdout, err.stderr].filter(Boolean).join("\n") || err.shortMessage || err.message || String(e);
+  return last(text, lines).join("\n");
 }

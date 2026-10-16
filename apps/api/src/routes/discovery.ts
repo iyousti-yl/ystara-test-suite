@@ -17,7 +17,7 @@ import {
   loadObject,
   type Db,
 } from "@ystara/db";
-import { JOBS, type PipelineResult, type ScanGraph, type ScanJobData } from "@ystara/shared";
+import { DATASPHERE_URL_HINT, isDatasphereUrl, JOBS, type PipelineResult, type ScanGraph, type ScanJobData } from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
 import type { JobQueue } from "../server.js";
 
@@ -42,7 +42,8 @@ const patterns = z.array(z.string().min(1).max(200)).max(50);
 
 const TenantInput = z.object({
   name: z.string().trim().min(1).max(100),
-  host: z.string().url().refine((u) => u.startsWith("https://"), "Use the https:// URL of the Datasphere tenant"),
+  // Only a Datasphere tenant: the worker sends it a token and shows what it answers (urls.ts in @ystara/shared).
+  host: z.string().trim().refine(isDatasphereUrl, DATASPHERE_URL_HINT),
 });
 const ScanInput = z.object({ spaces: z.array(spaceId).min(1).max(20) });
 const PipelineInput = z.object({
