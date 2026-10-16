@@ -1,4 +1,4 @@
-import { refKey, type DspObjectRef, type LineageGraph, type ObjectType, type Pipeline } from "@ystara/shared";
+import { isDataEdge, refKey, type DspObjectRef, type EdgeKind, type LineageGraph, type ObjectType, type Pipeline } from "@ystara/shared";
 
 /**
  * Renders a graph or a pipeline as a Mermaid flowchart. GitHub, VS Code and
@@ -33,6 +33,13 @@ const LABEL: Record<ObjectType, string> = {
   unknown: "unknown type",
 };
 
+const ARROW: Record<EdgeKind, string> = {
+  reads_from: "-->",
+  writes_to: "==>|writes|",
+  triggers: "-.->|runs|",
+  clears: "-.->|clears|",
+};
+
 export function toMermaid(graph: LineageGraph, pipeline?: Pipeline): string {
   const include = new Set((pipeline ? pipeline.steps : graph.nodes).map(refKey));
   const entry = new Set((pipeline?.entryPoints ?? []).map(refKey));
@@ -49,8 +56,8 @@ export function toMermaid(graph: LineageGraph, pipeline?: Pipeline): string {
   }
   for (const e of graph.edges) {
     if (!include.has(refKey(e.from)) || !include.has(refKey(e.to))) continue;
-    if (pipeline && e.kind === "triggers") continue;
-    lines.push(e.kind === "triggers" ? `  ${id(e.from)} -.->|runs| ${id(e.to)}` : e.kind === "writes_to" ? `  ${id(e.from)} ==>|writes| ${id(e.to)}` : `  ${id(e.from)} --> ${id(e.to)}`);
+    if (pipeline && !isDataEdge(e)) continue;
+    lines.push(`  ${id(e.from)} ${ARROW[e.kind]} ${id(e.to)}`);
   }
   if (pipeline) {
     lines.push("  classDef entry stroke-width:3px,stroke:#0a6ed1");

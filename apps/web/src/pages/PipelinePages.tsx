@@ -9,7 +9,7 @@ import { formatDateTime } from "../format";
 import { PipelineView } from "../lineage/PipelineView";
 
 /**
- * Trying a pipeline on one scan: /scans/:scanId/pipeline?output=SPACE.NAME&exclude=PATTERN...
+ * Trying a pipeline on one scan: /scans/:scanId/pipeline?output=SPACE.NAME&excludeWriter=PATTERN...
  * The output and exclusions live in the URL, so a link shows exactly this picture.
  */
 export function PipelineOnScanPage() {

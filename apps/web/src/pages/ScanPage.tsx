@@ -13,7 +13,7 @@ import {
   TableRow,
   Title,
 } from "@ui5/webcomponents-react";
-import { OBJECT_TYPES, refKey, type ScanGraph } from "@ystara/shared";
+import { isDataEdge, OBJECT_TYPES, refKey, type ScanGraph } from "@ystara/shared";
 import { useNavigate, useParams } from "react-router";
 import { pipelineQuery, useScan, useScanGraph, useTenant } from "../api";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
@@ -93,7 +93,7 @@ function ObjectList({ scanId, graph }: { scanId: string; graph: ScanGraph }) {
     const upstream = new Map<string, number>();
     const downstream = new Map<string, number>();
     for (const e of graph.edges) {
-      if (e.kind === "triggers") continue;
+      if (!isDataEdge(e)) continue;
       upstream.set(refKey(e.to), (upstream.get(refKey(e.to)) ?? 0) + 1);
       downstream.set(refKey(e.from), (downstream.get(refKey(e.from)) ?? 0) + 1);
     }

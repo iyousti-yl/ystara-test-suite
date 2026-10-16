@@ -52,6 +52,16 @@ describe("one port for the API and the web app", () => {
     expect(res.headers["cache-control"]).toContain("immutable");
   });
 
+  it("lets the browser load fonts and styles only from Ystara itself", async () => {
+    const csp = (await withWeb.inject({ url: "/", headers: html })).headers["content-security-policy"] as string;
+    const directives = new Map(csp.split(";").map((d) => [d.trim().split(" ")[0], d.trim().split(" ").slice(1)]));
+    expect(directives.get("font-src")).toEqual(["'self'", "data:"]);
+    expect(directives.get("style-src")).toEqual(["'self'", "'unsafe-inline'"]);
+    expect(directives.get("default-src")).toEqual(["'self'"]);
+    expect(csp).not.toContain("https:");
+    expect(directives.has("upgrade-insecure-requests")).toBe(false);
+  });
+
   it("answers unknown API routes with JSON, never with the page", async () => {
     const res = await withWeb.inject({ url: "/api/nope", headers: html });
     expect(res.statusCode).toBe(404);

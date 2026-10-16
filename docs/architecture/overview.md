@@ -56,7 +56,7 @@ _Phase 1 version. Written so one person can maintain the whole system. Update it
 | 12 | Pipelines are stored as an output plus writer exclusions; their steps are computed from the latest successful scan | Steps follow the tenant as it changes, and nothing goes stale | Tests attach to steps (phase 2), which may need stored step lists per scan |
 | 13 | Local settings: app settings and secrets in `.env.local`; `.env` holds only the `YSTARA_*` host ports (Postgres 55432, API 4000) that Compose substitutes. Programs refuse a database without Ystara's migrations | Compose never sees a secret, and no tool silently uses another Postgres on the machine | Hosting (decision 7) brings a secrets store |
 | 14 | One origin: the API serves the web app at `/` and itself under `/api` (Vite forwards `/api` in development). No CORS | No cross-origin calls to secure; one port to publish and, later, to put behind sign-in | The web app needs a CDN or its own host |
-| 15 | The web app loads nothing from third parties: SAP's 72 font is bundled from `@sap-theming/theming-base-content` instead of UI5's default CDN | GDPR (no visitor IPs to a CDN) and works offline | Never |
+| 15 | The web app loads nothing from third parties: SAP's 72 font is bundled from `@sap-theming/theming-base-content` instead of UI5's default CDN, and the API's Content-Security-Policy only allows fonts and styles from Ystara itself | GDPR (no visitor IPs to a CDN) and works offline; the policy blocks a regression instead of letting it leak | Never |
 
 ## Data model
 
@@ -84,7 +84,7 @@ Credentials are encrypted with a master key held only in the worker/API environm
 1. For each space and each object kind, `list` then `read` every object (CLI, read-only, a few in parallel). One unreadable object becomes a warning; the scan carries on.
 2. Classify each object (`views` is split back into SQL and graphical views) and hash its definition so re-scans show what changed.
 3. Find references: walk each definition and match strings, and identifiers inside SQL text with comments removed, against the names of all scanned objects. Role rules: in flows, each step's `component` decides (`...producer`, `...target` write; `...consumer`, `...source` read), keys of a `targets` section are writes, and elsewhere a key path containing "target" means a write; in task chains, references are steps; in tables, views and analytic models, references are reads. A flow reading its own target (delta, lookup) is not a dependency. When a `read` bundles dependency definitions, only the object's own entry is scanned.
-4. Build edges that point the way data moves (`reads_from`, `writes_to`) plus control edges (`triggers`) from task chains.
+4. Build edges that point the way data moves (`reads_from`, `writes_to`) plus control edges from task chains: `triggers` for a step they run, `clears` for a table a step empties (DELETE_DATA).
 5. A **pipeline** for an output object is traced backwards through data edges: what it reads (main chain and side inputs alike), the flow that writes each table, down to tables nothing upstream writes. Task chains are never followed. Writers excluded by configuration are listed, not followed; a table still left with several writers is reported as ambiguous. Steps are topologically sorted and loops are reported, not hidden. **Entry points** are tables with no other table upstream (where fixtures go).
 
 Try it locally: `npm run scan -- --space <SPACE> --output <OBJECT>` writes a Mermaid lineage diagram to `tools/scan/output/`.

@@ -24,7 +24,7 @@ Every page works as a link: the API answers these paths with `index.html` and `s
 ## How it fits together
 
 - `src/api.ts`: every API call, as hooks on TanStack Query (caching, refetching while a scan runs). Response types come from `packages/shared/src/api.ts`, the same types the API sends.
-- `src/lineage/`: the picture. `model.ts` turns a pipeline into nodes and edges with what to mark on them (output, entry table, excluded writer, several writers, loop); `layout.ts` places them left to right; `LineageGraph.tsx` and `ObjectNode.tsx` draw them; `ObjectPanel.tsx` shows the selected object; `PipelineView.tsx` puts it together. The first two are plain functions with tests.
+- `src/lineage/`: the picture. `model.ts` turns a pipeline into nodes and edges with what to mark on them (output, entry table, excluded writer, several writers, loop); `layout.ts` sizes each node to its names and places them left to right; `LineageGraph.tsx` and `ObjectNode.tsx` draw them; `ObjectPanel.tsx` shows the selected object; `PipelineView.tsx` puts it together. The first two are plain functions with tests.
 - `src/objectTypes.ts`: names and colours per object type (theme colours, so dark mode works).
 - `src/theme.ts`, `src/fonts.ts`, `src/locale.ts`, `src/icons.ts`: UI5 setup (light or dark theme, the bundled 72 font and English locale data instead of UI5's CDN downloads). UI5 draws only icons that are imported in `icons.ts`.
 

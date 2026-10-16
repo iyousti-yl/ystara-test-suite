@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DspEdge, DspObjectRef, GraphNode, Pipeline } from "@ystara/shared";
-import { layoutLeftToRight } from "./layout";
+import { layoutLeftToRight, NODE_MAX_WIDTH, NODE_MIN_WIDTH, nodeWidth } from "./layout";
 import { exclusionFor, lineageModel } from "./model";
 
 // Synthetic pipeline: DF_LOAD and DF_OTHER both write LT_DATA (DF_OTHER excluded), V_OUT reads LT_DATA and LT_CONFIG.
@@ -68,11 +68,19 @@ describe("lineage model", () => {
 describe("layout", () => {
   it("puts every object to the right of what it depends on", () => {
     const model = lineageModel(pipeline, graph);
+    const width = (key: string) => (key.endsWith("LT_DATA") ? 400 : 240);
     const at = layoutLeftToRight(
-      model.nodes.map((n) => n.key),
+      model.nodes.map((n) => ({ key: n.key, width: width(n.key) })),
       model.edges.map((e) => [e.from, e.to]),
     );
     expect(at.size).toBe(6);
-    for (const e of model.edges) expect(at.get(e.from)!.x, e.key).toBeLessThan(at.get(e.to)!.x);
+    for (const e of model.edges) expect(at.get(e.from)!.x + width(e.from), e.key).toBeLessThan(at.get(e.to)!.x);
+  });
+
+  it("makes nodes wide enough for the whole technical name", () => {
+    expect(nodeWidth({ type: "SQL view", technicalName: "V_OUT" })).toBe(NODE_MIN_WIDTH);
+    const longest = "X".repeat(50); // Datasphere's limit for technical names
+    expect(nodeWidth({ type: "SQL view", technicalName: longest })).toBeGreaterThanOrEqual(50 * 8 + 28);
+    expect(nodeWidth({ type: "SQL view", technicalName: "V_OUT", businessName: "Long business name ".repeat(10) })).toBe(NODE_MAX_WIDTH);
   });
 });

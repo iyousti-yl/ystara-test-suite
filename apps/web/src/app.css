@@ -172,9 +172,9 @@ section.block > ui5-title {
 
 /* --- Lineage nodes and edges (React Flow) */
 
+/* Width is set per node from its names (nodeWidth in lineage/layout.ts); height is NODE_HEIGHT there. */
 .lineage-node {
   box-sizing: border-box;
-  width: 240px;
   height: 76px;
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--sapGroup_ContentBorderColor);
@@ -202,6 +202,9 @@ section.block > ui5-title {
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .lineage-node-space {
   color: var(--sapContent_LabelColor);
@@ -255,6 +258,27 @@ section.block > ui5-title {
 .react-flow__edge.lineage-edge.is-excluded path.react-flow__edge-path {
   stroke-dasharray: 6 4;
   opacity: 0.6;
+}
+/* The full names of a hovered node, at full size whatever the zoom. */
+.lineage-card {
+  max-width: 32rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--sapGroup_ContentBorderColor);
+  border-radius: 0.5rem;
+  background: var(--sapGroup_ContentBackground);
+  color: var(--sapTextColor);
+  box-shadow: var(--sapContent_Shadow1);
+  pointer-events: none;
+}
+.lineage-card-name {
+  font-family: var(--sapFontFamily_Mono, "72Mono", ui-monospace, monospace);
+  font-size: 0.875rem;
+  font-weight: bold;
+  overflow-wrap: anywhere;
+}
+.lineage-card-business {
+  font-size: 0.8125rem;
+  color: var(--sapContent_LabelColor);
 }
 .lineage-hint {
   color: var(--sapContent_LabelColor);

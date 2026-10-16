@@ -18,7 +18,9 @@ import { FLOW_TYPES, type ObjectType } from "@ystara/shared";
  *     are writes and the keys of a `sources` section are reads.
  *  3. In a flow, any other reference is a write when its key path contains
  *     "target" (e.g. a replication task's `targetObject`) and a read otherwise.
- *  4. In a task chain, every reference is a step it triggers.
+ *  4. In a task chain, every reference is a step it triggers, except in a
+ *     step whose `activity` empties its object (DELETE_DATA on a local
+ *     table): those are tables it clears.
  *  5. In tables, views and analytic models, every reference is a read
  *     (CSN association "target"s point at dimensions, which are reads too).
  *
@@ -33,13 +35,16 @@ import { FLOW_TYPES, type ObjectType } from "@ystara/shared";
  * objects shared from a space that was not scanned are not resolved.
  */
 
-export type RefRole = "source" | "target" | "step";
+export type RefRole = "source" | "target" | "step" | "clear";
 
 export interface ExtractedRef {
   /** Key as it appears in `known` (either "NAME" for the same space or "SPACE.NAME"). */
   name: string;
   role: RefRole;
 }
+
+/** Task chain step activities that empty their object instead of running it. */
+const CLEARING_ACTIVITIES: ReadonlySet<string> = new Set(["DELETE_DATA"]);
 
 const SQL_HINT = /\bselect\b[\s\S]*\bfrom\b/i;
 const IDENTIFIER = /"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)/g;
@@ -53,9 +58,9 @@ export function extractReferences(
   const found = new Map<string, RefRole>();
   const isFlow = FLOW_TYPES.has(selfType);
 
-  /** `stepRole` is the role set by the enclosing flow step's component, if it has a recognised one. */
+  /** `stepRole` is the role set by the enclosing flow step's component or task chain step's activity, if it has a recognised one. */
   const roleFor = (path: readonly string[], stepRole: RefRole | undefined): RefRole => {
-    if (selfType === "task_chain") return "step";
+    if (selfType === "task_chain") return stepRole ?? "step";
     if (!isFlow) return "source";
     if (stepRole) return stepRole;
     return path.some((k) => k.toLowerCase().includes("target")) ? "target" : "source";
@@ -83,7 +88,12 @@ export function extractReferences(
     }
     if (value && typeof value === "object") {
       const obj = value as Record<string, unknown>;
-      const role = isFlow && typeof obj.component === "string" ? (componentRole(obj.component) ?? stepRole) : stepRole;
+      const role =
+        isFlow && typeof obj.component === "string"
+          ? (componentRole(obj.component) ?? stepRole)
+          : selfType === "task_chain" && typeof obj.activity === "string" && CLEARING_ACTIVITIES.has(obj.activity)
+            ? "clear"
+            : stepRole;
       const section = path.at(-1)?.toLowerCase();
       for (const [k, v] of Object.entries(obj)) {
         if (isFlow && section === "targets") add(k, "target");
