@@ -58,6 +58,7 @@ _Phase 1 version. Written so one person can maintain the whole system. Update it
 | 14 | One origin: the API serves the web app at `/` and itself under `/api` (Vite forwards `/api` in development). No CORS | No cross-origin calls to secure; one port to publish and, later, to put behind sign-in | The web app needs a CDN or its own host |
 | 16 | Sign-in is email + password (scrypt) + a mandatory authenticator code (TOTP, RFC 6238); server-side sessions in an HttpOnly, SameSite=Strict cookie; no public sign-up, accounts are created by the operator (`npm run account:create`) and people join by one-time invitation links. Ystara's operator (a flag on the user, set only by `npm run operator:grant`) has a panel across all accounts that shows counts, never tenant data, and makes one-time reset links for a lost password or phone. Every API route checks a permission from `packages/shared/src/roles.ts` and only sees its own account (another account's ids answer 404) | Small, no identity provider to run or pay for, and strong enough for the first customers' security reviews (Issam chose "You create them" and an operator panel besides each account's admin page, "Both", 2026-10-16) | First enterprise customer that needs SSO (decision 8) |
 | 15 | The web app loads nothing from third parties: SAP's 72 font is bundled from `@sap-theming/theming-base-content` instead of UI5's default CDN, and the API's Content-Security-Policy only allows fonts and styles from Ystara itself | GDPR (no visitor IPs to a CDN) and works offline; the policy blocks a regression instead of letting it leak | Never |
+| 17 | The worker logs in to each tenant with a **technical OAuth client** (purpose Technical User) that the customer's admin creates and enters in the Connect wizard. Its secret is sealed with `MASTER_KEY`, never sent back, and opened by the worker for one job at a time in a temporary CLI folder; the token URL must be on SAP's sign-in service | Scans (and later scheduled runs) need nobody present, a person's login expires, and tenants never share a login (Issam chose "Technical client", 2026-10-16) | A customer wants the self-hosted runner (decision 3), or SAP changes how the CLI logs in |
 
 ## Data model
 
@@ -66,7 +67,7 @@ In place (`packages/db/migrations/`):
 - `accounts` (customer organisations) → `memberships` (user, role) → `users` (email, scrypt password hash, encrypted authenticator secret, last code used, operator flag)
 - `invitations` (account, email, role, token hash, expiry, accepted at) and `sessions` (token hash, user, account, verified by code or not, expiry). Only hashes of links and cookies are stored
 - `sign_in_resets` (user, operator who made it, token hash, sealed authenticator secret, expiry, used at): one-time links from the operator panel to choose a new password and authenticator, kept on record
-- `tenants` (account, name unique per account, host). Credentials arrive with the connection wizard.
+- `tenants` (account, name unique per account, host) → `tenant_connections` (the technical OAuth client: client ID, secret encrypted with `MASTER_KEY`, token URL, status checking/connected/failed, the spaces it saw at its last check, who changed it)
 - `scans` (tenant, spaces, source tenant/import, status queued/running/succeeded/failed, counts, warnings, error) → `scan_objects` (space, name, type, CLI kind, definition hash) and `scan_edges` (from, to, kind)
 - `object_definitions` (tenant, hash, definition JSONB): each distinct definition once per tenant
 - `pipelines` (tenant, name, output, writer exclusions)
@@ -74,14 +75,14 @@ In place (`packages/db/migrations/`):
 Planned:
 
 - a space scope on `memberships` (a role limited to some spaces)
-- encrypted OAuth and DB credentials on `tenants`
+- encrypted HANA database credentials for SQL snapshots (phase 2)
 - `pipeline_steps` if tests need stored step lists
 - `snapshots` (object, metrics JSONB, captured at, run id)
 - `scenarios` (pipeline, YAML text, version) → `fixtures`
 - `runs` → `run_steps` → `assertion_results`
 - `alert_channels`, `audit_log`
 
-Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `apps/api/src/auth/secrets.ts`; authenticator secrets now, tenant credentials with the wizard). The key lives alone in the git-ignored file `.master-key`, which Docker Compose passes as a secret to the containers that need it; a hosting platform can set `MASTER_KEY` instead. Rotating the master key re-encrypts rows in a migration.
+Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `packages/shared/src/secrets.ts`: authenticator secrets and tenant client secrets). The key lives alone in the git-ignored file `.master-key`, which Docker Compose passes as a secret to the API and the worker; a hosting platform can set `MASTER_KEY` instead. The API seals a client secret; only the worker opens it, for one job at a time. Rotating the master key re-encrypts rows in a migration.
 
 ## Sign-in and accounts (phase 1d)
 
@@ -91,6 +92,13 @@ Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `apps/api/src/auth/secrets
 4. Admins manage their account on the Users and roles page: invite by email and role, change roles, remove people. An account always keeps one admin. Removing someone ends their sign-in to that account at once.
 5. The web app hides what a role can't do, but only the API enforces it (`config.access` on every route, `apps/api/src/auth/access.ts`).
 6. The operator (`npm run operator:grant`) runs the Operator page: every account and user with counts, creating accounts, inviting an admin to an account that has none left (never to one that still has an admin, so the operator can't make themselves admin of a customer, and never someone already in the account, whose role an invitation can't change), and reset links. A reset link (valid 3 days, one at a time per user, never for an operator) lets someone choose a new password and set up their authenticator again; using it signs out every browser signed in as them. Each link records the operator who made it and when it was used, goes into the log, and shows on the Users and roles page of the person's accounts ("Sign-in reset by Ystara on ..."): every link of the last 30 days, used, open or never used, so a newer link never hides an earlier one. Ystara still sends no email: the operator passes the link on after checking who asks.
+
+## Connecting a tenant (phase 1e)
+
+1. An admin adds a tenant by its Datasphere URL, and the app opens **Connect**. It says what a Datasphere admin does once: create an OAuth client with the purpose Technical User (System › Administration › App Integration), copy its client ID, secret and the token URL, and add its technical user to each space to scan with the least role that can see its objects.
+2. The API stores the client with the secret sealed (`PUT /api/tenants/:id/connection`, admins only), sets it to "checking" and queues a `connection-check` job. It accepts only a token URL on SAP's sign-in service (`*.hana.ondemand.com/oauth/token`), so no secret can be sent elsewhere. The secret is never sent back, not even to admins.
+3. The worker opens the secret, writes it to a secrets file in a new temporary CLI folder (readable by its own user only), downloads the CLI's command list, lists the spaces the client can see, and deletes the folder. It records "connected" with those spaces, or "failed" with the CLI's last lines (secret masked). A verdict for a client that was changed meanwhile is dropped.
+4. Scans of a tenant with a client log in the same way, one temporary folder per job. A tenant without a client is scanned with the CLI login of the machine the worker runs on, for local development.
 
 ## How discovery works (phase 1)
 

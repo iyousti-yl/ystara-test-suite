@@ -47,7 +47,7 @@ export const MASTER_KEY_COMMAND = `node -e "require('fs').writeFileSync('.master
  * Losing the key means every user sets up their authenticator again, and every tenant's client secret is entered again.
  */
 export function masterKeyFromEnv(env: NodeJS.ProcessEnv = process.env): Buffer {
-  const help = `Create one in the repository root with\n  ${MASTER_KEY_COMMAND}\nIt writes .master-key, which git ignores. Keep it secret and keep a copy: losing it means every user sets up their authenticator again.`;
+  const help = `Create one in the repository root with\n  ${MASTER_KEY_COMMAND}\nIt writes .master-key, which git ignores. Keep it secret and keep a copy: losing it means every user sets up their authenticator again, and every tenant's client secret is entered again.`;
   const file = env.MASTER_KEY_FILE?.trim();
   if (file && !existsSync(file)) throw new Error(`MASTER_KEY_FILE names ${file}, which doesn't exist. ${help}`);
   // A BOM appears when an editor on Windows saves the file as "UTF-8 with BOM".

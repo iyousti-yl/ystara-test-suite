@@ -18,8 +18,8 @@ The app only ever calls `/api` on its own origin and loads nothing from other se
 | `/reset/:token` | A reset link from the operator: choose a new password and set up the authenticator app again | `src/pages/ResetPage.tsx` |
 | `/users` | Users and roles (admins): members, roles, open invitations, invite someone | `src/pages/UsersPage.tsx` |
 | `/operator` | The operator panel (operators only): every account and user, create an account, invite a new admin, reset someone's sign-in | `src/pages/OperatorPage.tsx` |
-| `/` | Tenants; add one by its Datasphere URL | `src/pages/TenantsPage.tsx` |
-| `/tenants/:id` | A tenant's scans (refreshed while one runs), "Scan spaces", saved pipelines | `src/pages/TenantPage.tsx` |
+| `/` | Tenants; add one by its Datasphere URL, then its page opens Connect | `src/pages/TenantsPage.tsx` |
+| `/tenants/:id` | A tenant's connection (its technical client: Connect, Change client, Check again, Remove; `?connect=1` opens Connect), its scans (refreshed while one runs), "Scan spaces" (picks from the spaces the client sees), saved pipelines | `src/pages/TenantPage.tsx`, `src/pages/TenantConnection.tsx` |
 | `/scans/:id` | A scan's status and warnings, and its objects; likely outputs first | `src/pages/ScanPage.tsx` |
 | `/scans/:id/pipeline?output=SPACE.NAME&excludeWriter=...` | The pipeline behind one object on that scan; exclude writers, save it | `src/pages/PipelinePages.tsx` |
 | `/pipelines/:id` | A saved pipeline, on the tenant's latest successful scan | `src/pages/PipelinePages.tsx` |

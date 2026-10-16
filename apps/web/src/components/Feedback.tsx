@@ -1,5 +1,5 @@
 import { BusyIndicator, MessageStrip, Tag } from "@ui5/webcomponents-react";
-import type { ScanJson } from "../api";
+import type { ConnectionJson, ScanJson } from "../api";
 
 /** A failed request, in the API's own words. */
 export function ErrorStrip({ error }: { error: Error | null | undefined }) {
@@ -24,5 +24,16 @@ const SCAN_STATUS = {
 
 export function ScanStatusTag({ status }: { status: ScanJson["status"] }) {
   const s = SCAN_STATUS[status];
+  return <Tag design={s.design}>{s.label}</Tag>;
+}
+
+const CONNECTION_STATUS = {
+  checking: { design: "Information", label: "Checking" },
+  connected: { design: "Positive", label: "Connected" },
+  failed: { design: "Negative", label: "Not connected" },
+} as const;
+
+export function ConnectionStatusTag({ status }: { status: ConnectionJson["status"] }) {
+  const s = CONNECTION_STATUS[status];
   return <Tag design={s.design}>{s.label}</Tag>;
 }

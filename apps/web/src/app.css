@@ -100,6 +100,29 @@ section.block > ui5-title {
   border-radius: 50%;
   margin-right: 0.4rem;
 }
+/* --- Tenant page: connection and scans */
+.connection-row {
+  margin: 0.5rem 0;
+}
+.full-width {
+  width: 100%;
+}
+.steps-to-do {
+  margin: 0 0 0.5rem;
+  padding-left: 1.25rem;
+}
+.steps-to-do li + li {
+  margin-top: 0.25rem;
+}
+.cli-output {
+  margin: 0.5rem 0 0;
+  max-height: 10rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--sapFontFamily_Mono, "72Mono", ui-monospace, monospace);
+  font-size: var(--sapFontSmallSize);
+}
 .warnings {
   margin: 0.25rem 0 0;
   padding-left: 1.25rem;

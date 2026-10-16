@@ -34,7 +34,7 @@ const ConnectionInput = z.object({
     .refine((value) => {
       const url = URL.canParse(value) ? new URL(value) : undefined; // zod runs this even when .url() failed
       return url?.protocol === "https:" && TOKEN_HOST.test(url.hostname) && url.pathname.replace(/\/$/, "") === "/oauth/token" && !url.search;
-    }, "Use the token URL shown with the client in App Integration: https://….hana.ondemand.com/oauth/token"),
+    }, "Use the token URL from the App Integration page: https://….hana.ondemand.com/oauth/token"),
 });
 const id = z.object({ id: z.string().uuid() });
 

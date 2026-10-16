@@ -1,20 +1,42 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Title } from "@ui5/webcomponents-react";
-import { useNavigate, useParams } from "react-router";
-import { useCan, usePipelines, useScans, useStartScan, useTenant } from "../api";
+import {
+  Button,
+  Dialog,
+  Input,
+  Label,
+  MessageStrip,
+  MultiComboBox,
+  MultiComboBoxItem,
+  Table,
+  TableCell,
+  TableHeaderCell,
+  TableHeaderRow,
+  TableRow,
+  Title,
+} from "@ui5/webcomponents-react";
+import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useCan, useConnection, usePipelines, useScans, useStartScan, useTenant, type ConnectionJson } from "../api";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
+import { ConnectionSection } from "./TenantConnection";
 
-/** One tenant: its scans (newest first, refreshed while one runs) and its saved pipelines. */
+/**
+ * One tenant: how the worker logs in to it, its scans (newest first, refreshed
+ * while one runs) and its saved pipelines. `?connect=1` (after adding a
+ * tenant) opens the Connect wizard.
+ */
 export function TenantPage() {
   const { tenantId = "" } = useParams();
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const can = useCan();
   const tenant = useTenant(tenantId);
   const scans = useScans(tenantId);
   const pipelines = usePipelines(tenantId);
   const [scanning, setScanning] = useState(false);
+  const connecting = params.get("connect") === "1" && can("tenant.connect");
+  const setConnecting = (open: boolean) => setParams(open ? { connect: "1" } : {}, { replace: true });
 
   if (tenant.isPending) return <Loading />;
   if (!tenant.data) return <ErrorStrip error={tenant.error} />;
@@ -33,6 +55,8 @@ export function TenantPage() {
           )
         }
       />
+
+      {tenant.data.host && <ConnectionSection tenant={tenant.data} connecting={connecting} onConnecting={setConnecting} />}
 
       <section className="block">
         <Title level="H4">Scans</Title>
@@ -105,10 +129,17 @@ export function TenantPage() {
 /** Space IDs, separated by commas or spaces, as the API expects them. */
 export const parseSpaces = (text: string) => [...new Set(text.split(/[\s,;]+/).filter(Boolean).map((s) => s.toUpperCase()))];
 
+/**
+ * Picks the spaces to scan: from the spaces the technical client saw at its
+ * last check, or typed in when the tenant has none (the machine's own CLI login).
+ */
 function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => void }) {
   const start = useStartScan(tenantId);
+  const connection = useConnection(tenantId).data ?? null;
+  const visible = connection?.spaces ?? [];
   const [text, setText] = useState("");
-  const spaces = parseSpaces(text);
+  const [picked, setPicked] = useState<string[]>([]);
+  const spaces = visible.length ? picked : parseSpaces(text);
 
   return (
     <Dialog
@@ -128,15 +159,36 @@ function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => vo
     >
       <div className="dialog-body">
         <Label for="spaces" required>
-          Space IDs
+          {visible.length ? "Spaces" : "Space IDs"}
         </Label>
-        <Input id="spaces" value={text} onInput={(e) => setText(e.target.value)} placeholder="HR, SHARED" />
-        <MessageStrip design="Information" hideCloseButton>
-          Read-only: the worker lists and reads object definitions with the Datasphere CLI, nothing else. It needs a CLI login on the machine
-          it runs on (`datasphere login`, then `npm run dev:worker`). Scan the spaces of one pipeline together to see links between spaces.
+        {visible.length ? (
+          <MultiComboBox
+            id="spaces"
+            className="full-width"
+            placeholder="Choose the spaces of one pipeline"
+            onSelectionChange={(e) => setPicked(e.detail.items.map((item) => item.text ?? "").filter(Boolean))}
+          >
+            {visible.map((space) => (
+              <MultiComboBoxItem key={space} text={space} selected={picked.includes(space)} />
+            ))}
+          </MultiComboBox>
+        ) : (
+          <Input id="spaces" className="full-width" value={text} onInput={(e) => setText(e.target.value)} placeholder="HR, SHARED" />
+        )}
+        <MessageStrip design={connection?.status === "failed" ? "Critical" : "Information"} hideCloseButton>
+          {scanLogin(connection)} Scan the spaces of one pipeline together to see the links between them.
         </MessageStrip>
         <ErrorStrip error={start.error} />
       </div>
     </Dialog>
   );
+}
+
+function scanLogin(connection: ConnectionJson | null): string {
+  const readOnly = "Read-only: the worker lists and reads object definitions, nothing else.";
+  if (!connection) {
+    return `${readOnly} This tenant has no technical client, so the worker uses the Datasphere CLI login of the machine it runs on (datasphere login, then npm run dev:worker).`;
+  }
+  if (connection.status === "failed") return `${readOnly} The technical client's last check failed, so this scan will probably fail too.`;
+  return `${readOnly} It logs in with the tenant's technical client.`;
 }

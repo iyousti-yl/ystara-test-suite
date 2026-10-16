@@ -6,7 +6,7 @@ import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
 
-/** Home: every tenant, and adding one by its Datasphere URL. */
+/** Home: every tenant, and adding one by its Datasphere URL (then its page opens the Connect wizard). */
 export function TenantsPage() {
   const tenants = useTenants();
   const can = useCan();
@@ -50,7 +50,7 @@ export function TenantsPage() {
           ))}
         </Table>
       )}
-      {adding && <AddTenantDialog onClose={() => setAdding(false)} onAdded={(id) => navigate(`/tenants/${id}`)} />}
+      {adding && <AddTenantDialog onClose={() => setAdding(false)} onAdded={(id) => navigate(`/tenants/${id}?connect=1`)} />}
     </div>
   );
 }

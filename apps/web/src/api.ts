@@ -3,6 +3,7 @@ import type {
   Account,
   AccountOverview,
   AuthenticatorSetup,
+  ConnectionState,
   CreatedInvitation,
   CreatedReset,
   InvitationOffer,
@@ -19,6 +20,7 @@ import type {
   ScanGraph,
   Team,
   Tenant,
+  TenantConnection,
   UserOverview,
 } from "@ystara/shared";
 
@@ -39,6 +41,7 @@ export type TenantJson = Json<Tenant>;
 export type ScanJson = Json<Scan>;
 export type PipelineDefinitionJson = Json<PipelineDefinition>;
 export type TeamJson = Json<Team>;
+export type ConnectionJson = Json<TenantConnection>;
 
 export class ApiError extends Error {
   constructor(
@@ -53,7 +56,7 @@ export class ApiError extends Error {
 
 export const isUnauthorized = (e: unknown) => e instanceof ApiError && e.status === 401;
 
-async function request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
+async function request<T>(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
     headers: body === undefined ? {} : { "content-type": "application/json" },
@@ -207,6 +210,28 @@ export function useCreateTenant() {
     onSuccess: () => client.invalidateQueries({ queryKey: ["tenants"] }),
   });
 }
+
+// --- A tenant's technical client
+
+/** Refetches every few seconds while the worker checks the client. */
+export const useConnection = (tenantId: string) =>
+  useQuery({
+    queryKey: ["tenants", tenantId, "connection"],
+    queryFn: async () => (await request<Json<ConnectionState>>("GET", `/tenants/${tenantId}/connection`)).connection,
+    refetchInterval: (q) => pollWhile(q.state.data?.status === "checking"),
+  });
+
+function useConnectionChange<I, O>(tenantId: string, mutationFn: (input: I) => Promise<O>) {
+  const client = useQueryClient();
+  return useMutation({ mutationFn, onSettled: () => client.invalidateQueries({ queryKey: ["tenants", tenantId, "connection"] }) });
+}
+
+export const useConnect = (tenantId: string) =>
+  useConnectionChange(tenantId, (input: { clientId: string; clientSecret: string; tokenUrl: string }) =>
+    request<ConnectionJson>("PUT", `/tenants/${tenantId}/connection`, input),
+  );
+export const useCheckConnection = (tenantId: string) => useConnectionChange(tenantId, () => request<ConnectionJson>("POST", `/tenants/${tenantId}/connection/check`));
+export const useDisconnect = (tenantId: string) => useConnectionChange(tenantId, () => request<void>("DELETE", `/tenants/${tenantId}/connection`));
 
 // --- Scans
 
