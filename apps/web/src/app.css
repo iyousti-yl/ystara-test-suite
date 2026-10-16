@@ -379,10 +379,9 @@ section.block > ui5-title {
 
 /* --- Users and roles */
 
+/* The top bar draws the divider before it. */
 .shell-account {
   color: var(--sapShell_InteractiveTextColor);
-  border-left: 1px solid var(--sapShell_BorderColor);
-  padding-left: 0.75rem;
 }
 .you {
   margin-left: 0.25rem;
