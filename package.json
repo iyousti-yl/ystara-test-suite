@@ -17,6 +17,7 @@
     "dev:worker": "npm run dev -w @ystara/worker",
     "dev:web": "tsc -b && npm run dev -w @ystara/web",
     "spike:cli": "tsc -b && node tools/spike/cli-capabilities.mjs",
+    "spike:technical-client": "tsc -b && tsx tools/spike/technical-client.ts",
     "scan": "tsc -b && tsx tools/scan/scan.ts",
     "db:migrate": "tsc -b && node packages/db/dist/run-migrations.js",
     "db:import": "tsc -b && tsx tools/db/import-scan.ts"

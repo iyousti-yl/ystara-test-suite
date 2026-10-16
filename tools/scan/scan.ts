@@ -6,7 +6,8 @@
  * object. Nothing in the tenant is created, changed or deleted: the connector
  * only allows `list` and `read` commands.
  *
- * Usage (after `datasphere login` and with DSP_HOST in .env.local):
+ * Usage (with DSP_HOST in .env.local, after `datasphere login`, or with a
+ * technical OAuth client in DSP_CLIENT_ID, DSP_CLIENT_SECRET and DSP_TOKEN_URL):
  *   npm run scan -- --space HR
  *   npm run scan -- --space HR --space SHARED --output V_HEADCOUNT_OUT
  *   npm run scan -- --from tools/scan/output/<run> --output V_HEADCOUNT_OUT   (replay a saved scan, no tenant needed)
@@ -28,7 +29,8 @@
  *   pipeline.json   steps, entry points, excluded and ambiguous writers, cycles (with --output)
  */
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -65,13 +67,22 @@ if (values.from) {
     console.error("Need DSP_HOST in .env.local and at least one --space (or DSP_SPACE).");
     process.exit(1);
   }
-  const cli = new DatasphereCli({ host, bin: process.env.DSP_CLI_BIN });
-  console.log(`Scanning ${spaces.join(", ")} on ${host} (read-only)`);
+  // A technical OAuth client in .env.local logs in with nobody present, in a temporary CLI folder; otherwise your own `datasphere login`.
+  const { DSP_CLIENT_ID: clientId, DSP_CLIENT_SECRET: clientSecret, DSP_TOKEN_URL: tokenUrl } = process.env;
+  const client = clientId && clientSecret && tokenUrl ? { clientId, clientSecret, tokenUrl } : undefined;
+  const configDir = client ? await mkdtemp(path.join(tmpdir(), "ystara-scan-")) : undefined;
+  const cli = new DatasphereCli({ host, bin: process.env.DSP_CLI_BIN, client, configDir });
+  console.log(`Scanning ${spaces.join(", ")} on ${host} (read-only, ${client ? `technical client ${clientId}` : "your datasphere login"})`);
   const started = Date.now();
-  ({ raw, warnings } = await readSpaces(cli, spaces, {
-    concurrency: Number(values.concurrency ?? 4),
-    onProgress: (done, total, current) => process.stderr.write(`\r  read ${done}/${total} ${current.padEnd(60).slice(0, 60)}`),
-  }));
+  try {
+    if (client) await cli.initCache();
+    ({ raw, warnings } = await readSpaces(cli, spaces, {
+      concurrency: Number(values.concurrency ?? 4),
+      onProgress: (done, total, current) => process.stderr.write(`\r  read ${done}/${total} ${current.padEnd(60).slice(0, 60)}`),
+    }));
+  } finally {
+    if (configDir) await rm(configDir, { recursive: true, force: true });
+  }
   process.stderr.write("\n");
   console.log(`Read ${raw.length} objects in ${((Date.now() - started) / 1000).toFixed(1)} s`);
 }

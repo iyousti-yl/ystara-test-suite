@@ -47,7 +47,7 @@ _Phase 1 version. Written so one person can maintain the whole system. Update it
 | 3 | Connector behind an interface | Lets us ship a self-hosted runner later without touching api/worker | A security team asks for the runner |
 | 4 | Metadata, hashes and aggregates only; no raw rows by default | Security reviews and GDPR (HR data at the first client) | A customer opts in to store N differing rows |
 | 5 | Scenario spec is YAML validated by Zod; visual builder emits the same YAML | One artefact for devs and non-devs; Git-friendly | Never |
-| 6 | **Strictly read-only.** The connector allows only CLI `list`/`read` (enforced in `packages/connector/src/readonly.ts`) and SQL `SELECT` | Product promise to customers and Issam's requirement (2026-10-15); easiest possible security review | Never without an explicit product decision |
+| 6 | **Strictly read-only.** The connector allows only CLI `list`/`read`, plus `config cache init` which only downloads the CLI's command list (enforced in `packages/connector/src/readonly.ts`), and SQL `SELECT` | Product promise to customers and Issam's requirement (2026-10-15); easiest possible security review | Never without an explicit product decision |
 | 7 | Hosted in the EU (Hetzner or Scaleway), Docker Compose, Caddy | Budget under €200/month, GDPR | Beyond ~30 tenants, move to managed Postgres and two VMs |
 | 8 | Email + TOTP auth in v1, SSO in v2 | Keep v1 small; SSO is a known enterprise ask | First enterprise procurement |
 | 9 | Scenario tests are **read-only simulations**: fixture rows are inlined into a single `SELECT` that reproduces the pipeline's SQL logic | Keeps decision 6 for scenarios too (chosen by Issam, 2026-10-15) | Customers ask for coverage of flow types that can't be expressed as SQL |

@@ -8,6 +8,10 @@ describe("read-only guard", () => {
     expect(() => assertReadOnly(["spaces", "list"])).not.toThrow();
   });
 
+  it("allows filling the CLI's local command cache, which changes nothing in the tenant", () => {
+    expect(() => assertReadOnly(["config", "cache", "init"])).not.toThrow();
+  });
+
   it.each([
     [["objects", "views", "create"]],
     [["objects", "local-tables", "delete"]],
@@ -16,6 +20,11 @@ describe("read-only guard", () => {
     [["spaces", "create"]],
     [["objects", "not-a-kind", "read"]],
     [["objects", "views", "read", "extra"]],
+    [["config", "secrets", "show"]],
+    [["config", "cache", "clean"]],
+    [["config", "cache"]],
+    [["login"]],
+    [["logout"]],
     [[]],
   ])("blocks %j", (path) => {
     expect(() => assertReadOnly(path)).toThrow(WriteAttemptError);
