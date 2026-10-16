@@ -224,7 +224,7 @@ function InviteDialog({ onClose }: { onClose: () => void }) {
           <Label for="invite-email" required>
             Email
           </Label>
-          <Input id="invite-email" type="Email" value={email} onInput={(e) => setEmail(e.target.value)} placeholder="name@company.com" />
+          <Input id="invite-email" type="Email" value={email} onInput={(e) => setEmail(e.target.value)} placeholder="name@example.com" />
           <Label for="invite-role" required>
             Role
           </Label>
