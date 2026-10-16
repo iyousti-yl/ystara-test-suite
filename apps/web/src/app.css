@@ -259,9 +259,12 @@ section.block > ui5-title {
   stroke-dasharray: 6 4;
   opacity: 0.6;
 }
-/* The full names of a hovered node, at full size whatever the zoom. */
+/* The full names of a hovered node, at full size whatever the zoom; placed by HoverCard in LineageGraph.tsx. */
 .lineage-card {
-  max-width: 32rem;
+  position: absolute;
+  z-index: 10;
+  max-width: min(32rem, calc(100% - 1rem));
+  box-sizing: border-box;
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--sapGroup_ContentBorderColor);
   border-radius: 0.5rem;
