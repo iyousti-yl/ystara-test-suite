@@ -24,8 +24,8 @@ export interface Hit extends Line {
   source: string;
 }
 
-/** Files that must never be committed: .env and .env.* (except .env.example), *.local.md and *.local.json, scan and check output. */
-export const NEVER_COMMIT = [/(^|\/)\.env$/, /(^|\/)\.env\.(?!example$)[^/]+$/, /\.local\.(md|json)$/, /^tools\/(scan|spike|check)\/output\//];
+/** Files that must never be committed: .env and .env.* (except .env.example), .master-key, *.local.md and *.local.json, scan and check output. */
+export const NEVER_COMMIT = [/(^|\/)\.env$/, /(^|\/)\.env\.(?!example$)[^/]+$/, /(^|\/)\.master-key$/, /\.local\.(md|json)$/, /^tools\/(scan|spike|check)\/output\//];
 
 /** `relativePath` is relative to the repository, with "/" between folders. */
 export function mustNeverCommit(relativePath: string): boolean {
@@ -34,7 +34,7 @@ export function mustNeverCommit(relativePath: string): boolean {
 
 /**
  * True when `--file <file>` must not be read: a file that must never be
- * committed, any .env* file or any *.local.* file. The check prints the lines
+ * committed (.master-key included), any .env* file or any *.local.* file. The check prints the lines
  * that match, so it would otherwise be a way around the rule that these files
  * are never read. Decided on the name alone, before anything is read.
  * `cwd` is the folder `file` is relative to, `root` the repository.

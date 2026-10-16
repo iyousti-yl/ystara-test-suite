@@ -8,7 +8,8 @@ background: false
 allowed-tools:
   - Bash(npm run scan *)
   - Bash(datasphere --version)
-  - Bash(grep -c *)
+  - Bash(grep -c '^DSP_SPACE=.' .env.local)
+  - Bash(grep -c '^DSP_HOST=.' .env.local)
   - Read
   - Grep
   - Glob

@@ -18,6 +18,8 @@ describe("refusedFile", () => {
     expect(refused(".claude/tenant-conventions.local.md")).toBe(true);
     expect(refused("tools/scan/scan.local.json")).toBe(true);
     expect(refused("notes.local.txt")).toBe(true);
+    expect(refused(".master-key")).toBe(true);
+    expect(refused("./.Master-Key")).toBe(true);
   });
 
   it("refuses scan and check output, and .env files outside the repository", () => {
