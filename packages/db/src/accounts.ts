@@ -80,24 +80,35 @@ export async function useTotpStep(db: Queryable, userId: string, step: number): 
 }
 
 /**
- * Counts a wrong authenticator code for a user, whichever session it came
- * from, so signing in with the password again doesn't start the count over.
- * From the `lockAfter`th wrong code in a row, codes are locked for 1 minute,
- * then 2, 4, ... up to `maxMinutes`. Returns the count and the lock, if any.
+ * Claims one code attempt for a user before the code is checked, whichever
+ * session it comes from, so signing in with the password again doesn't start
+ * the count over. The claim and the lock check are one statement, so
+ * simultaneous requests can't check more codes than the rule allows: from the
+ * `lockAfter`th attempt in a row, codes are locked for 1 minute, then 2, 4,
+ * ... up to `maxMinutes`. A right code forgets the attempts (useTotpStep).
+ * Returns whether this attempt may check a code, and the lock this attempt
+ * set or found.
  */
-export async function recordFailedCode(
+export async function claimCodeAttempt(
   db: Queryable,
   userId: string,
   rule: { lockAfter: number; maxMinutes: number },
-): Promise<{ failedCodes: number; lockedUntil: Date | null }> {
-  const { rows } = await db.query<{ failed_codes: number; codes_locked_until: Date | null }>(
-    `update users set failed_codes = failed_codes + 1,
-       codes_locked_until = case when failed_codes + 1 >= $2
-         then now() + make_interval(mins => least(power(2, least(failed_codes + 1 - $2, 10))::int, $3)) end
-     where id = $1 returning failed_codes, codes_locked_until`,
+): Promise<{ allowed: boolean; lockedUntil: Date | null }> {
+  const { rows } = await db.query<{ claimed: boolean; codes_locked_until: Date | null }>(
+    `with claimed as (
+       update users set failed_codes = failed_codes + 1,
+         codes_locked_until = case when failed_codes + 1 >= $2
+           then now() + make_interval(mins => least(power(2, least(failed_codes + 1 - $2, 10))::int, $3)) end
+       where id = $1 and (codes_locked_until is null or codes_locked_until <= now())
+       returning codes_locked_until
+     )
+     select true as claimed, codes_locked_until from claimed
+     union all
+     select false, codes_locked_until from users where id = $1 and not exists (select 1 from claimed)`,
     [userId, rule.lockAfter, rule.maxMinutes],
   );
-  return { failedCodes: rows[0]?.failed_codes ?? 0, lockedUntil: rows[0]?.codes_locked_until ?? null };
+  const row = rows[0];
+  return { allowed: row?.claimed ?? false, lockedUntil: row?.codes_locked_until ?? null };
 }
 
 // --- Memberships

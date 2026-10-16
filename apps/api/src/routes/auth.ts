@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
   acceptInvitation,
+  claimCodeAttempt,
   createSession,
   deleteSession,
   findOpenInvitation,
@@ -11,7 +12,6 @@ import {
   getUser,
   invitationTotpSecret,
   membershipsOf,
-  recordFailedCode,
   setInvitationTotpSecret,
   switchSessionAccount,
   useTotpStep,
@@ -104,12 +104,14 @@ export function authRoutes(db: Db, secrets: SecretBox) {
       const pending = req.pending!;
       const user = await getUser(db, pending.userId);
       if (!user) return reply.code(401).send({ error: "Sign in with your password again.", restart: true });
-      // While locked, no code is even checked, so guessing gains nothing.
-      if (user.codesLockedUntil && user.codesLockedUntil > new Date()) return tooManyCodes(req, reply, user.codesLockedUntil);
-      const step = matchTotp(secrets.open(user.totpSecret), Code.parse(req.body).code);
+      const { code } = Code.parse(req.body);
+      // Each attempt is counted before its code is checked, in one statement with the lock check, so requests sent at
+      // the same moment can't check more codes than CODE_LOCK allows. While locked, no code is even checked.
+      const attempt = await claimCodeAttempt(db, user.id, CODE_LOCK);
+      if (!attempt.allowed) return tooManyCodes(req, reply, attempt.lockedUntil ?? new Date());
+      const step = matchTotp(secrets.open(user.totpSecret), code);
       if (step === undefined || !(await useTotpStep(db, user.id, step))) {
-        const { lockedUntil } = await recordFailedCode(db, user.id, CODE_LOCK);
-        if (lockedUntil) return tooManyCodes(req, reply, lockedUntil);
+        if (attempt.lockedUntil) return tooManyCodes(req, reply, attempt.lockedUntil);
         return reply.code(401).send({ error: "That code is not right, or was already used. Try the next one your app shows." });
       }
       const token = await startSession(req, reply, { userId: user.id, accountId: pending.accountId, verified: true });

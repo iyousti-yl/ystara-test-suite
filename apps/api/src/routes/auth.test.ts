@@ -100,6 +100,15 @@ describe("signing in", () => {
     expect(rows[0].failed_codes).toBe(0);
   });
 
+  it("checks no more than five codes when many are sent at once", async () => {
+    const user = await testUser(db, { account: "Sign-in", email: "at.once@example.com", role: "viewer" });
+    const pending = sessionCookie(await call("POST", "/auth/login", { payload: { email: "at.once@example.com", password: TEST_PASSWORD } }));
+    const answers = await Promise.all(Array.from({ length: 9 }, () => call("POST", "/auth/code", { cookie: pending.header, payload: { code: "000000" } })));
+    expect(answers.filter((a) => a.statusCode === 401 && /not right/.test(a.json().error))).toHaveLength(4);
+    const { rows } = await db.query<{ failed_codes: number }>("select failed_codes from users where id = $1", [user.userId]);
+    expect(rows[0].failed_codes).toBe(5);
+  });
+
   it("ends with signing out", async () => {
     const user = await testUser(db, { account: "Sign-in", email: "leaves@example.com", role: "viewer" });
     expect((await call("GET", "/auth/me", { cookie: user.cookie })).statusCode).toBe(200);

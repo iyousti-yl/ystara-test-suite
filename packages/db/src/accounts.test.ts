@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   acceptInvitation,
   changeMember,
+  claimCodeAttempt,
   createAccount,
   createInvitation,
   createSession,
@@ -17,7 +18,6 @@ import {
   listInvitations,
   listMembers,
   membershipsOf,
-  recordFailedCode,
   setInvitationTotpSecret,
   switchSessionAccount,
   useTotpStep,
@@ -172,21 +172,38 @@ describe("authenticator codes", () => {
   const rule = { lockAfter: 3, maxMinutes: 60 };
   const minutesFromNow = (d: Date | null) => d && Math.round((d.getTime() - Date.now()) / 60_000);
 
-  it("count wrong codes per user, lock with a growing wait, and forget them after a right one", async () => {
+  it("count attempts per user, lock with a growing wait, and forget them after a right code", async () => {
     const { adminId } = await accountWithAdmin("Wrong codes", "codes@example.com");
-    expect(await recordFailedCode(db, adminId, rule)).toEqual({ failedCodes: 1, lockedUntil: null });
-    expect((await recordFailedCode(db, adminId, rule)).lockedUntil).toBeNull();
-    expect(minutesFromNow((await recordFailedCode(db, adminId, rule)).lockedUntil)).toBe(1);
-    expect(minutesFromNow((await recordFailedCode(db, adminId, rule)).lockedUntil)).toBe(2);
-    expect(minutesFromNow((await recordFailedCode(db, adminId, rule)).lockedUntil)).toBe(4);
-    expect((await getUser(db, adminId))?.codesLockedUntil).not.toBeNull();
+    const claim = () => claimCodeAttempt(db, adminId, rule);
+    const unlock = () => db.query("update users set codes_locked_until = now() - interval '1 second' where id = $1", [adminId]);
+    expect(await claim()).toEqual({ allowed: true, lockedUntil: null });
+    expect(await claim()).toEqual({ allowed: true, lockedUntil: null });
+    // The third attempt may still check its code, and locks the next ones.
+    const third = await claim();
+    expect(third.allowed).toBe(true);
+    expect(minutesFromNow(third.lockedUntil)).toBe(1);
+    const refused = await claim();
+    expect(refused).toEqual({ allowed: false, lockedUntil: third.lockedUntil });
+    expect((await db.query<{ failed_codes: number }>("select failed_codes from users where id = $1", [adminId])).rows[0].failed_codes).toBe(3);
 
-    await db.query("update users set failed_codes = 500 where id = $1", [adminId]);
-    expect(minutesFromNow((await recordFailedCode(db, adminId, rule)).lockedUntil)).toBe(60); // capped, never overflows
+    await unlock();
+    expect(minutesFromNow((await claim()).lockedUntil)).toBe(2);
+    await unlock();
+    expect(minutesFromNow((await claim()).lockedUntil)).toBe(4);
+
+    await db.query("update users set failed_codes = 500, codes_locked_until = null where id = $1", [adminId]);
+    expect(minutesFromNow((await claim()).lockedUntil)).toBe(60); // capped, never overflows
 
     expect(await useTotpStep(db, adminId, 5000)).toBe(true);
     expect((await getUser(db, adminId))?.codesLockedUntil).toBeNull();
-    expect(await recordFailedCode(db, adminId, rule)).toEqual({ failedCodes: 1, lockedUntil: null });
+    expect(await claim()).toEqual({ allowed: true, lockedUntil: null });
+    expect(await claimCodeAttempt(db, "00000000-0000-4000-8000-000000000000", rule)).toEqual({ allowed: false, lockedUntil: null });
+  });
+
+  it("can't be claimed more often than the rule allows, even all at once", async () => {
+    const { adminId } = await accountWithAdmin("Codes at once", "at.once@example.com");
+    const claims = await Promise.all(Array.from({ length: 10 }, () => claimCodeAttempt(db, adminId, rule)));
+    expect(claims.filter((c) => c.allowed)).toHaveLength(3);
   });
 
   it("work once each: a used code, or an older one, is refused", async () => {
