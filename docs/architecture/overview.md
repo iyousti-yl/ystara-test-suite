@@ -94,7 +94,7 @@ Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `apps/api/src/auth/secrets
 
 ## How discovery works (phase 1)
 
-1. For each space and each object kind, `list` then `read` every object (CLI, read-only, a few in parallel). One unreadable object becomes a warning; the scan carries on.
+1. For each space and each object kind, `list` then `read` every object (CLI, read-only, a few in parallel). One unreadable object becomes a warning; the scan carries on. Spaces are given by their IDs: Ystara never lists the tenant's spaces, because `spaces list` and `spaces read` need a tenant-wide privilege that its technical client shouldn't have.
 2. Classify each object (`views` is split back into SQL and graphical views) and hash its definition so re-scans show what changed.
 3. Find references: walk each definition and match strings, and identifiers inside SQL text with comments removed, against the names of all scanned objects. Role rules: in flows, each step's `component` decides (`...producer`, `...target` write; `...consumer`, `...source` read), keys of a `targets` section are writes, and elsewhere a key path containing "target" means a write; in task chains, references are steps; in tables, views and analytic models, references are reads. A flow reading its own target (delta, lookup) is not a dependency. When a `read` bundles dependency definitions, only the object's own entry is scanned.
 4. Build edges that point the way data moves (`reads_from`, `writes_to`) plus control edges from task chains: `triggers` for a step they run, `clears` for a table a step empties (DELETE_DATA).
@@ -116,7 +116,7 @@ Open questions for phase 3: how delta loads and upserts in transformation flows 
 
 ## Security posture (short form for the security pack)
 
-- Read-only by design: CLI limited to `list`/`read` in code, database user with `SELECT` rights only, no writes, deploys or task runs.
+- Read-only by design: CLI limited to `list`/`read` in code (plus `config cache init`, which only fills the CLI's local list of commands), database user with `SELECT` rights only, no writes, deploys or task runs.
 - Sign-in with password and a mandatory authenticator code; roles checked on every API call; each account sees only its own data.
 - Secrets encrypted at rest, TLS in transit, EU hosting, daily encrypted backups, 30-day retention of results by default.
 - No customer row data stored unless explicitly enabled per account.
@@ -126,3 +126,11 @@ Open questions for phase 3: how delta loads and upserts in transformation flows 
 ## Feasibility spike results (2026-10-15)
 
 The spike ran successfully against the partner tenant with Datasphere CLI 2026.x. Findings already reflected in the connector: `list`/`read` always return JSON (no `--output` flag), `list` needs `--top` beyond 25 items, and SQL and graphical views share the `views` command.
+
+## Technical client spike results (2026-10-16)
+
+Issam ran `npm run spike:technical-client` against the partner tenant with CLI 2026.21, a fresh CLI folder and the client in a secrets file. Findings reflected in the connector:
+
+- `--host` goes after the command and its flags, for every command (the connector puts `--secrets-file` and `--verbose` there too). Before the command the CLI ignores the host: it asks "URL of the system to connect to" and exits with code 0. The old order only worked on a machine where `datasphere login` had stored a host.
+- The CLI runs with no input. A question (a line starting with "?") or a `list`/`read` that isn't JSON is a failure even on exit code 0.
+- With the host after the command, the client lists the views and local tables of a space it is a member of. `spaces list` and `spaces read` fail: they need a tenant-wide privilege, so scans and the spike don't rely on them.

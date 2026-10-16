@@ -22,7 +22,7 @@ Arguments: $ARGUMENTS
 How to read the arguments:
 - Bare words are space names; pass each one as `--space <NAME>`.
 - Keep `--output <OBJECT>`, `--from <folder>` and every `--exclude-writer <FLOW>` exactly as given. `--output` can be `OBJECT` or `SPACE.OBJECT`.
-- With no arguments, scan the space in `DSP_SPACE` from `.env.local` (check it is set with `grep -c '^DSP_SPACE=.' .env.local`; never print `.env.local`), without `--output`.
+- With no arguments, scan the spaces in `DSP_SPACE` from `.env.local`, one or more space IDs separated by commas (check it is set with `grep -c '^DSP_SPACE=.' .env.local`; never print `.env.local`), without `--output`.
 
 Then follow your procedure: preflight, scan with `npm run scan -- ...`, read the newest folder in `tools/scan/output/`, check the lineage for warnings, isolated objects, missed references and implausible edges, and return the report in your standard format.
 

@@ -1,5 +1,6 @@
 import { chmod, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { execa } from "execa";
 import { assertReadOnly, commandPath, type CliObjectKind, type ReadCommand } from "./readonly.js";
 
@@ -20,10 +21,17 @@ import { assertReadOnly, commandPath, type CliObjectKind, type ReadCommand } fro
  * `configDir` gives the CLI its own folder (its cache, the secrets file and
  * the token it gets), so tenants never share a login. Delete it when done.
  *
- * CLI 2026.x notes (found with the feasibility spike):
+ * CLI 2026.x notes (found with the feasibility spikes):
  *  - `list` and `read` always return JSON; there is no `--output` flag.
  *  - `list` returns 25 items unless `--top` is given.
  *  - SQL and graphical views share the `views` command.
+ *  - `--host` only counts after the command and its flags. Before the
+ *    command the CLI ignores it.
+ *  - When it lacks something, such as the host, the CLI asks for it and exits
+ *    with code 0, so exit code 0 alone doesn't mean it answered.
+ *  - `spaces list` and `spaces read` need a tenant-wide privilege that a
+ *    technical client with a role in its spaces doesn't have. Scans don't
+ *    use them.
  */
 export interface CliOptions {
   host: string;
@@ -63,20 +71,47 @@ export class DatasphereCli {
     this.timeoutMs = opts.timeoutMs ?? 120_000;
   }
 
-  /** The single place a CLI process is started. Every call passes the read-only guard first. */
+  /**
+   * The single place a CLI process is started. Every call passes the read-only guard first, and what the CLI printed is
+   * checked before it is returned: a question instead of an answer, or a `list` or `read` that isn't JSON, is a failure
+   * even when the CLI exits with code 0.
+   */
   async exec(cmd: ReadCommand, flags: Record<string, string> = {}): Promise<string> {
     const command = commandPath(cmd);
     assertReadOnly(command);
-    const options = Object.entries(flags).flatMap(([k, v]) => [`--${k}`, v]);
-    // Object and space commands come from the tenant's command list, so the CLI needs the host before them to know they
-    // exist; `config cache init` is built in and only reads the host after it (before it, the CLI asks for the URL).
-    const args = cmd.group === "config" ? [...command, "--host", this.opts.host, ...options] : ["--host", this.opts.host, ...command, ...options];
+    // The host, the login and --verbose go after the command and its flags, for every command. The CLI ignores a host
+    // before the command: it asks for the URL of the system, or uses the host stored by `datasphere login`.
+    const args = [...command, ...Object.entries(flags).flatMap(([k, v]) => [`--${k}`, v]), "--host", this.opts.host];
     if (this.opts.client) args.push("--secrets-file", await this.secretsFile());
     if (this.opts.verbose) args.push("--verbose");
     // The CLI keeps its cache and tokens under the home folder: HOME on Linux and macOS, USERPROFILE on Windows.
     const env = this.opts.configDir ? { HOME: this.opts.configDir, USERPROFILE: this.opts.configDir } : undefined;
-    const { stdout } = await execa(this.bin, args, { timeout: this.timeoutMs, env });
+    // No input, so a question from the CLI gets no answer and ends the call at once instead of waiting until the timeout.
+    const { stdout, stderr } = await execa(this.bin, args, { timeout: this.timeoutMs, env, stdin: "ignore" });
+    this.checkAnswer(command, stdout, stderr);
     return stdout;
+  }
+
+  /** Throws when the CLI asked a question, or when a `list` or `read` printed something other than JSON. */
+  private checkAnswer(command: string[], stdout: string, stderr: string): void {
+    const name = `datasphere ${command.join(" ")}`;
+    const lines = (text: string) => text.split("\n").map((l) => stripVTControlCharacters(l).trim()).filter(Boolean);
+    const output = this.withoutSecret([stdout, stderr].filter(Boolean).join("\n"));
+    // A prompt starts with "?", e.g. "? URL of the system to connect to". No line of JSON does.
+    const question = [...lines(stdout), ...lines(stderr)].find((l) => l.startsWith("?"));
+    if (question) {
+      const asked = clip(this.withoutSecret(question.slice(1).trim()));
+      throw new CliOutputError(`${name} asked "${asked}" instead of answering. Ystara gives the CLI no input: check the host and the login.`, output);
+    }
+    if (["list", "read"].includes(command[command.length - 1]) && !isJson(stdout)) {
+      const first = lines(stdout)[0];
+      throw new CliOutputError(`${name} printed ${first ? `"${clip(this.withoutSecret(first))}"` : "nothing"} instead of JSON.`, output);
+    }
+  }
+
+  private withoutSecret(text: string): string {
+    const secret = this.opts.client?.clientSecret;
+    return secret ? text.replaceAll(secret, "<secret>") : text;
   }
 
   /** Downloads the tenant's list of CLI commands; the object commands only exist after it. Once per configDir. */
@@ -104,7 +139,7 @@ export class DatasphereCli {
   }
 
   async version(): Promise<string> {
-    const { stdout } = await execa(this.bin, ["--version"], { timeout: this.timeoutMs });
+    const { stdout } = await execa(this.bin, ["--version"], { timeout: this.timeoutMs, stdin: "ignore" });
     return stdout.trim();
   }
 
@@ -117,6 +152,33 @@ export class DatasphereCli {
     const out = await this.exec({ group: "objects", kind, verb: "read" }, { space, "technical-name": technicalName });
     return JSON.parse(out) as unknown;
   }
+}
+
+/**
+ * The CLI ended without an error but didn't give what the command should: it asked a question, or a `list` or `read`
+ * printed something other than JSON. `output` is everything it printed, without the client secret.
+ */
+export class CliOutputError extends Error {
+  constructor(
+    message: string,
+    readonly output: string,
+  ) {
+    super(message);
+    this.name = "CliOutputError";
+  }
+}
+
+function isJson(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clip(text: string): string {
+  return text.length > 120 ? `${text.slice(0, 120)}...` : text;
 }
 
 /** Accepts the shapes seen so far: an array of strings or of objects with technicalName/name. */

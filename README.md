@@ -63,7 +63,7 @@ The API (with the web app) and Postgres are published on 127.0.0.1 only, because
 
 **Settings.** App settings and secrets go in `.env.local`. `.env` may only hold the `YSTARA_*` ports, because Compose reads `.env` and can print parts of its values (a `$` in a secret is read as a variable); the tools refuse to start when `.env` holds anything else and name the keys to move. Shell variables win over both files.
 
-**Scanning with a technical OAuth client.** `npm run scan` uses your own `datasphere login` unless `.env.local` holds a technical OAuth client of the tenant (`DSP_CLIENT_ID`, `DSP_CLIENT_SECRET`, `DSP_TOKEN_URL`); then it logs in with that client in a temporary CLI folder, the way the worker will. `npm run spike:technical-client` checks first, read-only, whether such a client can see a space; its header says how to create the client.
+**Scanning with a technical OAuth client.** `npm run scan` uses your own `datasphere login` unless `.env.local` holds a technical OAuth client of the tenant (`DSP_CLIENT_ID`, `DSP_CLIENT_SECRET`, `DSP_TOKEN_URL`); then it logs in with that client in a temporary CLI folder, the way the worker will. `npm run spike:technical-client` checks first, read-only, whether such a client can read the spaces in `DSP_SPACE` (one or more space IDs, separated by commas); its header says how to create the client. Spaces are always named by their IDs: listing the tenant's spaces needs a tenant-wide privilege the client shouldn't have, so the spike only warns when it can't, and scans never do it. Add `-- --verbose` to see the CLI's requests when a step fails.
 
 Load a scan you already saved with `npm run scan`, without calling the tenant, then open it in the web app (the command prints the link):
 
@@ -108,7 +108,7 @@ In Claude Code, `/datasphere-scan HR --output V_HEADCOUNT_OUT` hands the scan to
 
 ## Read-only guarantee
 
-Ystara never creates, changes, deletes or runs anything in a Datasphere tenant. Every CLI call goes through `assertReadOnly` in `packages/connector/src/readonly.ts`, which allows only `list` and `read` and throws on anything else. Changing that file is a product decision, not a code detail.
+Ystara never creates, changes, deletes or runs anything in a Datasphere tenant. Every CLI call goes through `assertReadOnly` in `packages/connector/src/readonly.ts`, which allows only `list` and `read` (plus `config cache init`, which only downloads the CLI's list of commands) and throws on anything else. Changing that file is a product decision, not a code detail.
 
 ## Conventions
 
