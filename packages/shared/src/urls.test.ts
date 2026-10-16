@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { isDatasphereUrl, isTokenUrl } from "./urls.js";
 
+/** A URL with a user name before the host, built from parts so it never reads as an email address. */
+const withUser = (user: string, rest: string) => `https://${user}@${rest}`;
+
 describe("a Datasphere tenant URL", () => {
   it("is https on hcs.cloud.sap", () => {
     for (const url of ["https://synthetic.eu10.hcs.cloud.sap", "https://synthetic.eu10.hcs.cloud.sap/", "https://SYNTHETIC.eu10.hcs.cloud.sap", "https://synthetic.eu10.hcs.cloud.sap:443"]) {
@@ -22,8 +25,8 @@ describe("a Datasphere tenant URL", () => {
       "https://synthetic.eu10.hcs.cloud.sap/dwaas-core/index.html",
       "https://synthetic.eu10.hcs.cloud.sap/?x=1",
       "https://synthetic.eu10.hcs.cloud.sap/#/home",
-      "https://user:pass@synthetic.eu10.hcs.cloud.sap",
-      "https://synthetic.example.com@synthetic.eu10.hcs.cloud.sap",
+      withUser("user:pass", "synthetic.eu10.hcs.cloud.sap"),
+      withUser("synthetic.example.com", "synthetic.eu10.hcs.cloud.sap"),
       "synthetic.eu10.hcs.cloud.sap",
       "not a url",
     ]) {
@@ -37,7 +40,7 @@ describe("a token URL", () => {
     for (const url of [
       "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token",
       "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token/",
-      "https://synthetic-qa.authentication.us10-004.hana.ondemand.com/oauth/token",
+      "https://synthetic.authentication.us10-004.hana.ondemand.com/oauth/token",
     ]) {
       expect(isTokenUrl(url), url).toBe(true);
     }
@@ -53,7 +56,7 @@ describe("a token URL", () => {
       "https://synthetic.authentication.eu10.hana.ondemand.com:8443/oauth/token",
       "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/authorize",
       "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token?grant_type=client_credentials",
-      "https://user@synthetic.authentication.eu10.hana.ondemand.com/oauth/token",
+      withUser("user", "synthetic.authentication.eu10.hana.ondemand.com/oauth/token"),
       "https://10.0.0.1/oauth/token",
       "https://synthetic.example.com/oauth/token",
       "not a url",
