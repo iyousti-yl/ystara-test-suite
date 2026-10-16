@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 
 /**
  * Secrets the platform has to read back later (authenticator secrets now,
@@ -25,23 +26,36 @@ export function secretBox(key: Buffer): SecretBox {
     open(sealed) {
       const [version, iv, tag, ct] = sealed.split(".");
       if (version !== "v1" || ct === undefined) throw new Error("Unknown secret format");
-      const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"));
+      // The full 16-byte tag, or a shortened one (easier to forge) would be accepted too.
+      const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"), { authTagLength: 16 });
       decipher.setAuthTag(Buffer.from(tag, "base64url"));
       return Buffer.concat([decipher.update(Buffer.from(ct, "base64url")), decipher.final()]).toString("utf8");
     },
   };
 }
 
-export const MASTER_KEY_COMMAND = `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`;
+/** Writes a new key to .master-key (never over an existing one), on Windows as on Linux and macOS. */
+export const MASTER_KEY_COMMAND = `node -e "require('fs').writeFileSync('.master-key', require('crypto').randomBytes(32).toString('base64'), { flag: 'wx', mode: 0o600 })"`;
 
 /**
- * MASTER_KEY from the environment (.env.local): 32 random bytes in base64.
- * Refuses to start without one, rather than run with a weak or shared key.
+ * MASTER_KEY: 32 random bytes in base64, read from the file MASTER_KEY_FILE names. That is `.master-key`
+ * at the repository root (git-ignored; loadLocalEnv points to it) or, in Docker Compose, a secret that
+ * only the containers that need it get. A MASTER_KEY variable works too (a hosting platform's secret
+ * store); if both are there, they must hold the same key.
+ * Refuses to start without one, rather than run with a weak or shared key. Errors never show the key.
  * Losing the key means every user sets up their authenticator again.
  */
 export function masterKeyFromEnv(env: NodeJS.ProcessEnv = process.env): Buffer {
-  const value = env.MASTER_KEY?.trim();
-  const help = `Create one with\n  ${MASTER_KEY_COMMAND}\nand put it in .env.local as MASTER_KEY=<the output>. Keep it secret and keep a copy: losing it means every user sets up their authenticator again.`;
+  const help = `Create one in the repository root with\n  ${MASTER_KEY_COMMAND}\nIt writes .master-key, which git ignores. Keep it secret and keep a copy: losing it means every user sets up their authenticator again.`;
+  const file = env.MASTER_KEY_FILE?.trim();
+  if (file && !existsSync(file)) throw new Error(`MASTER_KEY_FILE names ${file}, which doesn't exist. ${help}`);
+  // A BOM appears when an editor on Windows saves the file as "UTF-8 with BOM".
+  const fromFile = file ? readFileSync(file, "utf8").replace(/^\uFEFF/, "").trim() : undefined;
+  const fromVariable = env.MASTER_KEY?.trim();
+  if (fromFile && fromVariable && fromFile !== fromVariable) {
+    throw new Error(`MASTER_KEY and the key file ${file} hold different keys. Keep one: the file, and remove MASTER_KEY from your settings.`);
+  }
+  const value = fromFile || fromVariable;
   if (!value) throw new Error(`MASTER_KEY is not set. ${help}`);
   const key = Buffer.from(value, "base64");
   if (key.length !== 32 || key.toString("base64") !== value) throw new Error(`MASTER_KEY is not 32 bytes in base64. ${help}`);

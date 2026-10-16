@@ -1,12 +1,13 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
-import { testSecrets } from "./auth/testing.js";
-import { buildServer } from "./server.js";
+import { testSecrets, testUser } from "./auth/testing.js";
+import { buildServer, trustProxyFromEnv } from "./server.js";
 
 // A stand-in for apps/web/dist: index.html plus one hashed asset.
 const webRoot = mkdtempSync(path.join(tmpdir(), "ystara-web-"));
@@ -72,5 +73,58 @@ describe("one port for the API and the web app", () => {
   it("works without a built web app", async () => {
     expect((await apiOnly.inject({ url: "/", headers: html })).statusCode).toBe(404);
     expect((await apiOnly.inject("/api/health")).statusCode).toBe(200);
+  });
+});
+
+describe("the log", () => {
+  it("never holds the token of an invitation link", async () => {
+    const lines: string[] = [];
+    const stream = new PassThrough().on("data", (chunk: Buffer) => lines.push(chunk.toString()));
+    const logged = await buildServer(deps(), { logStream: stream, webRoot });
+    const token = "t".repeat(43);
+    await logged.inject(`/api/invitations/${token}`);
+    await logged.inject({ method: "POST", url: `/api/invitations/${token}/accept?x=1`, payload: {} });
+    await logged.inject({ url: `/invite/${token}`, headers: html });
+    await logged.close();
+
+    const log = lines.join("");
+    expect(log).not.toContain(token);
+    expect(log).toContain('"url":"/api/invitations/<token>"');
+    expect(log).toContain('"url":"/api/invitations/<token>/accept?x=1"');
+    expect(log).toContain('"url":"/invite/<token>"');
+  });
+});
+
+describe("the client's address", () => {
+  const login = (app: FastifyInstance, forwardedFor: string) =>
+    app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      remoteAddress: "10.0.0.2",
+      headers: { "x-forwarded-for": forwardedFor },
+      payload: { email: "shared@example.com", password: "wrong password!" },
+    });
+
+  it("comes from the proxy only when YSTARA_TRUST_PROXY says so, so limits count per real client", async () => {
+    await testUser(db, { account: "Proxied", email: "shared@example.com", role: "viewer" }); // a cheap hash keeps this quick
+    const proxied = await buildServer(deps(), { logger: false, trustProxy: trustProxyFromEnv("1") });
+    for (let i = 0; i < 10; i++) await login(proxied, "203.0.113.1");
+    expect((await login(proxied, "203.0.113.1")).statusCode).toBe(429);
+    expect((await login(proxied, "203.0.113.2")).statusCode).toBe(401);
+    await proxied.close();
+
+    // Not trusted: a client can't escape its limit by sending another address.
+    const direct = await buildServer(deps(), { logger: false });
+    for (let i = 0; i < 10; i++) await login(direct, "203.0.113.1");
+    expect((await login(direct, "203.0.113.2")).statusCode).toBe(429);
+    await direct.close();
+  });
+
+  it("is set deliberately: a count of proxies or their addresses, never everyone", () => {
+    expect(trustProxyFromEnv(undefined)).toBe(false);
+    expect(trustProxyFromEnv(" ")).toBe(false);
+    expect(trustProxyFromEnv("2")).toBe(2);
+    expect(trustProxyFromEnv("10.0.0.0/8, 127.0.0.1")).toEqual(["10.0.0.0/8", "127.0.0.1"]);
+    expect(() => trustProxyFromEnv("true")).toThrow(/number \(e\.g\. 1\) or their addresses/);
   });
 });

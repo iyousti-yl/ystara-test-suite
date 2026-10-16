@@ -12,10 +12,13 @@ import {
   findOpenInvitation,
   findSession,
   findUserByEmail,
+  getUser,
+  invitationTotpSecret,
   listInvitations,
   listMembers,
   membershipsOf,
   recordFailedCode,
+  setInvitationTotpSecret,
   switchSessionAccount,
   useTotpStep,
 } from "./accounts.js";
@@ -83,6 +86,25 @@ describe("invitations", () => {
     ]);
   });
 
+  it("never change the role of someone who is already a member", async () => {
+    const { account, adminId } = await accountWithAdmin("Already in", "already@example.com");
+    const { token } = await createInvitation(db, { accountId: account.id, email: "already@example.com", role: "viewer" });
+    expect(await acceptInvitation(db, token, { existingUserId: adminId })).toEqual({ userId: adminId, accountId: account.id });
+    expect((await listMembers(db, account.id)).map((m) => m.role)).toEqual(["admin"]);
+  });
+
+  it("keep the authenticator secret the server made, until the link is used", async () => {
+    const account = await createAccount(db, "Server secret");
+    const { token } = await createInvitation(db, { accountId: account.id, email: "fresh@example.com", role: "viewer" });
+    expect(await invitationTotpSecret(db, token)).toBeUndefined();
+    expect(await setInvitationTotpSecret(db, token, "sealed-first")).toBe(true);
+    expect(await setInvitationTotpSecret(db, token, "sealed-second")).toBe(true);
+    expect(await invitationTotpSecret(db, token)).toBe("sealed-second");
+    await acceptInvitation(db, token, newUser(8));
+    expect(await invitationTotpSecret(db, token)).toBeUndefined();
+    expect(await setInvitationTotpSecret(db, token, "sealed-late")).toBe(false);
+  });
+
   it("expire, and can be withdrawn by their own account only", async () => {
     const { account } = await accountWithAdmin("Withdraws", "admin@withdraws.example.com");
     const other = await createAccount(db, "Someone else");
@@ -141,17 +163,32 @@ describe("sessions", () => {
 
     expect(await changeMember(db, account.id, leaver, undefined)).toBe("done");
     expect(await findSession(db, token)).toBeUndefined();
-  });
-
-  it("count wrong codes", async () => {
-    const { account, adminId } = await accountWithAdmin("Wrong codes", "codes@example.com");
-    const token = await createSession(db, { userId: adminId, accountId: account.id, verified: false, minutes: 10 });
-    expect(await recordFailedCode(db, token)).toBe(1);
-    expect(await recordFailedCode(db, token)).toBe(2);
+    const { rows } = await db.query("select 1 from sessions where user_id = $1 and account_id = $2", [leaver, account.id]);
+    expect(rows).toHaveLength(0);
   });
 });
 
 describe("authenticator codes", () => {
+  const rule = { lockAfter: 3, maxMinutes: 60 };
+  const minutesFromNow = (d: Date | null) => d && Math.round((d.getTime() - Date.now()) / 60_000);
+
+  it("count wrong codes per user, lock with a growing wait, and forget them after a right one", async () => {
+    const { adminId } = await accountWithAdmin("Wrong codes", "codes@example.com");
+    expect(await recordFailedCode(db, adminId, rule)).toEqual({ failedCodes: 1, lockedUntil: null });
+    expect((await recordFailedCode(db, adminId, rule)).lockedUntil).toBeNull();
+    expect(minutesFromNow((await recordFailedCode(db, adminId, rule)).lockedUntil)).toBe(1);
+    expect(minutesFromNow((await recordFailedCode(db, adminId, rule)).lockedUntil)).toBe(2);
+    expect(minutesFromNow((await recordFailedCode(db, adminId, rule)).lockedUntil)).toBe(4);
+    expect((await getUser(db, adminId))?.codesLockedUntil).not.toBeNull();
+
+    await db.query("update users set failed_codes = 500 where id = $1", [adminId]);
+    expect(minutesFromNow((await recordFailedCode(db, adminId, rule)).lockedUntil)).toBe(60); // capped, never overflows
+
+    expect(await useTotpStep(db, adminId, 5000)).toBe(true);
+    expect((await getUser(db, adminId))?.codesLockedUntil).toBeNull();
+    expect(await recordFailedCode(db, adminId, rule)).toEqual({ failedCodes: 1, lockedUntil: null });
+  });
+
   it("work once each: a used code, or an older one, is refused", async () => {
     const { adminId } = await accountWithAdmin("Codes once", "once@example.com");
     expect(await useTotpStep(db, adminId, 1000)).toBe(true);

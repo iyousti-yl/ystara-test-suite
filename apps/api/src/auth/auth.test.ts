@@ -1,4 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { hashPassword, passwordProblem, verifyPassword } from "./passwords.js";
 import { masterKeyFromEnv, secretBox } from "./secrets.js";
@@ -81,8 +84,38 @@ describe("stored secrets", () => {
   it("need a real MASTER_KEY, and say how to make one", () => {
     const key = randomBytes(32).toString("base64");
     expect(masterKeyFromEnv({ MASTER_KEY: key })).toEqual(Buffer.from(key, "base64"));
-    expect(() => masterKeyFromEnv({})).toThrow(/not set.*randomBytes\(32\)/s);
+    expect(() => masterKeyFromEnv({})).toThrow(/not set.*randomBytes\(32\).*\.master-key/s);
     expect(() => masterKeyFromEnv({ MASTER_KEY: "change-me" })).toThrow(/not 32 bytes/);
     expect(() => masterKeyFromEnv({ MASTER_KEY: Buffer.alloc(32).toString("base64") })).toThrow(/placeholder/);
+  });
+
+  it("read MASTER_KEY from its file, and refuse two different keys without showing either", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "ystara-key-"));
+    try {
+      const key = randomBytes(32).toString("base64");
+      const file = path.join(dir, ".master-key");
+      writeFileSync(file, `\uFEFF${key}\r\n`);
+      expect(masterKeyFromEnv({ MASTER_KEY_FILE: file })).toEqual(Buffer.from(key, "base64"));
+      expect(masterKeyFromEnv({ MASTER_KEY_FILE: file, MASTER_KEY: key })).toEqual(Buffer.from(key, "base64"));
+
+      const other = randomBytes(32).toString("base64");
+      expect(() => masterKeyFromEnv({ MASTER_KEY_FILE: file, MASTER_KEY: other })).toThrow(/different keys/);
+      try {
+        masterKeyFromEnv({ MASTER_KEY_FILE: file, MASTER_KEY: other });
+      } catch (e) {
+        expect(String(e)).not.toContain(key);
+        expect(String(e)).not.toContain(other);
+      }
+      expect(() => masterKeyFromEnv({ MASTER_KEY_FILE: path.join(dir, "missing") })).toThrow(/doesn't exist/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuse a shortened authentication tag", () => {
+    const box = secretBox(randomBytes(32));
+    const [v, iv, tag, ct] = box.seal("JBSWY3DPEHPK3PXP").split(".");
+    const short = Buffer.from(tag, "base64url").subarray(0, 4).toString("base64url");
+    expect(() => box.open([v, iv, short, ct].join("."))).toThrow();
   });
 });

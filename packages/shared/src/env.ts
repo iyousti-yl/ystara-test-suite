@@ -12,8 +12,11 @@ import path from "node:path";
  *               this file for variable substitution and can print parts of its values
  *               in warnings (a `$` in a secret is read as a variable), so anything else
  *               in it stops the program before it starts.
+ *   .master-key The key that encrypts stored secrets (MASTER_KEY), alone in its own
+ *               git-ignored file, so Docker Compose can hand it to the containers that
+ *               need it and nothing else from .env.local. Found through MASTER_KEY_FILE.
  *
- * Variables already set in the shell win over both files.
+ * Variables already set in the shell win over the files.
  */
 export const COMPOSE_SETTING = /^(YSTARA_[A-Z0-9_]+|COMPOSE_[A-Z0-9_]+)$/;
 
@@ -31,6 +34,8 @@ export function loadLocalEnv(root: string): void {
   }
   const appFile = path.join(root, ".env.local");
   if (existsSync(appFile)) process.loadEnvFile(appFile);
+  const keyFile = path.join(root, ".master-key");
+  if (!process.env.MASTER_KEY_FILE && existsSync(keyFile)) process.env.MASTER_KEY_FILE = keyFile;
 }
 
 /** The variable names in a dotenv text. Values are never looked at, so they can't end up in an error. */

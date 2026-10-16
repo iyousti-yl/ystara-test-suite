@@ -75,12 +75,29 @@ describe("signing in", () => {
     expect((await call("POST", "/auth/code", { cookie: again.header, payload: { code: codeNow(user.totpSecret) } })).json().error).toMatch(/already used/);
   });
 
-  it("asks for the password again after five wrong codes", async () => {
-    await testUser(db, { account: "Sign-in", email: "guess@example.com", role: "viewer" });
-    const pending = sessionCookie(await call("POST", "/auth/login", { payload: { email: "guess@example.com", password: TEST_PASSWORD } }));
-    for (let i = 0; i < 4; i++) expect((await call("POST", "/auth/code", { cookie: pending.header, payload: { code: "000000" } })).json().restart).toBeUndefined();
-    expect((await call("POST", "/auth/code", { cookie: pending.header, payload: { code: "000000" } })).json().restart).toBe(true);
-    expect((await call("POST", "/auth/code", { cookie: pending.header, payload: { code: "000000" } })).statusCode).toBe(401);
+  it("locks codes for the user after five wrong ones, also across new sign-ins", async () => {
+    const user = await testUser(db, { account: "Sign-in", email: "guess@example.com", role: "viewer" });
+    const signIn = async () => sessionCookie(await call("POST", "/auth/login", { payload: { email: "guess@example.com", password: TEST_PASSWORD } }));
+    const tryCode = (cookie: string, code: string) => call("POST", "/auth/code", { cookie, payload: { code } });
+
+    const first = await signIn();
+    for (let i = 0; i < 4; i++) expect((await tryCode(first.header, "000000")).json()).toMatchObject({ error: expect.stringMatching(/not right/) });
+    const locked = await tryCode(first.header, "000000");
+    expect(locked.statusCode).toBe(429);
+    expect(locked.json()).toEqual({ error: "Too many wrong codes. Wait a minute, then sign in again.", restart: true });
+    // The sign-in is over: its cookie opens nothing any more.
+    expect((await tryCode(first.header, codeNow(user.totpSecret))).statusCode).toBe(401);
+
+    // A new sign-in with the password doesn't reset the count: even the right code waits.
+    const second = await signIn();
+    expect((await tryCode(second.header, codeNow(user.totpSecret))).statusCode).toBe(429);
+
+    // Once the wait is over, the right code works and the count starts again.
+    await db.query("update users set codes_locked_until = now() - interval '1 second' where id = $1", [user.userId]);
+    const third = await signIn();
+    expect((await tryCode(third.header, codeNow(user.totpSecret))).statusCode).toBe(200);
+    const { rows } = await db.query<{ failed_codes: number }>("select failed_codes from users where id = $1", [user.userId]);
+    expect(rows[0].failed_codes).toBe(0);
   });
 
   it("ends with signing out", async () => {
@@ -103,26 +120,42 @@ describe("invitation links", () => {
   it("let a new user choose a password and set up the authenticator app, once", async () => {
     const account = await createAccount(db, "Joining");
     const { token } = await createInvitation(db, { accountId: account.id, email: "new@example.com", role: "test_coordinator" });
+    const accept = (payload: object) => call("POST", `/invitations/${token}/accept`, { payload });
 
     expect((await call("GET", `/invitations/${token}`)).json()).toEqual({ account: "Joining", email: "new@example.com", role: "test_coordinator", existingUser: false });
+    expect((await accept({ password: "a fine long password", code: "123456" })).json().error).toMatch(/Set up the authenticator app first/);
+
+    // Opening the setup again makes a new secret: codes from the first one no longer count.
+    const replaced = (await call("POST", `/invitations/${token}/authenticator`)).json();
     const setup = (await call("POST", `/invitations/${token}/authenticator`)).json();
     expect(setup.otpauthUri).toContain(`secret=${setup.secret}`);
+    expect(setup.secret).not.toBe(replaced.secret);
+    expect((await accept({ password: "a fine long password", code: codeNow(replaced.secret) })).json().error).toMatch(/code is not right/);
 
-    const accept = (payload: object) => call("POST", `/invitations/${token}/accept`, { payload });
-    expect((await accept({ password: "too short", totpSecret: setup.secret, code: codeNow(setup.secret) })).json().error).toMatch(/at least 12/);
-    expect((await accept({ password: "a fine long password", totpSecret: setup.secret, code: "123456" })).json().error).toMatch(/code is not right/);
-    const joined = await accept({ password: "a fine long password", totpSecret: setup.secret, code: codeNow(setup.secret) });
+    expect((await accept({ password: "too short", code: codeNow(setup.secret) })).json().error).toMatch(/at least 12/);
+    expect((await accept({ password: "a fine long password", code: "123456" })).json().error).toMatch(/code is not right/);
+    const joined = await accept({ password: "a fine long password", code: codeNow(setup.secret) });
     expect(joined.statusCode).toBe(201);
     expect(joined.json()).toMatchObject({ user: { email: "new@example.com" }, account: { name: "Joining" }, role: "test_coordinator" });
     expect((await call("GET", "/tenants", { cookie: sessionCookie(joined).header })).statusCode).toBe(200);
 
-    // The authenticator secret is stored encrypted.
+    // The authenticator secret is the one the server made, stored encrypted.
     const { rows } = await db.query<{ totp_secret: string }>("select totp_secret from users where email = 'new@example.com'");
     expect(rows[0].totp_secret).not.toContain(setup.secret);
     expect(testSecrets.open(rows[0].totp_secret)).toBe(setup.secret);
 
     expect((await call("GET", `/invitations/${token}`)).statusCode).toBe(404);
-    expect((await accept({ password: "a fine long password", totpSecret: setup.secret, code: codeNow(setup.secret) })).statusCode).toBe(404);
+    expect((await accept({ password: "a fine long password", code: codeNow(setup.secret) })).statusCode).toBe(404);
+  });
+
+  it("never take an authenticator secret from the browser", async () => {
+    const account = await createAccount(db, "Own secret");
+    const { token } = await createInvitation(db, { accountId: account.id, email: "chooser@example.com", role: "viewer" });
+    await call("POST", `/invitations/${token}/authenticator`);
+    const chosen = "A".repeat(32);
+    const res = await call("POST", `/invitations/${token}/accept`, { payload: { password: "a fine long password", totpSecret: chosen, code: codeNow(chosen) } });
+    expect(res.statusCode).toBe(400);
+    expect((await call("GET", `/invitations/${token}`)).statusCode).toBe(200); // still open
   });
 
   it("let an existing user join another account after signing in as that email", async () => {
@@ -154,12 +187,27 @@ describe("invitation links", () => {
 });
 
 describe("guessing", () => {
-  it("is slowed down: ten tries a minute", async () => {
-    const limited = await buildServer({ db, queue: { send: async () => undefined }, secrets: testSecrets }, { logger: false });
+  const fresh = () => buildServer({ db, queue: { send: async () => undefined }, secrets: testSecrets }, { logger: false });
+
+  it("is slowed down: ten tries a minute per link", async () => {
+    const limited = await fresh();
     const statuses: number[] = [];
     for (let i = 0; i < 11; i++) statuses.push((await limited.inject(`/api/invitations/${"x".repeat(43)}`)).statusCode);
     expect(statuses.slice(0, 10).every((s) => s === 404)).toBe(true);
     expect(statuses[10]).toBe(429);
+    expect((await limited.inject(`/api/invitations/${"y".repeat(43)}`)).statusCode).toBe(404); // another link isn't blocked
+    await limited.close();
+  });
+
+  it("of one email's password doesn't block others who share the address", async () => {
+    // Real users: their (cheap test) hashes keep this quick, where an unknown email costs a full one.
+    await testUser(db, { account: "Sign-in", email: "target@example.com", role: "viewer" });
+    await testUser(db, { account: "Sign-in", email: "colleague@example.com", role: "viewer" });
+    const limited = await fresh();
+    const login = (email: string) => limited.inject({ method: "POST", url: "/api/auth/login", payload: { email, password: "wrong password!" } });
+    for (let i = 0; i < 10; i++) expect((await login("target@example.com")).statusCode).toBe(401);
+    expect((await login(" TARGET@example.com")).statusCode).toBe(429);
+    expect((await login("colleague@example.com")).statusCode).toBe(401);
     await limited.close();
   });
 });

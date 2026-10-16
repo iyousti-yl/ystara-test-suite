@@ -9,8 +9,10 @@ import {
   findSession,
   findUserByEmail,
   getUser,
+  invitationTotpSecret,
   membershipsOf,
   recordFailedCode,
+  setInvitationTotpSecret,
   switchSessionAccount,
   useTotpStep,
   type Db,
@@ -37,12 +39,29 @@ const Login = z.object({ email, password: z.string().min(1).max(1000) });
 const Code = z.object({ code });
 const SwitchAccount = z.object({ accountId: z.string().uuid() });
 const Token = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{20,100}$/) });
-const NewUser = z.object({ password: z.string().max(1000), totpSecret: z.string().regex(/^[A-Z2-7]{32}$/), code });
+const NewUser = z.object({ password: z.string().max(1000), code });
 
-/** Wrong codes allowed before the password has to be typed again. */
-const MAX_FAILED_CODES = 5;
-/** Ten tries a minute per address on everything that checks a password, code or link. */
-const limited = { rateLimit: { max: 10, timeWindow: "1 minute" } };
+/**
+ * Wrong authenticator codes in a row (counted per user, across sign-ins)
+ * before codes are locked: 1 minute, then 2, 4, ... up to an hour. Each lock
+ * also ends the sign-in, so the password has to be typed again.
+ */
+const CODE_LOCK = { lockAfter: 5, maxMinutes: 60 };
+
+/**
+ * Ten tries a minute on everything that checks a password, code or link,
+ * counted per address AND per what is tried (an email, a user, a link). One
+ * client hammering one email then can't block everyone else who shares its
+ * address (an office, or everyone behind a proxy that isn't trusted: see
+ * YSTARA_TRUST_PROXY in server.ts). Counted after the body is read, so the
+ * email in it can be part of the key.
+ */
+const limitedBy = (what: (req: FastifyRequest) => string) => ({
+  rateLimit: { max: 10, timeWindow: "1 minute", hook: "preHandler" as const, keyGenerator: (req: FastifyRequest) => `${req.ip}|${what(req)}` },
+});
+const byEmail = limitedBy((req) => String((req.body as { email?: unknown } | undefined)?.email ?? "").trim().toLowerCase());
+const byPendingUser = limitedBy((req) => req.pending?.userId ?? "");
+const byLink = limitedBy((req) => String((req.params as { token?: unknown }).token ?? ""));
 
 const INVITATION_GONE = "This invitation link is no longer valid. Ask your admin for a new one.";
 
@@ -61,8 +80,16 @@ export function authRoutes(db: Db, secrets: SecretBox) {
     return token;
   }
 
+  /** Ends the sign-in (the password is needed again) and says how long codes are locked. */
+  async function tooManyCodes(req: FastifyRequest, reply: FastifyReply, until: Date) {
+    await deleteSession(db, req.sessionToken!);
+    clearSessionCookie(reply);
+    const minutes = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60_000));
+    return reply.code(429).send({ error: `Too many wrong codes. Wait ${minutes === 1 ? "a minute" : `${minutes} minutes`}, then sign in again.`, restart: true });
+  }
+
   return async (app: FastifyInstance) => {
-    app.post("/auth/login", { config: { access: "public", ...limited } }, async (req, reply) => {
+    app.post("/auth/login", { config: { access: "public", ...byEmail } }, async (req, reply) => {
       const input = Login.parse(req.body);
       const user = await findUserByEmail(db, input.email);
       const ok = await verifyPassword(input.password, user?.passwordHash ?? (await dummyHash()));
@@ -73,16 +100,16 @@ export function authRoutes(db: Db, secrets: SecretBox) {
       return { next: "code" };
     });
 
-    app.post("/auth/code", { config: { access: "pending", ...limited } }, async (req, reply) => {
+    app.post("/auth/code", { config: { access: "pending", ...byPendingUser } }, async (req, reply) => {
       const pending = req.pending!;
       const user = await getUser(db, pending.userId);
-      const step = user && matchTotp(secrets.open(user.totpSecret), Code.parse(req.body).code);
-      if (!user || step === undefined || !(await useTotpStep(db, user.id, step))) {
-        if ((await recordFailedCode(db, req.sessionToken!)) >= MAX_FAILED_CODES) {
-          await deleteSession(db, req.sessionToken!);
-          clearSessionCookie(reply);
-          return reply.code(401).send({ error: "Too many wrong codes. Sign in with your password again.", restart: true });
-        }
+      if (!user) return reply.code(401).send({ error: "Sign in with your password again.", restart: true });
+      // While locked, no code is even checked, so guessing gains nothing.
+      if (user.codesLockedUntil && user.codesLockedUntil > new Date()) return tooManyCodes(req, reply, user.codesLockedUntil);
+      const step = matchTotp(secrets.open(user.totpSecret), Code.parse(req.body).code);
+      if (step === undefined || !(await useTotpStep(db, user.id, step))) {
+        const { lockedUntil } = await recordFailedCode(db, user.id, CODE_LOCK);
+        if (lockedUntil) return tooManyCodes(req, reply, lockedUntil);
         return reply.code(401).send({ error: "That code is not right, or was already used. Try the next one your app shows." });
       }
       const token = await startSession(req, reply, { userId: user.id, accountId: pending.accountId, verified: true });
@@ -106,23 +133,27 @@ export function authRoutes(db: Db, secrets: SecretBox) {
 
     // --- Invitation links (/invite/<token> in the web app)
 
-    app.get("/invitations/:token", { config: { access: "public", ...limited } }, async (req, reply) => {
+    app.get("/invitations/:token", { config: { access: "public", ...byLink } }, async (req, reply) => {
       const invitation = await findOpenInvitation(db, Token.parse(req.params).token);
       if (!invitation) return reply.code(404).send({ error: INVITATION_GONE });
       const existingUser = (await findUserByEmail(db, invitation.email)) !== undefined;
       return { account: invitation.account.name, email: invitation.email, role: invitation.role, existingUser } satisfies InvitationOffer;
     });
 
-    // A new secret for the authenticator app. Nothing is stored until the user accepts with a code from it.
-    app.post("/invitations/:token/authenticator", { config: { access: "public", ...limited } }, async (req, reply) => {
-      const invitation = await findOpenInvitation(db, Token.parse(req.params).token);
+    // A new secret for the authenticator app, made here and kept (sealed) on the invitation: the
+    // browser shows it once as a QR code and never sends it back, so nobody can choose their own.
+    // Opening the setup again replaces it.
+    app.post("/invitations/:token/authenticator", { config: { access: "public", ...byLink } }, async (req, reply) => {
+      const { token } = Token.parse(req.params);
+      const invitation = await findOpenInvitation(db, token);
       if (!invitation) return reply.code(404).send({ error: INVITATION_GONE });
       if (await findUserByEmail(db, invitation.email)) return reply.code(409).send({ error: "This email already has a user: sign in instead" });
       const secret = newTotpSecret();
+      if (!(await setInvitationTotpSecret(db, token, secrets.seal(secret)))) return reply.code(404).send({ error: INVITATION_GONE });
       return { secret, otpauthUri: otpauthUri(secret, invitation.email) } satisfies AuthenticatorSetup;
     });
 
-    app.post("/invitations/:token/accept", { config: { access: "public", ...limited } }, async (req, reply) => {
+    app.post("/invitations/:token/accept", { config: { access: "public", ...byLink } }, async (req, reply) => {
       const { token } = Token.parse(req.params);
       const invitation = await findOpenInvitation(db, token);
       if (!invitation) return reply.code(404).send({ error: INVITATION_GONE });
@@ -137,14 +168,17 @@ export function authRoutes(db: Db, secrets: SecretBox) {
         return me(db, (await findSession(db, req.sessionToken!))!);
       }
 
-      // A new user chooses a password and proves the authenticator app works with one code.
+      // A new user chooses a password and proves the authenticator app works with one code
+      // from the secret the server made for this link.
       const input = NewUser.parse(req.body);
       const problem = passwordProblem(input.password);
       if (problem) return reply.code(400).send({ error: problem });
-      const step = matchTotp(input.totpSecret, input.code);
+      const sealedSecret = await invitationTotpSecret(db, token);
+      if (!sealedSecret) return reply.code(400).send({ error: "Set up the authenticator app first: open the link again." });
+      const step = matchTotp(secrets.open(sealedSecret), input.code);
       if (step === undefined) return reply.code(400).send({ error: "That code is not right. Check that the app shows Ystara and try the next code." });
       const joined = await acceptInvitation(db, token, {
-        newUser: { passwordHash: await hashPassword(input.password), totpSecret: secrets.seal(input.totpSecret), totpStep: step },
+        newUser: { passwordHash: await hashPassword(input.password), totpSecret: sealedSecret, totpStep: step },
       });
       if (!joined) return reply.code(404).send({ error: INVITATION_GONE });
       const session = await startSession(req, reply, { ...joined, verified: true });

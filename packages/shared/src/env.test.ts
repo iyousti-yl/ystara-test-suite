@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { COMPOSE_SETTING, envKeys, loadLocalEnv } from "./env.js";
 
 const dirs: string[] = [];
-const touched = ["YSTARA_TEST_PORT", "YSTARA_TEST_SECRET"];
+const touched = ["YSTARA_TEST_PORT", "YSTARA_TEST_SECRET", "MASTER_KEY_FILE"];
 function root(files: Record<string, string>): string {
   const dir = mkdtempSync(path.join(tmpdir(), "ystara-env-"));
   dirs.push(dir);
@@ -42,6 +42,16 @@ describe("loadLocalEnv", () => {
 
   it("does nothing without settings files", () => {
     expect(() => loadLocalEnv(root({}))).not.toThrow();
+    expect(process.env.MASTER_KEY_FILE).toBeUndefined();
+  });
+
+  it("points MASTER_KEY_FILE to .master-key, unless the shell names another file", () => {
+    const dir = root({ ".master-key": "not read here" });
+    loadLocalEnv(dir);
+    expect(process.env.MASTER_KEY_FILE).toBe(path.join(dir, ".master-key"));
+    process.env.MASTER_KEY_FILE = "/run/secrets/master_key";
+    loadLocalEnv(dir);
+    expect(process.env.MASTER_KEY_FILE).toBe("/run/secrets/master_key");
   });
 });
 

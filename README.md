@@ -31,12 +31,12 @@ Read [docs/architecture/overview.md](docs/architecture/overview.md) first.
 ```bash
 npm install
 cp .env.example .env.local     # fill in values (not .env: see below)
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"   # put the output in .env.local as MASTER_KEY=...
+node -e "require('fs').writeFileSync('.master-key', require('crypto').randomBytes(32).toString('base64'), { flag: 'wx', mode: 0o600 })"   # writes .master-key
 npm run typecheck
 npm test
 ```
 
-`MASTER_KEY` encrypts the secrets Ystara keeps (each user's authenticator secret now, tenant credentials later). The API refuses to start without it. Keep a copy somewhere safe: without it, every user has to set up their authenticator again.
+`.master-key` holds `MASTER_KEY`, which encrypts the secrets Ystara keeps (each user's authenticator secret now, tenant credentials later). It is git-ignored, and Docker Compose hands only this file to the API, never `.env.local`. The API refuses to start without it. Keep a copy somewhere safe: without it, every user has to set up their authenticator again. If `MASTER_KEY` is still in your `.env.local`, move its value into `.master-key` and delete the line (the API refuses two different keys). Behind a proxy such as Caddy, set `YSTARA_TRUST_PROXY=1` (or the proxy's addresses) so sign-in limits count per real client.
 
 ### Run the app locally (Docker)
 

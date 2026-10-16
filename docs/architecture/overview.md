@@ -80,13 +80,13 @@ Planned:
 - `runs` → `run_steps` → `assertion_results`
 - `alert_channels`, `audit_log`
 
-Secrets are encrypted with `MASTER_KEY`, held only in the API/worker environment (AES-256-GCM, `apps/api/src/auth/secrets.ts`; authenticator secrets now, tenant credentials with the wizard). Rotating the master key re-encrypts rows in a migration.
+Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `apps/api/src/auth/secrets.ts`; authenticator secrets now, tenant credentials with the wizard). The key lives alone in the git-ignored file `.master-key`, which Docker Compose passes as a secret to the containers that need it; a hosting platform can set `MASTER_KEY` instead. Rotating the master key re-encrypts rows in a migration.
 
 ## Sign-in and accounts (phase 1d)
 
 1. The operator runs `npm run account:create -- --name <Account> --admin <email>`, which prints a one-time link for the account's first admin.
-2. Opening the link, a new user chooses a password and scans a QR code with an authenticator app; the first code from the app proves it works and creates the user. Someone who already uses Ystara in another account signs in as that email and joins.
-3. Signing in takes the password (a 10-minute "pending" session), then a code (a new 12-hour session: the cookie changes). Each code works once; five wrong codes end the pending session. Login, code and invitation routes allow ten tries a minute per address. Changes from another site's pages are refused (Origin check, on top of the SameSite cookie).
+2. Opening the link, a new user chooses a password and scans a QR code with an authenticator app. The server makes that secret and keeps it (sealed) on the invitation; the first code from the app proves it works and creates the user. Someone who already uses Ystara in another account signs in as that email and joins; their role elsewhere, or in this account if they already belong to it, never changes.
+3. Signing in takes the password (a 10-minute "pending" session), then a code (a new 12-hour session: the cookie changes). Each code works once. Wrong codes count per user across sign-ins: five in a row lock codes for a minute, then 2, 4, ... up to an hour, and end the sign-in. Login, code and invitation routes allow ten tries a minute per address and per email, user or link, so one client can't lock out a whole office. Behind a proxy, `YSTARA_TRUST_PROXY` says which proxy may report the client's address. Invitation tokens never reach the log. Changes from another site's pages are refused (Origin check, on top of the SameSite cookie).
 4. Admins manage their account on the Users and roles page: invite by email and role, change roles, remove people. An account always keeps one admin. Removing someone ends their sign-in to that account at once.
 5. The web app hides what a role can't do, but only the API enforces it (`config.access` on every route, `apps/api/src/auth/access.ts`).
 

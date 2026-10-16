@@ -20,7 +20,8 @@
       "Bash(datasphere tasks *)",
       "Bash(datasphere * tasks *)",
       "Read(./.env)",
-      "Read(./.env.*)"
+      "Read(./.env.*)",
+      "Read(./.master-key)"
     ]
   }
 }

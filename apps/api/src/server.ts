@@ -1,4 +1,4 @@
-import Fastify, { type FastifyError } from "fastify";
+import Fastify, { type FastifyError, type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
@@ -38,12 +38,53 @@ export interface JobQueue {
 
 export interface ServerOptions {
   logger?: boolean;
+  /** Where log lines go instead of stdout (tests). */
+  logStream?: NodeJS.WritableStream;
   /** The built web app (apps/web/dist). Without it, only /api is served. */
   webRoot?: string;
+  /** Which proxies in front of the API may say who the client is: see trustProxyFromEnv. Default: none. */
+  trustProxy?: number | string[] | false;
 }
 
+/**
+ * YSTARA_TRUST_PROXY: which proxy in front of the API may tell it the client's address (X-Forwarded-For),
+ * so the sign-in limits count per real client and not per proxy. Unset: none, for an API reached directly
+ * (as on 127.0.0.1). A number: that many proxies in front (1 for Caddy or nginx on the same machine).
+ * Otherwise: the proxies' addresses or ranges, separated by commas (e.g. 10.0.0.0/8). "true" is refused:
+ * trusting every sender would let any client choose its own address and get around the limits.
+ */
+export function trustProxyFromEnv(value = process.env.YSTARA_TRUST_PROXY): number | string[] | false {
+  const v = value?.trim();
+  if (!v) return false;
+  if (/^\d+$/.test(v)) return Number(v);
+  if (["true", "*", "all"].includes(v.toLowerCase())) {
+    throw new Error("YSTARA_TRUST_PROXY must name the proxies in front of the API: their number (e.g. 1) or their addresses. Trusting every sender would let any client choose its own address.");
+  }
+  return v.split(",").map((part) => part.trim()).filter(Boolean);
+}
+
+/**
+ * Some links work like a password for days (invitation links), so their token never goes into the log:
+ * it is cut from the path, both for the API call and for the web app's page.
+ */
+const TOKEN_IN_PATH = /\/(invitations|invite)\/[^/?#]+/g;
+export const pathForLog = (url: string) => url.replace(TOKEN_IN_PATH, "/$1/<token>");
+
+/** Fastify's own request log entry, with the path cleaned. */
+const requestForLog = (req: FastifyRequest) => ({
+  method: req.method,
+  url: pathForLog(req.url),
+  host: req.host,
+  remoteAddress: req.ip,
+  remotePort: req.socket?.remotePort,
+});
+
 export async function buildServer(deps: { db: Db; queue: JobQueue; secrets: SecretBox }, opts: ServerOptions = {}) {
-  const app = Fastify({ logger: opts.logger ?? true });
+  const logger = opts.logger === false ? false : { serializers: { req: requestForLog }, ...(opts.logStream && { stream: opts.logStream }) };
+  // A count of proxies: believe the forwarded addresses up to that many hops back (what Fastify does with a number,
+  // which its types don't take).
+  const { trustProxy = false } = opts;
+  const app = Fastify({ logger, trustProxy: typeof trustProxy === "number" ? (_address: string, hop: number) => hop < trustProxy : trustProxy });
   await app.register(cookie);
   // Only routes that ask for it are limited (sign-in, codes, invitation links).
   await app.register(rateLimit, { global: false });
@@ -104,6 +145,7 @@ export async function buildServer(deps: { db: Db; queue: JobQueue; secrets: Secr
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   loadLocalEnv(fileURLToPath(new URL("../../../", import.meta.url)));
   const secrets = secretBox(masterKeyFromEnv()); // before anything else, so a missing key stops the start at once
+  const trustProxy = trustProxyFromEnv(); // and so does a bad YSTARA_TRUST_PROXY
 
   const url = databaseUrl();
   const db = connect(url);
@@ -113,6 +155,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   await boss.start(); // queues are created by `npm run db:migrate`
 
   const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
-  const app = await buildServer({ db, queue: boss, secrets }, { webRoot: existsSync(webRoot) ? webRoot : undefined });
+  const app = await buildServer({ db, queue: boss, secrets }, { webRoot: existsSync(webRoot) ? webRoot : undefined, trustProxy });
   await app.listen({ port: Number(process.env.YSTARA_API_PORT ?? 4000), host: process.env.API_HOST ?? "127.0.0.1" });
 }

@@ -117,11 +117,14 @@ export const useInvitation = (token: string) =>
 export const useAuthenticatorSetup = (token: string) =>
   useMutation({ mutationFn: () => request<AuthenticatorSetup>("POST", `/invitations/${token}/authenticator`) });
 
-/** A new user sends a password, the authenticator secret and a code from it; an existing user (signed in) sends nothing. */
+/**
+ * A new user sends a password and a code from the authenticator secret the server made for the link (never the secret
+ * itself); an existing user (signed in) sends nothing.
+ */
 export function useAcceptInvitation(token: string) {
   const startWith = useStartWith();
   return useMutation({
-    mutationFn: (input: { password: string; totpSecret: string; code: string } | Record<string, never>) => request<Me>("POST", `/invitations/${token}/accept`, input),
+    mutationFn: (input: { password: string; code: string } | Record<string, never>) => request<Me>("POST", `/invitations/${token}/accept`, input),
     onSuccess: startWith,
   });
 }

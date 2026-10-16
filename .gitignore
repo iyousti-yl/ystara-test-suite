@@ -4,6 +4,7 @@ dist/
 .env
 .env.*
 !.env.example
+.master-key
 coverage/
 tools/spike/output/
 tools/scan/output/

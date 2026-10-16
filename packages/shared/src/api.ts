@@ -145,7 +145,10 @@ export interface CreatedInvitation {
   token: string;
 }
 
-/** POST /api/invitations/:token/authenticator: a new secret for the authenticator app, before the user exists. */
+/**
+ * POST /api/invitations/:token/authenticator: a secret the server made and keeps (sealed) on the
+ * invitation. Shown once, for the QR code and for typing in by hand; never sent back.
+ */
 export interface AuthenticatorSetup {
   secret: string;
   /** What the QR code holds. */

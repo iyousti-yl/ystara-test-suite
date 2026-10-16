@@ -17,11 +17,12 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build -w @ystara/web
-      # A secret with a `$` in .env.local must never show up in what Compose prints
-      # (it would if docker-compose.yml loaded the file or substituted app settings).
-      - name: Compose never sees app settings
+      # A secret with a `$` in .env.local, or the key in .master-key, must never show up in what Compose
+      # prints (it would if docker-compose.yml loaded those files or substituted app settings).
+      - name: Compose never sees app settings or the key
         run: |
           printf '%s\n' "DSP_OAUTH_CLIENT_SECRET='canary\$SECRET_TAIL'" > .env.local
+          printf '%s' 'keycanary$KEY_TAIL' > .master-key
           docker compose config > compose.out 2>&1
-          if grep -E 'canary|SECRET_TAIL' compose.out; then echo "Compose printed part of a secret"; exit 1; fi
-          rm .env.local compose.out
+          if grep -E 'canary|SECRET_TAIL|KEY_TAIL' compose.out; then echo "Compose printed part of a secret"; exit 1; fi
+          rm .env.local .master-key compose.out

@@ -37,6 +37,8 @@ export interface User {
   passwordHash: string;
   /** Sealed with MASTER_KEY; apps/api opens it. */
   totpSecret: string;
+  /** After too many wrong codes, no code is checked before this time. */
+  codesLockedUntil: Date | null;
 }
 
 interface UserRow {
@@ -44,8 +46,15 @@ interface UserRow {
   email: string;
   password_hash: string;
   totp_secret: string;
+  codes_locked_until: Date | null;
 }
-const toUser = (r: UserRow): User => ({ id: r.id, email: r.email, passwordHash: r.password_hash, totpSecret: r.totp_secret });
+const toUser = (r: UserRow): User => ({
+  id: r.id,
+  email: r.email,
+  passwordHash: r.password_hash,
+  totpSecret: r.totp_secret,
+  codesLockedUntil: r.codes_locked_until,
+});
 
 export async function findUserByEmail(db: Queryable, email: string): Promise<User | undefined> {
   const { rows } = await db.query<UserRow>("select * from users where email = $1", [email.toLowerCase()]);
@@ -58,12 +67,37 @@ export async function getUser(db: Queryable, id: string): Promise<User | undefin
 }
 
 /**
- * Records that the authenticator code of time step `step` was used. False when
- * that code or a later one was already used, so each code signs in only once.
+ * Records that the authenticator code of time step `step` was used, and
+ * forgets earlier wrong codes. False when that code or a later one was already
+ * used, so each code signs in only once.
  */
 export async function useTotpStep(db: Queryable, userId: string, step: number): Promise<boolean> {
-  const { rows } = await db.query("update users set totp_last_step = $2 where id = $1 and totp_last_step < $2 returning id", [userId, step]);
+  const { rows } = await db.query(
+    "update users set totp_last_step = $2, failed_codes = 0, codes_locked_until = null where id = $1 and totp_last_step < $2 returning id",
+    [userId, step],
+  );
   return rows.length === 1;
+}
+
+/**
+ * Counts a wrong authenticator code for a user, whichever session it came
+ * from, so signing in with the password again doesn't start the count over.
+ * From the `lockAfter`th wrong code in a row, codes are locked for 1 minute,
+ * then 2, 4, ... up to `maxMinutes`. Returns the count and the lock, if any.
+ */
+export async function recordFailedCode(
+  db: Queryable,
+  userId: string,
+  rule: { lockAfter: number; maxMinutes: number },
+): Promise<{ failedCodes: number; lockedUntil: Date | null }> {
+  const { rows } = await db.query<{ failed_codes: number; codes_locked_until: Date | null }>(
+    `update users set failed_codes = failed_codes + 1,
+       codes_locked_until = case when failed_codes + 1 >= $2
+         then now() + make_interval(mins => least(power(2, least(failed_codes + 1 - $2, 10))::int, $3)) end
+     where id = $1 returning failed_codes, codes_locked_until`,
+    [userId, rule.lockAfter, rule.maxMinutes],
+  );
+  return { failedCodes: rows[0]?.failed_codes ?? 0, lockedUntil: rows[0]?.codes_locked_until ?? null };
 }
 
 // --- Memberships
@@ -97,7 +131,11 @@ export async function changeMember(db: Db, accountId: string, userId: string, ro
     const otherAdmins = rows.filter((r) => r.role === "admin" && r.user_id !== userId).length;
     if (member.role === "admin" && role !== "admin" && otherAdmins === 0) return "last-admin";
     if (role) await tx.query("update memberships set role = $3 where account_id = $1 and user_id = $2", [accountId, userId, role]);
-    else await tx.query("delete from memberships where account_id = $1 and user_id = $2", [accountId, userId]);
+    else {
+      await tx.query("delete from memberships where account_id = $1 and user_id = $2", [accountId, userId]);
+      // Their sessions in this account already stopped working (a session needs a membership); remove them too.
+      await tx.query("delete from sessions where account_id = $1 and user_id = $2", [accountId, userId]);
+    }
     return "done";
   });
 }
@@ -154,9 +192,32 @@ export async function findOpenInvitation(db: Queryable, token: string): Promise<
 }
 
 /**
+ * Keeps the authenticator secret the server made for a new user (sealed),
+ * replacing any earlier one. False when the link is used or expired.
+ */
+export async function setInvitationTotpSecret(db: Queryable, token: string, sealedSecret: string): Promise<boolean> {
+  const { rows } = await db.query(
+    "update invitations set totp_secret = $2 where token_hash = $1 and accepted_at is null and expires_at > now() returning id",
+    [hashToken(token), sealedSecret],
+  );
+  return rows.length === 1;
+}
+
+/** The sealed authenticator secret kept for an open invitation; undefined before the setup was opened. */
+export async function invitationTotpSecret(db: Queryable, token: string): Promise<string | undefined> {
+  const { rows } = await db.query<{ totp_secret: string | null }>(
+    "select totp_secret from invitations where token_hash = $1 and accepted_at is null and expires_at > now()",
+    [hashToken(token)],
+  );
+  return rows[0]?.totp_secret ?? undefined;
+}
+
+/**
  * Accepts an invitation: creates the user when `newUser` is given, adds the
  * membership and closes the invitation, all at once. Undefined when the
- * invitation was used or expired in the meantime.
+ * invitation was used or expired in the meantime. Someone who is already a
+ * member keeps their role: an invitation never changes an existing role
+ * (that goes through the Users and roles page, which keeps the last admin).
  */
 export async function acceptInvitation(
   db: Db,
@@ -181,7 +242,7 @@ export async function acceptInvitation(
       userId = created.rows[0].id;
     }
     await tx.query(
-      "insert into memberships (account_id, user_id, role) values ($1, $2, $3) on conflict (account_id, user_id) do update set role = excluded.role",
+      "insert into memberships (account_id, user_id, role) values ($1, $2, $3) on conflict (account_id, user_id) do nothing",
       [invitation.account_id, userId, invitation.role],
     );
     // Other open links for the same person and account have nothing left to do.
@@ -226,15 +287,6 @@ export async function findSession(db: Queryable, token: string): Promise<Session
   );
   const r = rows[0];
   return r && { userId: r.user_id, email: r.email, accountId: r.account_id, role: r.role, verified: r.verified };
-}
-
-/** Counts a wrong authenticator code on a session and returns how many there were. */
-export async function recordFailedCode(db: Queryable, token: string): Promise<number> {
-  const { rows } = await db.query<{ failed_codes: number }>(
-    "update sessions set failed_codes = failed_codes + 1 where token_hash = $1 returning failed_codes",
-    [hashToken(token)],
-  );
-  return rows[0]?.failed_codes ?? 0;
 }
 
 /** Moves a session to another account the user belongs to. False when they are not a member there. */

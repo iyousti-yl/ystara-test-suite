@@ -121,7 +121,7 @@ function NewUser({ token, offer }: { token: string; offer: InvitationOffer }) {
     <AuthFrame title="Set up your authenticator app">
       <AuthForm
         key="authenticator"
-        onSubmit={() => codeComplete && accept.mutate({ password, totpSecret: secret, code: code.trim() }, { onSuccess: () => navigate("/", { replace: true }) })}
+        onSubmit={() => codeComplete && accept.mutate({ password, code: code.trim() }, { onSuccess: () => navigate("/", { replace: true }) })}
       >
         <p>
           Every sign-in asks for a code from an authenticator app (Microsoft Authenticator, Google Authenticator, 1Password or similar). Scan this
