@@ -6,6 +6,11 @@
  * every CLI call goes through `assertReadOnly`, which allows a short list of
  * read commands and throws on anything else. Adding a write command means
  * changing this file on purpose, in a reviewed PR.
+ *
+ * Besides reads, one housekeeping command is allowed: `config cache init`,
+ * which downloads the tenant's list of CLI commands into the CLI's local
+ * cache (the object commands only exist after it). It changes nothing in the
+ * tenant.
  */
 
 export const CLI_OBJECT_KINDS = [
@@ -25,7 +30,8 @@ export type CliObjectKind = (typeof CLI_OBJECT_KINDS)[number];
 /** The only commands Ystara may run. */
 export type ReadCommand =
   | { group: "objects"; kind: CliObjectKind; verb: "list" | "read" }
-  | { group: "spaces"; verb: "list" | "read" };
+  | { group: "spaces"; verb: "list" | "read" }
+  | { group: "config"; verb: "cache-init" };
 
 const READ_VERBS = new Set(["list", "read"]);
 
@@ -37,7 +43,9 @@ export class WriteAttemptError extends Error {
 }
 
 export function commandPath(cmd: ReadCommand): string[] {
-  return cmd.group === "objects" ? ["objects", cmd.kind, cmd.verb] : ["spaces", cmd.verb];
+  if (cmd.group === "objects") return ["objects", cmd.kind, cmd.verb];
+  if (cmd.group === "spaces") return ["spaces", cmd.verb];
+  return ["config", "cache", "init"];
 }
 
 /**
@@ -51,6 +59,7 @@ export function assertReadOnly(path: readonly string[]): void {
       path[0] === "objects" &&
       (CLI_OBJECT_KINDS as readonly string[]).includes(path[1]) &&
       READ_VERBS.has(path[2])) ||
-    (path.length === 2 && path[0] === "spaces" && READ_VERBS.has(path[1]));
+    (path.length === 2 && path[0] === "spaces" && READ_VERBS.has(path[1])) ||
+    (path.length === 3 && path[0] === "config" && path[1] === "cache" && path[2] === "init");
   if (!ok) throw new WriteAttemptError([...path]);
 }

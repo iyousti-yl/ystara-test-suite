@@ -63,6 +63,8 @@ The API (with the web app) and Postgres are published on 127.0.0.1 only, because
 
 **Settings.** App settings and secrets go in `.env.local`. `.env` may only hold the `YSTARA_*` ports, because Compose reads `.env` and can print parts of its values (a `$` in a secret is read as a variable); the tools refuse to start when `.env` holds anything else and name the keys to move. Shell variables win over both files.
 
+**Scanning with a technical OAuth client.** `npm run scan` uses your own `datasphere login` unless `.env.local` holds a technical OAuth client of the tenant (`DSP_CLIENT_ID`, `DSP_CLIENT_SECRET`, `DSP_TOKEN_URL`); then it logs in with that client in a temporary CLI folder, the way the worker will. `npm run spike:technical-client` checks first, read-only, whether such a client can see a space; its header says how to create the client.
+
 Load a scan you already saved with `npm run scan`, without calling the tenant, then open it in the web app (the command prints the link):
 
 ```bash
