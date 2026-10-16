@@ -62,9 +62,9 @@ services:
 
   # Checks connections and runs scans with the Datasphere CLI, logged in with each tenant's technical
   # client (entered with Connect on the tenant page; it opens their secrets with the key in .master-key).
-  # A tenant without one would need the CLI's own login, which this container doesn't
-  # have: for that, stop this service and run `npm run dev:worker` on your machine after
-  # `datasphere login`. Imported scans need no worker.
+  # A tenant without one is not scanned here ("not connected"). To scan it with your own CLI login for
+  # local development, stop this service, run `datasphere login` and then `npm run dev:worker` on your
+  # machine with YSTARA_WORKER_MACHINE_LOGIN=1 set in your shell. Imported scans need no worker.
   worker:
     <<: *app
     command: ["node", "apps/worker/dist/main.js"]
