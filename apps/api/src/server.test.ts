@@ -77,7 +77,7 @@ describe("one port for the API and the web app", () => {
 });
 
 describe("the log", () => {
-  it("never holds the token of an invitation link", async () => {
+  it("never holds the token of an invitation or reset link", async () => {
     const lines: string[] = [];
     const stream = new PassThrough().on("data", (chunk: Buffer) => lines.push(chunk.toString()));
     const logged = await buildServer(deps(), { logStream: stream, webRoot });
@@ -85,6 +85,8 @@ describe("the log", () => {
     await logged.inject(`/api/invitations/${token}`);
     await logged.inject({ method: "POST", url: `/api/invitations/${token}/accept?x=1`, payload: {} });
     await logged.inject({ url: `/invite/${token}`, headers: html });
+    await logged.inject(`/api/resets/${token}`);
+    await logged.inject({ url: `/reset/${token}`, headers: html });
     await logged.close();
 
     const log = lines.join("");
@@ -92,6 +94,8 @@ describe("the log", () => {
     expect(log).toContain('"url":"/api/invitations/<token>"');
     expect(log).toContain('"url":"/api/invitations/<token>/accept?x=1"');
     expect(log).toContain('"url":"/invite/<token>"');
+    expect(log).toContain('"url":"/api/resets/<token>"');
+    expect(log).toContain('"url":"/reset/<token>"');
   });
 });
 

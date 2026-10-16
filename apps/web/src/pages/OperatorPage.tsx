@@ -75,9 +75,12 @@ export function OperatorPage() {
                 <TableCell horizontalAlign="End">{a.openInvitations || "–"}</TableCell>
                 <TableCell>{formatDateTime(a.createdAt)}</TableCell>
                 <TableCell horizontalAlign="End">
-                  <Button design="Transparent" onClick={() => setDialog({ kind: "admin", accountId: a.id, name: a.name })}>
-                    Invite an admin
-                  </Button>
+                  {/* Where an admin is left, they invite people themselves; the API refuses it too. */}
+                  {a.admins === 0 && (
+                    <Button design="Transparent" onClick={() => setDialog({ kind: "admin", accountId: a.id, name: a.name })}>
+                      Invite an admin
+                    </Button>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -116,9 +119,12 @@ export function OperatorPage() {
                 <TableCell>{u.accounts.map((a) => `${a.name}: ${ROLE_LABEL[a.role]}`).join(", ") || <span className="muted">None</span>}</TableCell>
                 <TableCell>{formatDateTime(u.createdAt)}</TableCell>
                 <TableCell horizontalAlign="End">
-                  <Button design="Transparent" onClick={() => setDialog({ kind: "reset", user: u })}>
-                    Reset sign-in
-                  </Button>
+                  {/* An operator's sign-in is never reset from here: one operator would take over another. */}
+                  {!u.operator && (
+                    <Button design="Transparent" onClick={() => setDialog({ kind: "reset", user: u })}>
+                      Reset sign-in
+                    </Button>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -254,7 +260,8 @@ function ResetDialog({ user, onClose }: { user: Json<UserOverview>; onClose: () 
         <div className="dialog-body">
           <p>
             For someone who lost their password or phone. Check first that the request really comes from {user.email}: the link gives full access to
-            their accounts. Their current sign-in keeps working until the link is used, and an earlier reset link stops working.
+            their accounts. Their current sign-in keeps working until the link is used, and an earlier reset link stops working. The admins of their
+            accounts see that Ystara made the link, and when it was used.
           </p>
           <ErrorStrip error={reset.error} />
         </div>

@@ -13,7 +13,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { assertYstaraDatabase, connect, createAccount, createInvitation, findAccountByName, listMembers } from "@ystara/db";
+import { assertYstaraDatabase, connect, createAccountWithAdmin, createInvitation, findAccountByName, listMembers } from "@ystara/db";
 import { loadLocalEnv } from "@ystara/shared/env";
 
 loadLocalEnv(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".."));
@@ -30,12 +30,12 @@ const db = connect();
 try {
   await assertYstaraDatabase(db);
   const existing = await findAccountByName(db, name);
-  const account = existing ?? (await createAccount(db, name));
-  if (existing && (await listMembers(db, account.id)).some((m) => m.email === email)) {
+  if (existing && (await listMembers(db, existing.id)).some((m) => m.email === email)) {
     console.error(`${email} is already a member of "${name}".`);
     process.exit(1);
   }
-  const { token } = await createInvitation(db, { accountId: account.id, email, role: "admin" });
+  // A new account comes with its admin's invitation, or not at all.
+  const { token } = existing ? await createInvitation(db, { accountId: existing.id, email, role: "admin" }) : await createAccountWithAdmin(db, name, email);
   const base = (process.env.YSTARA_PUBLIC_URL ?? `http://127.0.0.1:${process.env.YSTARA_API_PORT ?? 4000}`).replace(/\/+$/, "");
   console.log(existing ? `Account "${name}" already exists; invited ${email} as admin.` : `Created account "${name}" and invited ${email} as its admin.`);
   console.log(`\nSend this link to ${email}. It works once, for 7 days:\n\n  ${base}/invite/${token}\n`);

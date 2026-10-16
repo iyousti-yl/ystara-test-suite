@@ -127,11 +127,26 @@ export async function membershipsOf(db: Queryable, userId: string): Promise<(Acc
 }
 
 export async function listMembers(db: Queryable, accountId: string): Promise<Member[]> {
-  const { rows } = await db.query<{ user_id: string; email: string; role: Role; created_at: Date }>(
-    "select m.user_id, u.email, m.role, m.created_at from memberships m join users u on u.id = m.user_id where m.account_id = $1 order by u.email",
+  // With each member, the latest sign-in reset Ystara's operator made for them that was used or is still open.
+  const { rows } = await db.query<{ user_id: string; email: string; role: Role; created_at: Date; reset_made_at: Date | null; reset_used_at: Date | null }>(
+    `select m.user_id, u.email, m.role, m.created_at, r.created_at as reset_made_at, r.used_at as reset_used_at
+     from memberships m
+     join users u on u.id = m.user_id
+     left join lateral (
+       select created_at, used_at from sign_in_resets
+       where user_id = m.user_id and (used_at is not null or expires_at > now())
+       order by coalesce(used_at, created_at) desc limit 1
+     ) r on true
+     where m.account_id = $1 order by u.email`,
     [accountId],
   );
-  return rows.map((r) => ({ userId: r.user_id, email: r.email, role: r.role, joinedAt: r.created_at }));
+  return rows.map((r) => ({
+    userId: r.user_id,
+    email: r.email,
+    role: r.role,
+    joinedAt: r.created_at,
+    ...(r.reset_made_at && { signInReset: { madeAt: r.reset_made_at, ...(r.reset_used_at && { usedAt: r.reset_used_at }) } }),
+  }));
 }
 
 /**
@@ -180,6 +195,14 @@ export async function createInvitation(db: Queryable, input: { accountId: string
     [input.accountId, input.email.toLowerCase(), input.role, hashToken(token), INVITATION_DAYS],
   );
   return { invitation: toInvitation(rows[0]), token };
+}
+
+/** A new account and the invitation for its first admin, both or neither. */
+export async function createAccountWithAdmin(db: Db, name: string, email: string): Promise<{ account: Account; invitation: Invitation; token: string }> {
+  return db.transaction(async (tx) => {
+    const account = await createAccount(tx, name);
+    return { account, ...(await createInvitation(tx, { accountId: account.id, email, role: "admin" })) };
+  });
 }
 
 /** Open invitations of an account: not accepted and not expired. */

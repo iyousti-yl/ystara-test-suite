@@ -79,6 +79,13 @@ export function UsersPage() {
                   <TableCell>
                     {m.email}
                     {m.userId === me.user.id && <span className="muted you">(you)</span>}
+                    {m.signInReset && (
+                      <div className="muted">
+                        {m.signInReset.usedAt
+                          ? `Sign-in reset by Ystara on ${formatDateTime(m.signInReset.usedAt)}`
+                          : `Ystara made a sign-in reset link on ${formatDateTime(m.signInReset.madeAt)}; not used yet`}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Select

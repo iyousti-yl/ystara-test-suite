@@ -66,10 +66,10 @@ export function trustProxyFromEnv(value = process.env.YSTARA_TRUST_PROXY): numbe
 }
 
 /**
- * Some links work like a password for days (invitation links), so their token never goes into the log:
+ * Some links work like a password for days (invitation and reset links), so their token never goes into the log:
  * it is cut from the path, both for the API call and for the web app's page.
  */
-const TOKEN_IN_PATH = /\/(invitations|invite)\/[^/?#]+/g;
+const TOKEN_IN_PATH = /\/(invitations|invite|resets|reset)\/[^/?#]+/g;
 export const pathForLog = (url: string) => url.replace(TOKEN_IN_PATH, "/$1/<token>");
 
 /** Fastify's own request log entry, with the path cleaned. */

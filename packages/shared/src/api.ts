@@ -124,6 +124,8 @@ export interface Member {
   email: string;
   role: Role;
   joinedAt: Date;
+  /** The latest sign-in reset link Ystara's operator made for them, when it was used or is still open. */
+  signInReset?: { madeAt: Date; usedAt?: Date };
 }
 
 /** An open invitation to join the account. The link itself is shown only once, when it is created. */
