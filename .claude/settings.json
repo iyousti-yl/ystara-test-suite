@@ -23,6 +23,9 @@
       "Bash(datasphere * run)",
       "Bash(datasphere tasks *)",
       "Bash(datasphere * tasks *)",
+      "Bash(git diff *--output*)",
+      "Bash(git log *--output*)",
+      "Bash(git diff *--no-index*)",
       "Read(./.env)",
       "Read(./.env.*)",
       "Read(./.master-key)"

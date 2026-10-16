@@ -11,7 +11,8 @@
   "scripts": {
     "build": "tsc -b && npm run build -w @ystara/web",
     "typecheck": "tsc -b && tsc -p tools/tsconfig.json && tsc -p apps/web/tsconfig.json",
-    "test": "npm run test --workspaces --if-present",
+    "prepare": "node -e \"try { const git = (...a) => require('child_process').execFileSync('git', a, { encoding: 'utf8', stdio: 'pipe' }); if (git('rev-parse', '--is-inside-work-tree').trim() === 'true') git('config', 'core.hooksPath', '.githooks'); } catch {}\"",
+    "test": "npm run test --workspaces --if-present && vitest run --dir tools",
     "lint": "eslint .",
     "dev:api": "npm run dev -w @ystara/api",
     "dev:worker": "npm run dev -w @ystara/worker",

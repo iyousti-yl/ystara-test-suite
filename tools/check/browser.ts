@@ -13,7 +13,9 @@
  *
  * Without --page it opens every kind of page that has data: sign-in (signed
  * out), tenants, the first tenant, its newest successful scan, its first saved
- * pipeline, Users and roles for admins and Operator for operators.
+ * pipeline, Users and roles for admins and Operator for operators. --page
+ * takes a path on this app that starts with one "/", so it never opens
+ * another site.
  *
  * Signing in: the check writes a 15-minute session for the user straight into
  * the database and deletes it at the end, so it needs no password or
@@ -93,6 +95,10 @@ try {
 
 async function main() {
   if (widths.some((w) => !Number.isInteger(w) || w < 320 || w > 3840)) fail("--widths takes numbers between 320 and 3840, e.g. 390,1440");
+  // A page is a path on this app, so the check never opens another site ("@other.site" or "//other.site" would).
+  for (const p of values.page ?? []) {
+    if (!p.startsWith("/") || p.startsWith("//") || new URL(base + p).origin !== base) fail(`--page takes a path on this app that starts with one "/", e.g. /users (not ${p}).`);
+  }
   // The check signs in without a code, so it only runs against this machine.
   const local = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
   if (!local.has(new URL(base).hostname)) fail(`${base} is not on this machine. The browser check only runs against a local app.`);

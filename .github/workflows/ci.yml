@@ -8,6 +8,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The whole history, so the tenant-content check can compare with the base branch.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -17,6 +20,24 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build -w @ystara/web
+      # Nothing tenant-specific in what a PR or a push to main adds (CLAUDE.md). CI has
+      # no tenant notes, saved scans or database, so only the generic checks apply here:
+      # Datasphere hosts, email addresses and files that must never be committed.
+      # A PR is checked from its base branch to its own last commit (not GitHub's merge
+      # commit); a push to main from the commit main was at before.
+      - name: Tenant content (generic checks)
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            npm run check:tenant-content -- --base "origin/$BASE_BRANCH" --head "$PR_HEAD"
+          elif git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            npm run check:tenant-content -- --base "$BEFORE" --head "$GITHUB_SHA"
+          else
+            npm run check:tenant-content -- --base HEAD~1 --head "$GITHUB_SHA"
+          fi
       # A secret with a `$` in .env.local, or the key in .master-key, must never show up in what Compose
       # prints (it would if docker-compose.yml loaded those files or substituted app settings).
       - name: Compose never sees app settings or the key

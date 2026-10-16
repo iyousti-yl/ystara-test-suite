@@ -1,0 +1,58 @@
+#!/bin/sh
+# Before a push leaves, runs the tenant-content check on what it adds
+# (CLAUDE.md: nothing tenant-specific in the repository). A BLOCKED verdict
+# stops the push. `npm ci` turns this hook on (the "prepare" script runs
+# `git config core.hooksPath .githooks`). Plain POSIX sh, so it also runs in
+# Git for Windows' sh.
+#
+# Git passes one line per branch or tag it is about to push:
+#   <local ref> <local sha> <remote ref> <remote sha>
+# A local sha of zeros deletes the remote branch: nothing to check. A remote
+# sha of zeros is a new branch there: check everything since origin/main.
+# Otherwise check what the remote doesn't have yet.
+#
+# Last resort, only when you are sure every hit is a false positive:
+#   git push --no-verify     (skips this hook)
+
+all_zeros() {
+  case "$1" in
+    *[!0]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "pre-push: npm was not found, so the tenant-content check can't run and the push is stopped."
+  echo "  Push from a terminal where npm works, or, last resort, git push --no-verify."
+  exit 1
+fi
+
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if all_zeros "$local_sha"; then
+    continue
+  fi
+  # A new branch, or a remote commit this clone hasn't fetched: compare with origin/main.
+  if all_zeros "$remote_sha" || ! git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    base=origin/main
+  else
+    base=$remote_sha
+  fi
+  echo "pre-push: tenant-content check of $local_ref -> $remote_ref (since $base)"
+  # </dev/null: the check must not read the ref lines meant for this loop.
+  if ! npm run --silent check:tenant-content -- --base "$base" --head "$local_sha" </dev/null; then
+    status=1
+  fi
+done
+
+if [ "$status" -ne 0 ]; then
+  echo ""
+  echo "pre-push: push stopped. The check found tenant content (BLOCKED above) or could not run."
+  echo "  - Replace each name under \"New hits\" with a synthetic one (e.g. SALES_ORDERS_SYNTH, name@example.com)"
+  echo "    in the commit that adds it: git commit --amend for the last commit, an interactive rebase for an"
+  echo "    earlier one. A later commit that removes the name still pushes the earlier one."
+  echo "  - A file that must never be committed: git rm --cached <file>, then amend the commit."
+  echo "  - In Claude Code, /tenant-content-check explains each hit."
+  echo "  - Last resort, only when you are sure every hit is a false positive: git push --no-verify"
+fi
+exit "$status"

@@ -20,8 +20,8 @@ You check Ystara's web app in a real browser and report what is wrong on screen.
 
 ## Procedure
 
-1. **Preflight.** `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/api/auth/me` answers `401` when the app runs (use the `--url` given, if any). Anything else: report that the app is not running and how to start it (`docker compose up -d`, or `npm run dev:api` with `npm run dev:web` for the dev server on :5173 and `--url http://127.0.0.1:5173`), and stop.
-2. **Run** `npm run check:browser -- <arguments>`. Without `--page` it opens every kind of page that has data. It exits with code 1 when it found problems; that is a result, not a failure. If it refuses (no user, unknown account, Chromium missing), report its message and stop.
+1. **Preflight.** Run exactly `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/api/auth/me`, or the same with `:5173` when `--url http://127.0.0.1:5173` is given; it answers `401` when the app runs. These two are the only curl commands you run (the skill allows nothing else); with any other `--url`, skip the preflight. Anything but `401`: report that the app is not running and how to start it (`docker compose up -d`, or `npm run dev:api` with `npm run dev:web` for the dev server on :5173 and `--url http://127.0.0.1:5173`), and stop.
+2. **Run** `npm run check:browser -- <arguments>`. Without `--page` it opens every kind of page that has data; `--page` takes paths on this app that start with one `/`. It exits with code 1 when it found problems; that is a result, not a failure. If it refuses (no user, unknown account, a `--page` that is not a path, Chromium missing), report its message and stop.
 3. **Read** `report.json` in the folder it names. Group the same problem on several widths into one line. A 403 or 404 is fine only when the page shows a clear message for it; a 401 on a signed-out page is expected (listed under `notes`).
 4. **Look at the screenshots** with Read: every one when there are 24 or fewer, otherwise each page at the narrowest and the widest width plus any page with problems. Look for:
    - text cut off, overlapping or running out of its box; columns too narrow to read

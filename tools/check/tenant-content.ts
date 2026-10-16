@@ -6,6 +6,7 @@
  *   npm run check:tenant-content                              # this branch against origin/main, plus uncommitted and untracked files
  *   npm run check:tenant-content -- --base phase-1d-sign-in   # a branch stacked on another one
  *   npm run check:tenant-content -- --file pr-body.md         # also a text that leaves another way (a PR description)
+ *   npm run check:tenant-content -- --base <sha> --head <sha> # only the commits a push sends (the pre-push hook and CI)
  *
  * What it looks for comes from the git-ignored places that hold tenant
  * content on this machine, and is never printed as a list:
@@ -15,62 +16,59 @@
  *     a name ending in _ or * is a prefix (a naming convention)
  *   - the local database, when it runs: scanned objects, tenant names and hosts, account names, user emails
  * plus, always, Datasphere/HANA Cloud host names and email addresses outside the example domains.
+ * Names are found as whole words and ignoring case (SALES_ORDERS_SYNTH also finds
+ * sales_orders_synth). Names of 3 characters are looked for only with a digit or
+ * an underscore (A1B, ZX_); plain words of 1 to 3 letters (HR, API) are too generic.
  *
  * Where it looks: lines added on this branch since --base, uncommitted and
- * untracked files, file names, commit messages, and every --file. Images that
- * are added are listed to check by eye, and files that must never be
- * committed (.env*, *.local.*, scan and check output) are refused outright.
+ * untracked files, file names, commit messages with their authors and
+ * committers, and every --file. With --head, only the commits up to that one
+ * (what a push sends): uncommitted and untracked files stay on this machine.
+ * Images that are added are listed to check by eye, and files that must never
+ * be committed (.env*, *.local.*, scan and check output) are refused outright;
+ * --file refuses to read them too.
  *
- * A hit whose text is already in --base is listed apart: it is not new, but
- * it may be a leak from before or simply a generic word. The exit code is 1
- * when there is a new hit or a file that must never be committed.
+ * A hit is listed apart as "already in --base" when the exact same text (same
+ * case, whole word) is in a file there, package-lock.json aside, or, for an
+ * author or committer, when the same name and address made a commit there. It
+ * is not new, but it may be a leak from before or simply a generic word. The
+ * exit code is 1 when there is a new hit or a file that must never be committed.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { connect, databaseUrl } from "@ystara/db";
 import { loadLocalEnv } from "@ystara/shared/env";
+import { addedLines, buildMatcher, EXAMPLE_DOMAIN, findIn, longEnough, mustNeverCommit, refusedFile, type Hit, type Line, type Term } from "./tenant-rules.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+const { values } = parseArgs({ options: { base: { type: "string" }, head: { type: "string" }, file: { type: "string", multiple: true } } });
+
+// The check prints the lines that match, so --file could otherwise read .env.local
+// or tenant notes. The name decides, before anything is read; a link is judged by
+// where it points too.
+for (const file of values.file ?? []) {
+  const full = path.resolve(file);
+  if (refusedFile(file, process.cwd(), root) || (existsSync(full) && refusedFile(realpathSync(full), process.cwd(), root))) {
+    stop(`--file ${file}: refused. Files that must never be committed (.env*, *.local.*, scan and check output) are not read by this check either.`);
+  }
+}
+
 loadLocalEnv(root);
 
-const { values } = parseArgs({ options: { base: { type: "string" }, file: { type: "string", multiple: true } } });
-
-/** Something tenant-specific to look for. */
-interface Term {
-  text: string;
-  source: string;
-  /** word: the whole name; prefix: the start of a name (a naming convention); text: anywhere, ignoring case (hosts, emails). */
-  kind: "word" | "prefix" | "text";
-}
-/** A place in what leaves the machine, and the line there. */
-interface Line {
-  where: string;
-  text: string;
-}
-interface Hit extends Line {
-  match: string;
-  source: string;
-}
-
-const MIN_LENGTH = 4;
-const EXAMPLE_DOMAIN = /(^|\.)(example\.(com|org|net)|example|invalid|test|localhost|local)$/i;
-/** Addresses that are fine anywhere: commit attribution and GitHub's no-reply addresses. */
-const OWN_ADDRESS = /^(noreply@anthropic\.com|.*@users\.noreply\.github\.com)$/i;
-const NEVER_COMMIT = [/(^|\/)\.env$/, /(^|\/)\.env\.(?!example$)[^/]+$/, /\.local\.(md|json)$/, /^tools\/(scan|spike|check)\/output\//];
 const IMAGE = /\.(png|jpe?g|gif|webp|svg|bmp|pdf)$/i;
-/** "page@1440.png" looks like an address but is a file name. */
-const FILE_NAME = /\.(png|jpe?g|gif|webp|svg|pdf|json|md|ts|tsx|js|mjs|css|html|txt|log|csv)$/i;
-const GENERIC = [
-  { source: "Datasphere host", pattern: /\b[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)*\.(hcs\.cloud\.sap|hanacloud\.ondemand\.com|hana\.ondemand\.com)\b/gi },
-  { source: "email address", pattern: /\b[\w.+-]+@[\w-]+(\.[\w-]+)*\.[A-Za-z]{2,}\b/g },
-];
 
 const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
 const base = values.base ?? (tryGit("rev-parse", "--verify", "-q", "origin/main") ? "origin/main" : "main");
+// --verify also refuses anything that looks like an option (--output=...), so --base and --head can't pass one on to git.
 if (!tryGit("rev-parse", "--verify", "-q", base)) stop(`There is no branch or commit ${base}. Pass --base <branch>.`);
+// With --head, only what a push sends: the commits from --base up to --head.
+const head = values.head ?? "HEAD";
+const pushOnly = values.head !== undefined;
+if (!tryGit("rev-parse", "--verify", "-q", `${head}^{commit}`)) stop(`There is no commit ${head}.`);
 
 const dbNotes: string[] = [];
 const terms = await localTerms();
@@ -78,15 +76,19 @@ const matcher = buildMatcher(terms);
 const { lines, paths, images, counts } = outgoing();
 
 const hits: Hit[] = [];
-for (const line of lines) hits.push(...findIn(line));
-const neverCommit = paths.filter((p) => NEVER_COMMIT.some((r) => r.test(p)));
+for (const line of lines) hits.push(...findIn(line, matcher));
+const neverCommit = paths.filter(mustNeverCommit);
 
-// Split hits into new ones and ones whose text is already in the base branch.
+// Split hits into new ones and ones already in the base branch: the exact same
+// text (same case, as a whole word) in one of its files, or, for an author or
+// committer, the same name and address on one of its commits. The lockfile
+// doesn't count: its thousands of package names would let short real names pass.
+const baseIdentities = new Set(git("log", "--format=%an <%ae>%n%cn <%ce>", base).split("\n"));
 const known = new Map<string, boolean>();
 const inBase = (h: Hit) => {
-  const key = h.match.toLowerCase();
-  if (!known.has(key)) known.set(key, tryGit("grep", "-q", "-i", "-F", h.match, base, "--"));
-  return known.get(key)!;
+  if (h.identity && baseIdentities.has(h.text)) return true;
+  if (!known.has(h.match)) known.set(h.match, tryGit("grep", "-q", "-w", "-F", "-e", h.match, base, "--", ":(exclude)package-lock.json"));
+  return known.get(h.match)!;
 };
 const fresh = hits.filter((h) => !inBase(h));
 const old = hits.filter((h) => inBase(h));
@@ -95,7 +97,8 @@ const bySource = new Map<string, number>();
 for (const t of terms) bySource.set(t.source, (bySource.get(t.source) ?? 0) + 1);
 console.log(`Looked for ${terms.length} tenant names (${[...bySource].map(([s, n]) => `${n} from ${s}`).join(", ") || "no local tenant content found"}), plus Datasphere hosts and email addresses.`);
 for (const note of dbNotes) console.log(note);
-console.log(`Checked: ${counts.branch} lines added since ${base}, ${counts.uncommitted} uncommitted, ${counts.untracked} in untracked files, ${counts.messages} commit message lines, ${counts.extra} in extra files, ${paths.length} file names.\n`);
+const workingTree = pushOnly ? ` up to ${head}` : `, ${counts.uncommitted} uncommitted, ${counts.untracked} in untracked files`;
+console.log(`Checked: ${counts.branch} lines added since ${base}${workingTree}, ${counts.messages} lines of commit messages, authors and committers, ${counts.extra} in extra files, ${paths.length} file names.\n`);
 
 print(`New hits (block the push): ${fresh.length}`, fresh);
 print(`Already in ${base} (not new; a generic word, or a leak from before): ${old.length}`, old);
@@ -125,7 +128,7 @@ async function localTerms(): Promise<Term[]> {
       t = t.replace(/\*+$/, "");
       k = "prefix";
     }
-    if (t.length < MIN_LENGTH && !(k === "prefix" && t.length >= 3)) return;
+    if (!longEnough(t, k)) return;
     found.push({ text: t, source, kind: k });
   };
 
@@ -198,8 +201,8 @@ async function databaseTerms(): Promise<Term[]> {
       return [];
     }
     const terms: Term[] = [];
-    for (const v of [...got.spaces, ...got.names, ...got.businessNames]) if (v && v.length >= MIN_LENGTH) terms.push({ text: v, source: "local database", kind: "word" });
-    for (const v of [...got.tenants, ...got.accounts]) if (v && v.length >= MIN_LENGTH && !/synthetic/i.test(v)) terms.push({ text: v, source: "local database", kind: "word" });
+    for (const v of [...got.spaces, ...got.names, ...got.businessNames]) if (v && longEnough(v, "word")) terms.push({ text: v, source: "local database", kind: "word" });
+    for (const v of [...got.tenants, ...got.accounts]) if (v && longEnough(v, "word") && !/synthetic/i.test(v)) terms.push({ text: v, source: "local database", kind: "word" });
     for (const v of got.hosts) if (v) terms.push({ text: new URL(v.includes("://") ? v : `https://${v}`).hostname, source: "local database", kind: "text" });
     for (const v of got.emails) if (v && !EXAMPLE_DOMAIN.test(v.split("@")[1] ?? "")) terms.push({ text: v, source: "local database", kind: "text" });
     return terms;
@@ -223,27 +226,21 @@ function localNotes(dir: string): string[] {
   return out;
 }
 
-/** Everything that leaves with the push: added lines, uncommitted and untracked files, file names, commit messages, extra files. */
+/** Everything that leaves with the push: added lines, uncommitted and untracked files, file names, commits, extra files. */
 function outgoing() {
   const lines: Line[] = [];
   const counts = { branch: 0, uncommitted: 0, untracked: 0, messages: 0, extra: 0 };
   const added = (diff: string, key: "branch" | "uncommitted") => {
-    let file = "";
-    let lineNo = 0;
-    for (const l of diff.split("\n")) {
-      if (l.startsWith("+++ ")) file = l.slice(4).replace(/^b\//, "");
-      else if (l.startsWith("@@")) lineNo = Number(/\+(\d+)/.exec(l)?.[1] ?? 0);
-      else if (l.startsWith("+")) {
-        lines.push({ where: `${file}:${lineNo}`, text: l.slice(1) });
-        counts[key]++;
-        lineNo++;
-      }
+    for (const a of addedLines(diff)) {
+      lines.push({ where: `${a.file}:${a.lineNo}`, text: a.text });
+      counts[key]++;
     }
   };
-  added(git("diff", "--unified=0", "--no-color", "--no-ext-diff", `${base}...HEAD`), "branch");
-  added(git("diff", "--unified=0", "--no-color", "--no-ext-diff", "HEAD"), "uncommitted");
+  added(git("diff", "--unified=0", "--no-color", "--no-ext-diff", `${base}...${head}`), "branch");
+  // A push sends commits only: uncommitted and untracked files stay on this machine.
+  if (!pushOnly) added(git("diff", "--unified=0", "--no-color", "--no-ext-diff", "HEAD"), "uncommitted");
 
-  const untracked = git("ls-files", "--others", "--exclude-standard").split("\n").filter(Boolean);
+  const untracked = pushOnly ? [] : git("ls-files", "--others", "--exclude-standard").split("\n").filter(Boolean);
   for (const file of untracked) {
     const full = path.join(root, file);
     if (IMAGE.test(file) || statSync(full).size > 2_000_000) continue;
@@ -253,11 +250,18 @@ function outgoing() {
     counts.untracked += text.split("\n").length;
   }
 
-  for (const [i, t] of git("log", "--format=%h %B", `${base}..HEAD`).split("\n").entries()) {
-    if (!t.trim()) continue;
-    lines.push({ where: `commit message, line ${i + 1}`, text: t });
-    counts.messages++;
+  // Each commit's message, and who wrote and committed it: names and addresses leave with the push too.
+  for (const commit of git("log", "--format=%x00%h%n%an <%ae>%n%cn <%ce>%n%B", `${base}..${head}`).split("\0").slice(1)) {
+    const [hash, author, committer, ...message] = commit.split("\n");
+    lines.push({ where: `commit ${hash} author`, text: author, identity: true }, { where: `commit ${hash} committer`, text: committer, identity: true });
+    counts.messages += 2;
+    message.forEach((t, i) => {
+      if (!t.trim()) return;
+      lines.push({ where: `commit ${hash} message, line ${i + 1}`, text: t });
+      counts.messages++;
+    });
   }
+  // Refused names were stopped at the start.
   for (const file of values.file ?? []) {
     const text = readFileSync(path.resolve(file), "utf8");
     text.split("\n").forEach((t, i) => lines.push({ where: `${file}:${i + 1}`, text: t }));
@@ -265,48 +269,16 @@ function outgoing() {
   }
 
   const changed = new Set([
-    ...git("diff", "--name-only", "--no-renames", `${base}...HEAD`).split("\n"),
-    ...git("diff", "--name-only", "--no-renames", "HEAD").split("\n"),
+    ...git("diff", "--name-only", "--no-renames", `${base}...${head}`).split("\n"),
+    ...(pushOnly ? [] : git("diff", "--name-only", "--no-renames", "HEAD").split("\n")),
     ...untracked,
   ]);
   changed.delete("");
   const paths = [...changed];
   for (const p of paths) lines.push({ where: `file name ${p}`, text: p });
-  const images = paths.filter((p) => IMAGE.test(p) && existsSync(path.join(root, p)));
+  // Images still there (not deleted): in the pushed commit with --head, else on disk.
+  const images = paths.filter((p) => IMAGE.test(p) && (pushOnly ? tryGit("cat-file", "-e", `${head}:${p}`) : existsSync(path.join(root, p))));
   return { lines, paths, images, counts };
-}
-
-/** Tenant names in one line. */
-function findIn(line: Line): Hit[] {
-  const out: Hit[] = [];
-  for (const m of line.text.matchAll(matcher.words)) out.push({ ...line, match: m[0], source: matcher.sourceOf(m[0]) });
-  for (const m of line.text.matchAll(matcher.prefixes)) out.push({ ...line, match: m[0], source: matcher.sourceOf(m[1]) });
-  for (const m of line.text.matchAll(matcher.texts)) out.push({ ...line, match: m[0], source: matcher.sourceOf(m[0].toLowerCase()) });
-  for (const g of GENERIC) {
-    for (const m of line.text.matchAll(g.pattern)) {
-      if (g.source === "email address" && (EXAMPLE_DOMAIN.test(m[0].split("@")[1]) || OWN_ADDRESS.test(m[0]) || FILE_NAME.test(m[0]))) continue;
-      if (g.source === "Datasphere host" && /^(example|your|my|tenant)[.-]/i.test(m[0])) continue;
-      if (!out.some((h) => h.match.toLowerCase() === m[0].toLowerCase())) out.push({ ...line, match: m[0], source: g.source });
-    }
-  }
-  return out;
-}
-
-function buildMatcher(list: Term[]) {
-  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const alternation = (kind: Term["kind"]) => {
-    const texts = list.filter((t) => t.kind === kind).map((t) => t.text).sort((a, b) => b.length - a.length);
-    // An empty list must match nothing.
-    return texts.length ? texts.map(escape).join("|") : "(?!)";
-  };
-  const source = new Map<string, string>();
-  for (const t of list) source.set(t.kind === "text" ? t.text.toLowerCase() : t.text, t.source);
-  return {
-    words: new RegExp(`(?<![A-Za-z0-9_])(?:${alternation("word")})(?![A-Za-z0-9_])`, "g"),
-    prefixes: new RegExp(`(?<![A-Za-z0-9_])(${alternation("prefix")})[A-Za-z0-9_]*`, "g"),
-    texts: new RegExp(alternation("text"), "gi"),
-    sourceOf: (match: string) => source.get(match) ?? "local tenant content",
-  };
 }
 
 function tryGit(...args: string[]) {
