@@ -13,6 +13,7 @@ import { loadLocalEnv } from "@ystara/shared/env";
 import { masterKeyFromEnv, secretBox, type SecretBox } from "@ystara/shared/secrets";
 import { installAccess } from "./auth/access.js";
 import { authRoutes } from "./routes/auth.js";
+import { connectionRoutes } from "./routes/connections.js";
 import { discoveryRoutes } from "./routes/discovery.js";
 import { operatorRoutes } from "./routes/operator.js";
 import { teamRoutes } from "./routes/team.js";
@@ -21,7 +22,8 @@ import { teamRoutes } from "./routes/team.js";
  * API entry point. Every route is under /api; anything else is the web app
  * (apps/web, built into apps/web/dist), so one port serves both and the
  * browser never makes a cross-origin call. Routes arrive per phase:
- *   phase 1: tenants, scans, lineage, pipelines (routes/discovery.ts)
+ *   phase 1: tenants, scans, lineage, pipelines (routes/discovery.ts),
+ *            each tenant's technical client (routes/connections.ts),
  *            sign-in and invitations (routes/auth.ts), users and roles (routes/team.ts),
  *            the operator panel (routes/operator.ts)
  *   later:   snapshots, runs, alerts; scenarios
@@ -121,6 +123,7 @@ export async function buildServer(deps: { db: Db; queue: JobQueue; secrets: Secr
       await api.register(teamRoutes(deps.db));
       await api.register(operatorRoutes(deps.db));
       await api.register(discoveryRoutes(deps.db, deps.queue));
+      await api.register(connectionRoutes(deps.db, deps.queue, deps.secrets));
     },
     { prefix: "/api" },
   );
