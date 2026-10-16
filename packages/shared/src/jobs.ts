@@ -5,7 +5,7 @@
 export const JOBS = {
   /** Read the spaces of a scan from its tenant (list and read only) and store the lineage graph. */
   scan: "discovery-scan",
-  /** Log in to a tenant with its technical client and list the spaces it can see. */
+  /** Log in to a tenant with its technical client and check which of its spaces it can read. */
   connectionCheck: "connection-check",
 } as const;
 
@@ -20,5 +20,5 @@ export interface ConnectionCheckJobData {
   tenantId: string;
 }
 
-/** A check is a login and one list: if it hangs, the person retries with "Check again". */
+/** A check is a login and two one-object lists per space: if it hangs, the person retries with "Check again". */
 export const CONNECTION_CHECK_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 5 * 60 };

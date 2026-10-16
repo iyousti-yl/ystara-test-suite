@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatasphereCli, describeCliFailure, type TechnicalClient } from "@ystara/connector";
-import { getConnectionLogin, type Db, type Tenant } from "@ystara/db";
+import { getConnectionLogin, type ConnectionSpace, type Db, type Tenant } from "@ystara/db";
 import { DATASPHERE_URL_HINT, isDatasphereUrl, isTokenUrl, TOKEN_URL_HINT } from "@ystara/shared";
 import { connectionSecretContext, type SecretBox } from "@ystara/shared/secrets";
 import type { TenantAccess } from "./jobs/scan.js";
@@ -44,11 +44,26 @@ export async function clientCli(host: string, client: TechnicalClient, bin?: str
   }
 }
 
-/** The connection check: log in with `client` and list the spaces it can see. */
-export async function listSpacesWith(host: string, client: TechnicalClient, bin?: string): Promise<string[]> {
+/**
+ * The connection check: log in with `client`, then see whether it can list the
+ * objects of each space (one view and one local table are enough to know).
+ * Not `spaces list` or `spaces read`: they need a tenant-wide privilege that a
+ * client limited to its spaces doesn't have, and shouldn't.
+ */
+export async function checkSpacesWith(host: string, client: TechnicalClient, spaces: string[], bin?: string): Promise<ConnectionSpace[]> {
   const { cli, close } = await clientCli(host, client, bin);
   try {
-    return await cli.listSpaces();
+    const results: ConnectionSpace[] = [];
+    for (const space of spaces) {
+      try {
+        await cli.listObjects(space, "views", 1);
+        await cli.listObjects(space, "local-tables", 1);
+        results.push({ space, readable: true, error: null });
+      } catch (e) {
+        results.push({ space, readable: false, error: describeCliFailure(e, client, 5) });
+      }
+    }
+    return results;
   } finally {
     await close();
   }

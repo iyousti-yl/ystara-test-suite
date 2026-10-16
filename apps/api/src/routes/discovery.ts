@@ -6,6 +6,7 @@ import {
   createScan,
   createTenant,
   deletePipeline,
+  getConnection,
   getPipeline,
   getScan,
   getTenant,
@@ -17,7 +18,7 @@ import {
   loadObject,
   type Db,
 } from "@ystara/db";
-import { DATASPHERE_URL_HINT, isDatasphereUrl, JOBS, type PipelineResult, type ScanGraph, type ScanJobData } from "@ystara/shared";
+import { DATASPHERE_URL_HINT, isDatasphereUrl, JOBS, readableSpaces, type PipelineResult, type ScanGraph, type ScanJobData } from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
 import type { JobQueue } from "../server.js";
 
@@ -45,7 +46,13 @@ const TenantInput = z.object({
   // Only a Datasphere tenant: the worker sends it a token and shows what it answers (urls.ts in @ystara/shared).
   host: z.string().trim().refine(isDatasphereUrl, DATASPHERE_URL_HINT),
 });
-const ScanInput = z.object({ spaces: z.array(spaceId).min(1).max(20) });
+/** Space IDs to scan or check, each once. Also for a tenant's connection (connections.ts). */
+export const spaceIds = z
+  .array(spaceId)
+  .min(1)
+  .max(20)
+  .transform((spaces) => [...new Set(spaces)]);
+const ScanInput = z.object({ spaces: spaceIds });
 const PipelineInput = z.object({
   name: z.string().trim().min(1).max(100),
   output: objectRef.refine((o) => o.includes("."), "Use SPACE.NAME"),
@@ -91,7 +98,16 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
       const tenant = await ownTenant(req, id.parse(req.params).id);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
       if (!tenant.host) return reply.code(409).send({ error: "This tenant has no Datasphere URL; it only has imported scans." });
-      const scan = await createScan(db, tenant.id, ScanInput.parse(req.body).spaces);
+      const { spaces } = ScanInput.parse(req.body);
+      // With a technical client, only the spaces its last check could read. (Without one, the worker refuses the scan anyway.)
+      const connection = await getConnection(db, tenant.id);
+      const readable = connection ? readableSpaces(connection) : undefined;
+      const unconfirmed = readable ? spaces.filter((s) => !readable.includes(s)) : [];
+      if (unconfirmed.length) {
+        const error = `The technical client can't read ${unconfirmed.join(", ")}, or hasn't been checked on it yet. Add the space to the tenant's connection and check again.`;
+        return reply.code(409).send({ error });
+      }
+      const scan = await createScan(db, tenant.id, spaces);
       await queue.send(JOBS.scan, { scanId: scan.id } satisfies ScanJobData);
       return reply.code(202).send(scan);
     });

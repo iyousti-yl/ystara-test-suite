@@ -2,7 +2,7 @@
  * Worker entry point. Consumes jobs from Postgres (pg-boss), so there is no
  * separate queue service. Job types arrive per phase:
  *   discovery-scan    (phase 1) read spaces of a tenant into a stored lineage graph
- *   connection-check  (phase 1) log in with a tenant's technical client and list its spaces
+ *   connection-check  (phase 1) log in with a tenant's technical client and check it can read its spaces
  *   snapshot.capture  (phase 2) metrics of pipeline objects
  *   snapshot.compare  (phase 2)
  *   scenario.run      (phase 3) read-only simulation of a pipeline on fixtures
@@ -21,7 +21,7 @@ import { loadLocalEnv } from "@ystara/shared/env";
 import { masterKeyFromEnv, secretBox } from "@ystara/shared/secrets";
 import { runConnectionCheck } from "./jobs/connection-check.js";
 import { runScan } from "./jobs/scan.js";
-import { listSpacesWith, removeStaleFolders, tenantAccess, type LoginOptions } from "./tenant-login.js";
+import { checkSpacesWith, removeStaleFolders, tenantAccess, type LoginOptions } from "./tenant-login.js";
 
 loadLocalEnv(fileURLToPath(new URL("../../../", import.meta.url)));
 const secrets = secretBox(masterKeyFromEnv()); // before anything else, so a missing key stops the start at once
@@ -44,7 +44,7 @@ await boss.work<ScanJobData>(JOBS.scan, async ([job]) => {
   console.log(`[worker] scan ${job.data.scanId}: ${scan?.status ?? "gone"}${scan?.error ? ` (${scan.error})` : ""}`);
 });
 await boss.work<ConnectionCheckJobData>(JOBS.connectionCheck, async ([job]) => {
-  const connection = await runConnectionCheck(db, job.data.tenantId, secrets, (host, client) => listSpacesWith(host, client, login.bin));
+  const connection = await runConnectionCheck(db, job.data.tenantId, secrets, (host, client, spaces) => checkSpacesWith(host, client, spaces, login.bin));
   console.log(`[worker] connection check of tenant ${job.data.tenantId}: ${connection?.status ?? "gone"}`);
 });
 console.log("[worker] started");

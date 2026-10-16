@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { graphFromRaw, type RawObject } from "@ystara/connector";
-import { createScan, saveScanResult, type Db } from "@ystara/db";
+import { createScan, getConnectionLogin, recordConnectionCheck, saveScanResult, setConnection, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import type { Pipeline } from "@ystara/shared";
 import { testSecrets, testUser, type TestUser } from "../auth/testing.js";
@@ -32,6 +32,8 @@ const RAW: RawObject[] = [
   },
   { space: "S", kind: "views", technicalName: "V_OUT", definition: { definitions: { V_OUT: { kind: "entity", "@DataWarehouse.sqlEditor.query": 'SELECT * FROM "LT_DATA"' } } } },
 ];
+
+const tokenUrl = "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token";
 
 let db: Db;
 let app: FastifyInstance;
@@ -87,6 +89,21 @@ describe("scans", () => {
     expect(sent.at(-1)).toEqual({ name: "discovery-scan", data: { scanId: res.json().id } });
     expect((await get(`/scans/${res.json().id}`)).json().status).toBe("queued");
     expect((await get(`/scans/${res.json().id}/graph`)).statusCode).toBe(409);
+  });
+
+  it("of a tenant with a technical client, read only the spaces its last check could read", async () => {
+    const tenant = (await post("/tenants", { name: "Connected", host: "https://synthetic.eu10.hcs.cloud.sap" })).json();
+    await setConnection(db, { tenantId: tenant.id, clientId: "sb-synthetic", sealedSecret: "v1.sealed", tokenUrl, spaces: ["SALES", "HR"], updatedBy: null });
+    const notYet = await post(`/tenants/${tenant.id}/scans`, { spaces: ["SALES"] });
+    expect(notYet.statusCode).toBe(409);
+    expect(notYet.json().error).toMatch(/can't read SALES/);
+
+    const login = (await getConnectionLogin(db, tenant.id))!;
+    await recordConnectionCheck(db, login, { spaces: [{ space: "SALES", readable: true, error: null }, { space: "HR", readable: false, error: "403" }] });
+    expect((await post(`/tenants/${tenant.id}/scans`, { spaces: ["SALES"] })).statusCode).toBe(202);
+    for (const spaces of [["HR"], ["SALES", "FINANCE"]]) {
+      expect((await post(`/tenants/${tenant.id}/scans`, { spaces })).statusCode, spaces.join()).toBe(409);
+    }
   });
 
   it("reject space names that aren't plain IDs", async () => {

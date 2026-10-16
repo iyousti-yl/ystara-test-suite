@@ -23,10 +23,22 @@ export interface Tenant {
  * "Technical User") an admin creates in Datasphere and enters in the Connect
  * wizard. Ystara stores its secret encrypted and never sends it back.
  *
- * Lifecycle: checking (saved, or "Check again") -> connected | failed. The
- * worker checks by listing the spaces the client can see.
+ * Lifecycle: checking (saved, spaces changed, or "Check again") -> connected |
+ * failed. The admin names the spaces to scan, and the worker checks each one by
+ * listing a few of its objects: connected when at least one can be read.
+ * (Not with `spaces list`: it needs a tenant-wide privilege that a technical
+ * client limited to its spaces doesn't have.)
  */
 export type ConnectionStatus = "checking" | "connected" | "failed";
+
+/** One space the admin named, and what the last check found. */
+export interface ConnectionSpace {
+  space: string;
+  /** Whether the client could list the space's objects. Null until checked. */
+  readable: boolean | null;
+  /** Why it couldn't: the CLI's last lines, without the secret. */
+  error: string | null;
+}
 
 export interface TenantConnection {
   tenantId: string;
@@ -34,13 +46,16 @@ export interface TenantConnection {
   tokenUrl: string;
   status: ConnectionStatus;
   checkedAt: Date | null;
-  /** Why the last check failed: the CLI's last lines, without the secret. */
+  /** Why the last check couldn't log in at all: the CLI's last lines, without the secret. */
   error: string | null;
-  /** The spaces the client could see at the last successful check. */
-  spaces: string[];
-  /** When the client was entered or last changed. */
+  /** The spaces to scan, in the order the admin gave them, each with its last check. Scans may use only the readable ones. */
+  spaces: ConnectionSpace[];
+  /** When the client or its spaces were entered or last changed. */
   updatedAt: Date;
 }
+
+/** The spaces a scan of a connected tenant may read: those its last check could read. */
+export const readableSpaces = (connection: { spaces: ConnectionSpace[] }) => connection.spaces.filter((s) => s.readable).map((s) => s.space);
 
 /** GET /api/tenants/:id/connection. Null until an admin connects the tenant. */
 export interface ConnectionState {

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -8,7 +8,7 @@ import type { DatasphereCli } from "@ystara/connector";
 import { createAccount, createTenant, setConnection, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import { connectionSecretContext, secretBox } from "@ystara/shared/secrets";
-import { listSpacesWith, removeStaleFolders, tenantAccess } from "./tenant-login.js";
+import { checkSpacesWith, removeStaleFolders, tenantAccess } from "./tenant-login.js";
 
 const host = "https://synthetic.eu10.hcs.cloud.sap";
 const tokenUrl = "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token";
@@ -33,7 +33,15 @@ describe.skipIf(process.platform === "win32")("how a scan logs in to a tenant", 
 const fs = require("node:fs");
 fs.writeFileSync(${JSON.stringify(path.join(dir, "called"))}, "yes");
 const args = process.argv.slice(2);
+// The command and its flags, without the host and the secrets file (wherever they are).
+const flagged = new Set(["--host", "--secrets-file"]);
+const command = args.filter((a, n) => !flagged.has(a) && !flagged.has(args[n - 1]));
+fs.appendFileSync(${JSON.stringify(path.join(dir, "calls"))}, command.join(" ") + "\\n");
 const i = args.indexOf("--secrets-file");
+if (args[args.indexOf("--space") + 1] === "LOCKED") {
+  console.error("error: 403 Forbidden, client secret " + JSON.parse(fs.readFileSync(args[i + 1], "utf8")).client_secret);
+  process.exit(1);
+}
 console.log(JSON.stringify({ args, home: process.env.HOME, secrets: i >= 0 ? JSON.parse(fs.readFileSync(args[i + 1], "utf8")) : null }));
 `,
     );
@@ -48,7 +56,7 @@ console.log(JSON.stringify({ args, home: process.env.HOME, secrets: i >= 0 ? JSO
   async function connected(name: string, more: { host?: string; tokenUrl?: string } = {}) {
     const tenant = await createTenant(db, { accountId, name, host: more.host ?? host });
     const sealedSecret = secrets.seal("synthetic-secret", connectionSecretContext(tenant.id));
-    await setConnection(db, { tenantId: tenant.id, clientId: "sb-synthetic", sealedSecret, tokenUrl: more.tokenUrl ?? tokenUrl, updatedBy: null });
+    await setConnection(db, { tenantId: tenant.id, clientId: "sb-synthetic", sealedSecret, tokenUrl: more.tokenUrl ?? tokenUrl, spaces: ["SALES"], updatedBy: null });
     return tenant;
   }
 
@@ -84,17 +92,34 @@ console.log(JSON.stringify({ args, home: process.env.HOME, secrets: i >= 0 ? JSO
 
     const app = await connected("App on SAP's cloud", { tokenUrl: "https://synthetic.cfapps.eu10.hana.ondemand.com/oauth/token" });
     await expect(tenantAccess(db, secrets, app, { bin })).rejects.toThrow(/token URL is not on SAP's sign-in service/);
-    await expect(listSpacesWith(host, { clientId: "sb-synthetic", clientSecret: "x", tokenUrl: "https://synthetic.example.com/oauth/token" }, bin)).rejects.toThrow(
+    await expect(checkSpacesWith(host, { clientId: "sb-synthetic", clientSecret: "x", tokenUrl: "https://synthetic.example.com/oauth/token" }, ["SALES"], bin)).rejects.toThrow(
       /token URL/,
     );
     expect(called()).toBe(false);
+  });
+
+  it("checks each space by listing one view and one local table, never with the spaces commands", async () => {
+    await rm(path.join(dir, "calls"), { force: true });
+    const client = { clientId: "sb-synthetic", clientSecret: "synthetic-secret", tokenUrl };
+    const results = await checkSpacesWith(host, client, ["SALES", "LOCKED"], bin);
+    expect(results).toEqual([
+      { space: "SALES", readable: true, error: null },
+      { space: "LOCKED", readable: false, error: "error: 403 Forbidden, client secret <secret>" },
+    ]);
+    const calls = (await readFile(path.join(dir, "calls"), "utf8")).trim().split("\n");
+    expect(calls.filter((c) => c.includes("objects"))).toEqual([
+      "objects views list --space SALES --top 1",
+      "objects local-tables list --space SALES --top 1",
+      "objects views list --space LOCKED --top 1",
+    ]);
+    expect(calls.some((c) => c.includes("spaces"))).toBe(false);
   });
 
   it("can't open a secret copied from another tenant's row", async () => {
     const source = await connected("Source");
     const copy = await createTenant(db, { accountId, name: "Copy", host });
     const sealedSecret = secrets.seal("synthetic-secret", connectionSecretContext(source.id));
-    await setConnection(db, { tenantId: copy.id, clientId: "sb-synthetic", sealedSecret, tokenUrl, updatedBy: null });
+    await setConnection(db, { tenantId: copy.id, clientId: "sb-synthetic", sealedSecret, tokenUrl, spaces: ["SALES"], updatedBy: null });
     await expect(tenantAccess(db, secrets, copy, { bin })).rejects.toThrow(/can't be opened for this tenant/);
   });
 });

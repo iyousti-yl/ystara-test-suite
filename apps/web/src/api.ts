@@ -227,9 +227,11 @@ function useConnectionChange<I, O>(tenantId: string, mutationFn: (input: I) => P
 }
 
 export const useConnect = (tenantId: string) =>
-  useConnectionChange(tenantId, (input: { clientId: string; clientSecret: string; tokenUrl: string }) =>
+  useConnectionChange(tenantId, (input: { clientId: string; clientSecret: string; tokenUrl: string; spaces: string[] }) =>
     request<ConnectionJson>("PUT", `/tenants/${tenantId}/connection`, input),
   );
+export const useSetConnectionSpaces = (tenantId: string) =>
+  useConnectionChange(tenantId, (spaces: string[]) => request<ConnectionJson>("PUT", `/tenants/${tenantId}/connection/spaces`, { spaces }));
 export const useCheckConnection = (tenantId: string) => useConnectionChange(tenantId, () => request<ConnectionJson>("POST", `/tenants/${tenantId}/connection/check`));
 export const useDisconnect = (tenantId: string) => useConnectionChange(tenantId, () => request<void>("DELETE", `/tenants/${tenantId}/connection`));
 

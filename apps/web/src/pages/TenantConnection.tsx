@@ -1,20 +1,25 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label, MessageStrip, Title } from "@ui5/webcomponents-react";
-import { useCan, useCheckConnection, useConnect, useConnection, useDisconnect, type ConnectionJson, type TenantJson } from "../api";
+import { Button, Dialog, Input, Label, MessageStrip, Tag, Title } from "@ui5/webcomponents-react";
+import { useCan, useCheckConnection, useConnect, useConnection, useDisconnect, useSetConnectionSpaces, type ConnectionJson, type TenantJson } from "../api";
 import { ConnectionStatusTag, ErrorStrip, Loading } from "../components/Feedback";
 import { formatDateTime } from "../format";
 
+/** Space IDs, separated by commas or spaces, as the API expects them. */
+export const parseSpaces = (text: string) => [...new Set(text.split(/[\s,;]+/).filter(Boolean).map((s) => s.toUpperCase()))];
+
 /**
- * How the worker logs in to a tenant: its technical OAuth client. Admins
- * connect, change and remove it; anyone who can scan may check it again. The
- * worker checks a new client at once, and this section refreshes until the
- * verdict is in (TenantConnection in packages/shared/src/api.ts).
+ * How the worker logs in to a tenant: its technical OAuth client, and the
+ * spaces it is meant to scan. Admins connect, change and remove it and change
+ * its spaces; anyone who can scan may check it again. The worker checks each
+ * space at once, and this section refreshes until the verdict is in
+ * (TenantConnection in packages/shared/src/api.ts).
  */
 export function ConnectionSection({ tenant, connecting, onConnecting }: { tenant: TenantJson; connecting: boolean; onConnecting: (open: boolean) => void }) {
   const can = useCan();
   const connection = useConnection(tenant.id);
   const check = useCheckConnection(tenant.id);
   const disconnect = useDisconnect(tenant.id);
+  const [editingSpaces, setEditingSpaces] = useState(false);
   const c = connection.data;
 
   const remove = () => {
@@ -45,12 +50,18 @@ export function ConnectionSection({ tenant, connecting, onConnecting }: { tenant
             {c.checkedAt && <span>Checked {formatDateTime(c.checkedAt)}</span>}
           </div>
           <Verdict connection={c} />
+          <SpaceResults connection={c} />
         </>
       )}
       <div className="page-header-actions connection-row">
         {can("tenant.connect") && (
           <Button design={c ? "Default" : "Emphasized"} icon="chain-link" onClick={() => onConnecting(true)}>
             {c ? "Change client" : "Connect"}
+          </Button>
+        )}
+        {c && can("tenant.connect") && (
+          <Button icon="edit" onClick={() => setEditingSpaces(true)}>
+            Change spaces
           </Button>
         )}
         {c && can("discovery.run") && (
@@ -64,51 +75,89 @@ export function ConnectionSection({ tenant, connecting, onConnecting }: { tenant
           </Button>
         )}
       </div>
-      {/* Once loaded, so "Change client" starts from the current client's ID and token URL. */}
+      {/* Once loaded, so "Change client" starts from the current client's ID, token URL and spaces. */}
       {connecting && !connection.isPending && <ConnectDialog tenant={tenant} current={c ?? null} onClose={() => onConnecting(false)} />}
+      {editingSpaces && c && <SpacesDialog tenantId={tenant.id} current={c} onClose={() => setEditingSpaces(false)} />}
     </section>
   );
 }
 
 function Verdict({ connection: c }: { connection: ConnectionJson }) {
   if (c.status === "checking") {
-    return <p className="muted">The worker is logging in with this client and listing the spaces it can see. This section refreshes on its own.</p>;
+    return <p className="muted">The worker is logging in with this client and checking each space. This section refreshes on its own.</p>;
+  }
+  if (c.status === "failed" && c.error) {
+    return (
+      <MessageStrip design="Negative" hideCloseButton className="block">
+        The worker could not log in with this client. Check the client ID, secret and token URL, and that the client&apos;s purpose is Technical User.
+        <pre className="cli-output">{c.error}</pre>
+      </MessageStrip>
+    );
   }
   if (c.status === "failed") {
     return (
       <MessageStrip design="Negative" hideCloseButton className="block">
-        The worker could not log in with this client. Check the client ID, secret and token URL, and that the client&apos;s purpose is Technical User.
-        {c.error && <pre className="cli-output">{c.error}</pre>}
+        The client logs in, but can read none of these spaces. Add its technical user to them with a scoped role that can read their objects, then check
+        again.
       </MessageStrip>
     );
   }
-  if (c.spaces.length === 0) {
-    return (
-      <MessageStrip design="Critical" hideCloseButton className="block">
-        The client logs in, but sees no space yet. Add it to the spaces to scan, then check again.
-      </MessageStrip>
-    );
-  }
+  return null;
+}
+
+/** Each space the admin named: readable, not readable (and why), or not checked yet. */
+function SpaceResults({ connection: c }: { connection: ConnectionJson }) {
   return (
-    <p>
-      Sees {c.spaces.length === 1 ? "1 space" : `${c.spaces.length} spaces`}: <span className="mono">{c.spaces.join(", ")}</span>
-    </p>
+    <ul className="space-results">
+      {c.spaces.map((s) => (
+        <li key={s.space}>
+          <span className="mono">{s.space}</span>{" "}
+          {s.readable === null ? (
+            <span className="muted">not checked yet</span>
+          ) : s.readable ? (
+            <Tag design="Positive">Readable</Tag>
+          ) : (
+            <>
+              <Tag design="Negative">Not readable</Tag>
+              {s.error && <pre className="cli-output">{s.error}</pre>}
+            </>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SpacesInput({ value, onInput }: { value: string; onInput: (value: string) => void }) {
+  return (
+    <>
+      <Label for="connection-spaces" required>
+        Space IDs
+      </Label>
+      <Input id="connection-spaces" className="full-width" value={value} onInput={(e) => onInput(e.target.value)} placeholder="HR, SHARED" />
+      <span className="muted">
+        The spaces to scan, separated by commas, as in Space Management (at most 20). The worker checks that the client can read each one: a technical
+        client limited to its spaces can&apos;t list them itself.
+      </span>
+    </>
   );
 }
 
 /**
  * The Connect wizard: what to create in Datasphere, then the client's three
- * values. The secret is never shown again, so changing the client means
- * entering it again.
+ * values and the spaces to scan. The secret is never shown again, so changing
+ * the client means entering it again.
  */
 function ConnectDialog({ tenant, current, onClose }: { tenant: TenantJson; current: ConnectionJson | null; onClose: () => void }) {
   const connect = useConnect(tenant.id);
   const [clientId, setClientId] = useState(current?.clientId ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [tokenUrl, setTokenUrl] = useState(current?.tokenUrl ?? "");
-  const ready = clientId.trim() && clientSecret.trim() && tokenUrl.trim();
+  const [spacesText, setSpacesText] = useState(current?.spaces.map((s) => s.space).join(", ") ?? "");
+  const spaces = parseSpaces(spacesText);
+  const ready = clientId.trim() && clientSecret.trim() && tokenUrl.trim() && spaces.length > 0;
   const submit = () =>
-    connect.mutate({ clientId: clientId.trim(), clientSecret: clientSecret.trim(), tokenUrl: tokenUrl.trim() }, { onSuccess: onClose });
+    connect.mutate({ clientId: clientId.trim(), clientSecret: clientSecret.trim(), tokenUrl: tokenUrl.trim(), spaces }, { onSuccess: onClose });
 
   return (
     <Dialog
@@ -135,7 +184,7 @@ function ConnectDialog({ tenant, current, onClose }: { tenant: TenantJson; curre
           </li>
           <li>Set its purpose to Technical User and name it Ystara. Copy its client ID and secret: Datasphere shows the secret only once.</li>
           <li>Copy the token URL shown on the App Integration page.</li>
-          <li>Add the technical user to each space to scan, with the least role that can see its objects.</li>
+          <li>Add the technical user to each space to scan, with a scoped role that can read the space&apos;s objects (e.g. Viewer).</li>
         </ol>
         <Label for="client-id" required>
           Client ID
@@ -163,11 +212,42 @@ function ConnectDialog({ tenant, current, onClose }: { tenant: TenantJson; curre
           onInput={(e) => setTokenUrl(e.target.value)}
           placeholder="https://….authentication.eu10.hana.ondemand.com/oauth/token"
         />
+        <SpacesInput value={spacesText} onInput={setSpacesText} />
         <span className="muted">
           Ystara stores the secret encrypted, sends it only to the token URL to log in, and never shows it again. The worker checks the client as soon as
           you save.
         </span>
         <ErrorStrip error={connect.error} />
+      </div>
+    </Dialog>
+  );
+}
+
+/** Changes only the spaces to scan: the client and its secret stay as they are. */
+function SpacesDialog({ tenantId, current, onClose }: { tenantId: string; current: ConnectionJson; onClose: () => void }) {
+  const save = useSetConnectionSpaces(tenantId);
+  const [text, setText] = useState(current.spaces.map((s) => s.space).join(", "));
+  const spaces = parseSpaces(text);
+
+  return (
+    <Dialog
+      open
+      headerText="Change the spaces to scan"
+      onClose={onClose}
+      footer={
+        <div className="dialog-footer">
+          <Button design="Emphasized" disabled={spaces.length === 0 || save.isPending} onClick={() => save.mutate(spaces, { onSuccess: onClose })}>
+            Save and check
+          </Button>
+          <Button design="Transparent" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      }
+    >
+      <div className="dialog-body">
+        <SpacesInput value={text} onInput={setText} />
+        <ErrorStrip error={save.error} />
       </div>
     </Dialog>
   );

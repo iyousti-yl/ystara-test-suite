@@ -31,7 +31,13 @@ afterAll(async () => {
 const call = (method: "GET" | "PUT" | "POST" | "DELETE", url: string, as: TestUser, payload?: object) =>
   app.inject({ method, url: `/api${url}`, payload, headers: { cookie: as.cookie } });
 
-const client = { clientId: "sb-synthetic-client", clientSecret: "synthetic-secret-value", tokenUrl: "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token" };
+const client = {
+  clientId: "sb-synthetic-client",
+  clientSecret: "synthetic-secret-value",
+  tokenUrl: "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token",
+  spaces: ["SALES", "FINANCE", "SALES"],
+};
+const unchecked = (space: string) => ({ space, readable: null, error: null });
 
 async function newTenant(name: string) {
   return (await call("POST", "/tenants", admin, { name, host: "https://synthetic.eu10.hcs.cloud.sap" })).json() as { id: string };
@@ -45,7 +51,7 @@ describe("a tenant's technical client", () => {
     sent.length = 0;
     const res = await call("PUT", `/tenants/${tenant.id}/connection`, admin, client);
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ clientId: client.clientId, tokenUrl: client.tokenUrl, status: "checking", spaces: [] });
+    expect(res.json()).toMatchObject({ clientId: client.clientId, tokenUrl: client.tokenUrl, status: "checking", spaces: [unchecked("SALES"), unchecked("FINANCE")] });
     expect(sent).toEqual([{ name: JOBS.connectionCheck, data: { tenantId: tenant.id } }]);
 
     // Stored sealed, and opened only with MASTER_KEY, for this tenant.
@@ -78,6 +84,23 @@ describe("a tenant's technical client", () => {
     expect((await call("POST", `/tenants/${tenant.id}/connection/check`, admin)).statusCode).toBe(404);
   });
 
+  it("has its spaces changed by an admin without the secret, and checked again", async () => {
+    const tenant = await newTenant("More spaces");
+    const url = `/tenants/${tenant.id}/connection/spaces`;
+    expect((await call("PUT", url, admin, { spaces: ["SALES"] })).statusCode).toBe(404); // no client yet
+    await call("PUT", `/tenants/${tenant.id}/connection`, admin, client);
+    const sealed = (await getConnectionLogin(db, tenant.id))!.sealedSecret;
+
+    sent.length = 0;
+    expect((await call("PUT", url, developer, { spaces: ["HR"] })).statusCode).toBe(403);
+    expect((await call("PUT", url, admin, { spaces: ["bad space"] })).statusCode).toBe(400);
+    const res = await call("PUT", url, admin, { spaces: ["SALES", "HR"] });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ status: "checking", spaces: [unchecked("SALES"), unchecked("HR")] });
+    expect(sent).toEqual([{ name: JOBS.connectionCheck, data: { tenantId: tenant.id } }]);
+    expect((await getConnectionLogin(db, tenant.id))!.sealedSecret).toBe(sealed);
+  });
+
   it("is another account's business: 404, as if the tenant didn't exist", async () => {
     const tenant = await newTenant("Private");
     await call("PUT", `/tenants/${tenant.id}/connection`, admin, client);
@@ -85,7 +108,8 @@ describe("a tenant's technical client", () => {
       const url = method === "POST" ? `/tenants/${tenant.id}/connection/check` : `/tenants/${tenant.id}/connection`;
       expect((await call(method, url, stranger, payload)).statusCode).toBe(404);
     }
-    expect((await getConnectionLogin(db, tenant.id))?.clientId).toBe(client.clientId);
+    expect((await call("PUT", `/tenants/${tenant.id}/connection/spaces`, stranger, { spaces: ["HR"] })).statusCode).toBe(404);
+    expect(await getConnectionLogin(db, tenant.id)).toMatchObject({ clientId: client.clientId, spaces: ["SALES", "FINANCE"] });
   });
 
   it("needs SAP's token URL, and a tenant with a Datasphere URL", async () => {
@@ -102,6 +126,9 @@ describe("a tenant's technical client", () => {
       expect((await call("PUT", `/tenants/${tenant.id}/connection`, admin, { ...client, tokenUrl })).statusCode, tokenUrl).toBe(400);
     }
     expect((await call("PUT", `/tenants/${tenant.id}/connection`, admin, { ...client, clientSecret: " " })).statusCode).toBe(400);
+    for (const spaces of [[], ["SALES; rm -rf"], Array.from({ length: 21 }, (_, i) => `S${i}`), undefined]) {
+      expect((await call("PUT", `/tenants/${tenant.id}/connection`, admin, { ...client, spaces })).statusCode, JSON.stringify(spaces)).toBe(400);
+    }
 
     // As `npm run db:import` makes them.
     const imported = await createTenant(db, { accountId: admin.accountId, name: "Imported only", host: null });

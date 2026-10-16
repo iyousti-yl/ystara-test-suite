@@ -15,11 +15,12 @@ import {
   Title,
 } from "@ui5/webcomponents-react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
+import { readableSpaces } from "@ystara/shared";
 import { useCan, useConnection, usePipelines, useScans, useStartScan, useTenant, type ConnectionJson } from "../api";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
-import { ConnectionSection } from "./TenantConnection";
+import { ConnectionSection, parseSpaces } from "./TenantConnection";
 
 /**
  * One tenant: how the worker logs in to it, its scans (newest first, refreshed
@@ -126,21 +127,19 @@ export function TenantPage() {
   );
 }
 
-/** Space IDs, separated by commas or spaces, as the API expects them. */
-export const parseSpaces = (text: string) => [...new Set(text.split(/[\s,;]+/).filter(Boolean).map((s) => s.toUpperCase()))];
-
 /**
- * Picks the spaces to scan: from the spaces the technical client saw at its
- * last check, or typed in when the tenant has none (only a worker started with
+ * Picks the spaces to scan: for a connected tenant, from the spaces its
+ * technical client could read at the last check (the API refuses any other);
+ * typed in for a tenant without a client (only a worker started with
  * YSTARA_WORKER_MACHINE_LOGIN=1 can scan it, with its machine's own CLI login).
  */
 function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => void }) {
   const start = useStartScan(tenantId);
   const connection = useConnection(tenantId).data ?? null;
-  const visible = connection?.spaces ?? [];
+  const readable = connection ? readableSpaces(connection) : [];
   const [text, setText] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
-  const spaces = visible.length ? picked : parseSpaces(text);
+  const spaces = connection ? picked : parseSpaces(text);
 
   return (
     <Dialog
@@ -159,25 +158,34 @@ function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => vo
       }
     >
       <div className="dialog-body">
-        <Label for="spaces" required>
-          {visible.length ? "Spaces" : "Space IDs"}
-        </Label>
-        {visible.length ? (
-          <MultiComboBox
-            id="spaces"
-            className="full-width"
-            placeholder="Choose the spaces of one pipeline"
-            onSelectionChange={(e) => setPicked(e.detail.items.map((item) => item.text ?? "").filter(Boolean))}
-          >
-            {visible.map((space) => (
-              <MultiComboBoxItem key={space} text={space} selected={picked.includes(space)} />
-            ))}
-          </MultiComboBox>
+        {connection ? (
+          readable.length > 0 && (
+            <>
+              <Label for="spaces" required>
+                Spaces
+              </Label>
+              <MultiComboBox
+                id="spaces"
+                className="full-width"
+                placeholder="Choose the spaces of one pipeline"
+                onSelectionChange={(e) => setPicked(e.detail.items.map((item) => item.text ?? "").filter(Boolean))}
+              >
+                {readable.map((space) => (
+                  <MultiComboBoxItem key={space} text={space} selected={picked.includes(space)} />
+                ))}
+              </MultiComboBox>
+            </>
+          )
         ) : (
-          <Input id="spaces" className="full-width" value={text} onInput={(e) => setText(e.target.value)} placeholder="HR, SHARED" />
+          <>
+            <Label for="spaces" required>
+              Space IDs
+            </Label>
+            <Input id="spaces" className="full-width" value={text} onInput={(e) => setText(e.target.value)} placeholder="HR, SHARED" />
+          </>
         )}
-        <MessageStrip design={!connection || connection.status === "failed" ? "Critical" : "Information"} hideCloseButton>
-          {scanLogin(connection)} Scan the spaces of one pipeline together to see the links between them.
+        <MessageStrip design={readable.length ? "Information" : "Critical"} hideCloseButton>
+          {scanLogin(connection, readable)} Scan the spaces of one pipeline together to see the links between them.
         </MessageStrip>
         <ErrorStrip error={start.error} />
       </div>
@@ -185,11 +193,11 @@ function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => vo
   );
 }
 
-function scanLogin(connection: ConnectionJson | null): string {
+function scanLogin(connection: ConnectionJson | null, readable: string[]): string {
   const readOnly = "Read-only: the worker lists and reads object definitions, nothing else.";
   if (!connection) {
     return `${readOnly} This tenant is not connected: an admin connects it on the tenant page, and until then the scan fails. (Only a worker started on a developer's computer with YSTARA_WORKER_MACHINE_LOGIN=1 scans it with that computer's own Datasphere CLI login.)`;
   }
-  if (connection.status === "failed") return `${readOnly} The technical client's last check failed, so this scan will probably fail too.`;
-  return `${readOnly} It logs in with the tenant's technical client.`;
+  if (readable.length === 0) return `${readOnly} The technical client can't read any of its spaces yet: see Connection on the tenant page.`;
+  return `${readOnly} It logs in with the tenant's technical client, in the spaces its last check could read.`;
 }

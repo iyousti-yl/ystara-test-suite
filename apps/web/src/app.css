@@ -107,6 +107,13 @@ section.block > ui5-title {
 .full-width {
   width: 100%;
 }
+.space-results {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+.space-results li + li {
+  margin-top: 0.35rem;
+}
 .steps-to-do {
   margin: 0 0 0.5rem;
   padding-left: 1.25rem;
