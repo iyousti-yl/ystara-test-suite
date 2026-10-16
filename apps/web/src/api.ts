@@ -1,20 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  Account,
+  AccountOverview,
   AuthenticatorSetup,
   CreatedInvitation,
+  CreatedReset,
   InvitationOffer,
   Json,
   Me,
   ObjectDetails,
   Permission,
-  Role,
   PipelineDefinition,
   PipelineResult,
+  ResetOffer,
+  Role,
   SavedPipelineResult,
   Scan,
   ScanGraph,
   Team,
   Tenant,
+  UserOverview,
 } from "@ystara/shared";
 
 /**
@@ -82,13 +87,15 @@ export function useCan() {
 
 /**
  * After signing in, joining or switching accounts: forget everything cached for the previous
- * one. The pages on screen fetch their data again, now for this account.
+ * one. The pages on screen fetch their data again, now for this account. The invitation or
+ * reset link just used is left alone: asked again, it would answer that it is used up.
  */
 function useStartWith() {
   const client = useQueryClient();
+  const keep = new Set([ME[0], "invitations", "resets"]);
   return (me: Me) => {
     client.setQueryData(ME, me);
-    void client.resetQueries({ predicate: (q) => q.queryKey[0] !== ME[0] });
+    void client.resetQueries({ predicate: (q) => !keep.has(String(q.queryKey[0])) });
   };
 }
 
@@ -128,6 +135,43 @@ export function useAcceptInvitation(token: string) {
     onSuccess: startWith,
   });
 }
+
+// --- Reset links (made on the operator panel)
+
+export const useReset = (token: string) =>
+  useQuery({ queryKey: ["resets", token], queryFn: () => request<ResetOffer>("GET", `/resets/${token}`), retry: false, staleTime: Infinity });
+
+export const useResetAuthenticator = (token: string) => useMutation({ mutationFn: () => request<AuthenticatorSetup>("POST", `/resets/${token}/authenticator`) });
+
+export function useAcceptReset(token: string) {
+  const startWith = useStartWith();
+  return useMutation({
+    mutationFn: (input: { password: string; code: string }) => request<Me>("POST", `/resets/${token}/accept`, input),
+    onSuccess: startWith,
+  });
+}
+
+// --- Operator panel (Ystara's operator only)
+
+const OPERATOR = ["operator"];
+
+export const useAccountOverviews = (allowed: boolean) =>
+  useQuery({ queryKey: [...OPERATOR, "accounts"], queryFn: () => request<Json<AccountOverview>[]>("GET", "/operator/accounts"), enabled: allowed });
+export const useUserOverviews = (allowed: boolean) =>
+  useQuery({ queryKey: [...OPERATOR, "users"], queryFn: () => request<Json<UserOverview>[]>("GET", "/operator/users"), enabled: allowed });
+
+function useOperatorChange<I, O>(mutationFn: (input: I) => Promise<O>) {
+  const client = useQueryClient();
+  return useMutation({ mutationFn, onSettled: () => client.invalidateQueries({ queryKey: OPERATOR }) });
+}
+
+export const useCreateAccount = () =>
+  useOperatorChange((input: { name: string; adminEmail: string }) => request<Json<CreatedInvitation> & { account: Account }>("POST", "/operator/accounts", input));
+export const useInviteAdmin = () =>
+  useOperatorChange((input: { accountId: string; email: string }) =>
+    request<Json<CreatedInvitation>>("POST", `/operator/accounts/${input.accountId}/invitations`, { email: input.email }),
+  );
+export const useCreateReset = () => useOperatorChange((userId: string) => request<Json<CreatedReset>>("POST", `/operator/users/${userId}/reset`));
 
 // --- Users and roles (admins)
 

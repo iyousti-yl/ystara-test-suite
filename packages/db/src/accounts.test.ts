@@ -142,7 +142,14 @@ describe("sessions", () => {
     const { account, adminId } = await accountWithAdmin("Sessions", "session@example.com");
     const token = await createSession(db, { userId: adminId, accountId: account.id, verified: true, minutes: 60 });
     expect((await db.query("select * from sessions where token_hash = $1", [token])).rows).toEqual([]);
-    expect(await findSession(db, token)).toEqual({ userId: adminId, email: "session@example.com", accountId: account.id, role: "admin", verified: true });
+    expect(await findSession(db, token)).toEqual({
+      userId: adminId,
+      email: "session@example.com",
+      accountId: account.id,
+      role: "admin",
+      verified: true,
+      operator: false,
+    });
 
     await deleteSession(db, token);
     expect(await findSession(db, token)).toBeUndefined();

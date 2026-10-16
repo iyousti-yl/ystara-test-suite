@@ -15,19 +15,21 @@ The app only ever calls `/api` on its own origin and loads nothing from other se
 |---|---|---|
 | `/sign-in` | Email and password, then the code from the authenticator app | `src/pages/SignInPage.tsx` |
 | `/invite/:token` | An invitation link: choose a password and set up the authenticator app, or join with an existing sign-in | `src/pages/InvitePage.tsx` |
+| `/reset/:token` | A reset link from the operator: choose a new password and set up the authenticator app again | `src/pages/ResetPage.tsx` |
 | `/users` | Users and roles (admins): members, roles, open invitations, invite someone | `src/pages/UsersPage.tsx` |
+| `/operator` | The operator panel (operators only): every account and user, create an account, invite a new admin, reset someone's sign-in | `src/pages/OperatorPage.tsx` |
 | `/` | Tenants; add one by its Datasphere URL | `src/pages/TenantsPage.tsx` |
 | `/tenants/:id` | A tenant's scans (refreshed while one runs), "Scan spaces", saved pipelines | `src/pages/TenantPage.tsx` |
 | `/scans/:id` | A scan's status and warnings, and its objects; likely outputs first | `src/pages/ScanPage.tsx` |
 | `/scans/:id/pipeline?output=SPACE.NAME&excludeWriter=...` | The pipeline behind one object on that scan; exclude writers, save it | `src/pages/PipelinePages.tsx` |
 | `/pipelines/:id` | A saved pipeline, on the tenant's latest successful scan | `src/pages/PipelinePages.tsx` |
 
-Every page works as a link: the API answers these paths with `index.html` and `src/App.tsx` picks the page. Every page except sign-in and invitation links needs a signed-in user: `App.tsx` sends anyone else to `/sign-in?next=<the page>` and back after signing in. The user menu (top right) shows the account and role, switches accounts and signs out.
+Every page works as a link: the API answers these paths with `index.html` and `src/App.tsx` picks the page. Every page except sign-in, invitation and reset links needs a signed-in user: `App.tsx` sends anyone else to `/sign-in?next=<the page>` and back after signing in. The user menu (top right) shows the account and role, switches accounts and signs out; admins and operators also find their pages there and in the top bar.
 
 ## How it fits together
 
 - `src/api.ts`: every API call, as hooks on TanStack Query (caching, refetching while a scan runs). Response types come from `packages/shared/src/api.ts`, the same types the API sends. `useMe()` is who is signed in; `useCan()` hides buttons the role can't use (the API checks every call anyway). A 401 on any call sends the browser back to sign-in (`src/main.tsx`).
-- Sign-in fields are plain `<input>` elements styled like UI5's (`src/components/AuthFrame.tsx`), so password managers and the browser's one-time-code fill find them.
+- Sign-in fields are plain `<input>` elements styled like UI5's (`src/components/AuthFrame.tsx`), so password managers and the browser's one-time-code fill find them. `src/components/SetUpSignIn.tsx` is the password-then-authenticator setup that invitation and reset links share, and `src/components/LinkToSend.tsx` shows a new link once, with a Copy button.
 - `src/lineage/`: the picture. `model.ts` turns a pipeline into nodes and edges with what to mark on them (output, entry table, excluded writer, several writers, loop); `layout.ts` sizes each node to its names and places them left to right; `viewport.ts` picks the first view and places the hover card; `LineageGraph.tsx` and `ObjectNode.tsx` draw them; `ObjectPanel.tsx` shows the selected object; `PipelineView.tsx` puts it together. The first three are plain functions with tests.
 - `src/objectTypes.ts`: names and colours per object type (theme colours, so dark mode works).
 - `src/theme.ts`, `src/fonts.ts`, `src/locale.ts`, `src/icons.ts`: UI5 setup (light or dark theme, the bundled 72 font and English locale data instead of UI5's CDN downloads). UI5 draws only icons that are imported in `icons.ts`.

@@ -26,4 +26,5 @@ npm run dev:web                                      # web app with instant relo
 npm run db:migrate                                   # apply packages/db/migrations and create job queues
 npm run db:import -- --from <scan folder> --tenant <NAME> [--account <NAME>]   # load a saved scan, no tenant calls
 npm run account:create -- --name <ACCOUNT> --admin <email>   # create an account, print its first admin's invitation link
+npm run operator:grant -- --email <email> [--revoke]         # make an existing user the operator (operator panel)
 ```

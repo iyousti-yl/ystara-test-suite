@@ -20,6 +20,11 @@ export async function createAccount(db: Queryable, name: string): Promise<Accoun
   return rows[0];
 }
 
+export async function getAccount(db: Queryable, id: string): Promise<Account | undefined> {
+  const { rows } = await db.query<Account>("select id, name from accounts where id = $1", [id]);
+  return rows[0];
+}
+
 export async function findAccountByName(db: Queryable, name: string): Promise<Account | undefined> {
   const { rows } = await db.query<Account>("select id, name from accounts where name = $1", [name]);
   return rows[0];
@@ -271,6 +276,8 @@ export interface Session {
   role: Role;
   /** The second factor (authenticator code) has been checked. */
   verified: boolean;
+  /** Ystara's operator: may use the operator panel (migration 004). */
+  operator: boolean;
 }
 
 /** Starts a session and returns the token for the cookie. */
@@ -288,8 +295,8 @@ export async function createSession(db: Queryable, input: { userId: string; acco
  * account. Undefined when it expired or the user is no longer a member there.
  */
 export async function findSession(db: Queryable, token: string): Promise<Session | undefined> {
-  const { rows } = await db.query<{ user_id: string; email: string; account_id: string; role: Role; verified: boolean }>(
-    `select s.user_id, u.email, s.account_id, m.role, s.verified
+  const { rows } = await db.query<{ user_id: string; email: string; account_id: string; role: Role; verified: boolean; operator: boolean }>(
+    `select s.user_id, u.email, s.account_id, m.role, s.verified, u.operator
      from sessions s
      join users u on u.id = s.user_id
      join memberships m on m.account_id = s.account_id and m.user_id = s.user_id
@@ -297,7 +304,7 @@ export async function findSession(db: Queryable, token: string): Promise<Session
     [hashToken(token)],
   );
   const r = rows[0];
-  return r && { userId: r.user_id, email: r.email, accountId: r.account_id, role: r.role, verified: r.verified };
+  return r && { userId: r.user_id, email: r.email, accountId: r.account_id, role: r.role, verified: r.verified, operator: r.operator };
 }
 
 /** Moves a session to another account the user belongs to. False when they are not a member there. */

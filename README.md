@@ -21,6 +21,7 @@ tools/
   scan/       `npm run scan`: read-only discovery from your machine
   db/         `npm run db:import`: load a saved scan into the database
               `npm run account:create`: create a customer account and invite its first admin
+              `npm run operator:grant`: make a user Ystara's operator (the operator panel)
   spike/      One-off feasibility scripts (not shipped)
 ```
 
@@ -44,10 +45,13 @@ npm test
 docker compose up -d --build          # Postgres, migrations, API, worker and the web app
 npm run account:create -- --name "My company" --admin you@example.com   # prints an invitation link
 open <the link>                       # choose a password, set up an authenticator app, and you are in
+npm run operator:grant -- --email you@example.com   # optional: the operator panel for you
 docker compose down                   # stop; add -v to also delete the database
 ```
 
 **Signing in.** There is no sign-up page: customer accounts are created with `npm run account:create`, which prints a one-time link (valid 7 days) for the account's first admin. Everyone signs in with email, password and a 6-digit code from an authenticator app (Microsoft or Google Authenticator, 1Password, ...). Admins invite the rest of their team, set roles (admin, developer, test coordinator, viewer) and remove people on the **Users and roles** page; Ystara sends no email, the admin passes the link on. One person can belong to several accounts and switches between them in the user menu. Tenants from before sign-in are in an account named `Default`: run `npm run account:create -- --name Default --admin you@example.com` to get in.
+
+**The operator panel.** Whoever runs Ystara becomes its operator with `npm run operator:grant -- --email you@example.com` (only this command sets it; `--revoke` takes it away). The operator gets an **Operator** page across all customer accounts: every account with its members, admins, tenants and open invitations, and every user with their accounts and roles. It shows counts, never tenants, scans or pipelines. From there the operator creates an account (with an invitation link for its first admin), invites a new admin to an account whose admins are gone, and makes a **reset link** (valid 3 days) for someone who lost their password or phone: they choose a new password and set up their authenticator again, and every browser signed in as them is signed out.
 
 The web app lists tenants and their scans, the objects each scan found (with the likely outputs first), and the pipeline behind any object as a lineage picture: entry tables, the output, tables with several writers and loops are marked, and clicking an object shows what it reads and writes and its definition. Writers that belong to another process can be excluded with a click, and the pipeline saved.
 
@@ -65,7 +69,7 @@ npm run db:import -- --from tools/scan/output/<run> --tenant Partner [--account 
 
 `--account` can be left out while there is only one account.
 
-API routes (all JSON, all under `/api`, all but sign-in and invitation links need a signed-in user; `apps/api/src/auth/access.ts` explains the checks). Sign-in: `POST /auth/login`, `POST /auth/code`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/account` (switch account), `GET /invitations/:token`, `POST /invitations/:token/authenticator`, `POST /invitations/:token/accept`. Users and roles (admins): `GET /team`, `POST /team/invitations`, `DELETE /team/invitations/:id`, `PATCH/DELETE /team/members/:userId`. Discovery: `GET/POST /tenants`, `GET /tenants/:id`, `GET/POST /tenants/:id/scans` (POST queues a read-only scan for the worker), `GET /scans/:id`, `GET /scans/:id/graph`, `GET /scans/:id/objects/:space/:name` (one object with its definition and links), `GET /scans/:id/pipeline?output=...&excludeWriter=...`, `GET/POST /tenants/:id/pipelines`, `GET/DELETE /pipelines/:id` (a saved pipeline, computed on the tenant's latest successful scan). Response types are in `packages/shared/src/api.ts`.
+API routes (all JSON, all under `/api`, all but sign-in, invitation and reset links need a signed-in user; `apps/api/src/auth/access.ts` explains the checks). Sign-in: `POST /auth/login`, `POST /auth/code`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/account` (switch account), `GET /invitations/:token`, `POST /invitations/:token/authenticator`, `POST /invitations/:token/accept`, `GET /resets/:token`, `POST /resets/:token/authenticator`, `POST /resets/:token/accept`. Users and roles (admins): `GET /team`, `POST /team/invitations`, `DELETE /team/invitations/:id`, `PATCH/DELETE /team/members/:userId`. Operator panel (operators only): `GET/POST /operator/accounts`, `POST /operator/accounts/:id/invitations` (a new admin), `GET /operator/users`, `POST /operator/users/:id/reset` (a reset link). Discovery: `GET/POST /tenants`, `GET /tenants/:id`, `GET/POST /tenants/:id/scans` (POST queues a read-only scan for the worker), `GET /scans/:id`, `GET /scans/:id/graph`, `GET /scans/:id/objects/:space/:name` (one object with its definition and links), `GET /scans/:id/pipeline?output=...&excludeWriter=...`, `GET/POST /tenants/:id/pipelines`, `GET/DELETE /pipelines/:id` (a saved pipeline, computed on the tenant's latest successful scan). Response types are in `packages/shared/src/api.ts`.
 
 **Working on the web app.** `npm run dev:web` serves it on http://127.0.0.1:5173 with instant reload and forwards `/api` to the API on `YSTARA_API_PORT` (Docker's, or `npm run dev:api`). See `apps/web/README.md`.
 

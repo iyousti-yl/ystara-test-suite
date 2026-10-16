@@ -5,7 +5,9 @@ import { createBrowserRouter, isRouteErrorResponse, Navigate, Outlet, useLocatio
 import { isUnauthorized, useMe, useSignOut, useSwitchAccount } from "./api";
 import { ErrorStrip, Loading } from "./components/Feedback";
 import { InvitePage } from "./pages/InvitePage";
+import { OperatorPage } from "./pages/OperatorPage";
 import { PipelineOnScanPage, SavedPipelinePage } from "./pages/PipelinePages";
+import { ResetPage } from "./pages/ResetPage";
 import { ScanPage } from "./pages/ScanPage";
 import { SignInPage } from "./pages/SignInPage";
 import { TenantPage } from "./pages/TenantPage";
@@ -16,12 +18,13 @@ import { ROLE_LABEL } from "./roles";
 /**
  * The pages and their URLs. Every page can be opened by its link: the API
  * answers these paths with index.html and the router picks the page.
- * Everything under Layout needs a signed-in user; sign-in and invitation
- * links work without one.
+ * Everything under Layout needs a signed-in user; sign-in, invitation and
+ * reset links work without one.
  */
 export const router = createBrowserRouter([
   { path: "/sign-in", element: <SignInPage /> },
   { path: "/invite/:token", element: <InvitePage /> },
+  { path: "/reset/:token", element: <ResetPage /> },
   {
     path: "/",
     element: <Layout />,
@@ -33,6 +36,7 @@ export const router = createBrowserRouter([
       { path: "scans/:scanId/pipeline", element: <PipelineOnScanPage /> },
       { path: "pipelines/:pipelineId", element: <SavedPipelinePage /> },
       { path: "users", element: <UsersPage /> },
+      { path: "operator", element: <OperatorPage /> },
       { path: "*", element: <NotFound /> },
     ],
   },
@@ -54,7 +58,7 @@ function Layout({ error }: { error?: boolean }) {
   );
 }
 
-/** The bar on top: the product, the account worked in, the admin page for admins, and the user menu. */
+/** The bar on top: the product, the account worked in, the admin and operator pages for those who may, and the user menu. */
 function Shell({ me }: { me: Me }) {
   const navigate = useNavigate();
   const signOut = useSignOut();
@@ -82,6 +86,7 @@ function Shell({ me }: { me: Me }) {
         onProfileClick={(e) => setMenuFor(e.detail.targetRef)}
       >
         {isAdmin && <ShellBarItem icon="group" text="Users and roles" onClick={() => navigate("/users")} />}
+        {me.operator && <ShellBarItem icon="action-settings" text="Operator" onClick={() => navigate("/operator")} />}
       </ShellBar>
       <UserMenu
         open={menuFor !== undefined}
@@ -110,6 +115,7 @@ function Shell({ me }: { me: Me }) {
         ))}
       >
         {isAdmin && <UserMenuItem icon="group" text="Users and roles" data-to="/users" />}
+        {me.operator && <UserMenuItem icon="action-settings" text="Operator" data-to="/operator" />}
       </UserMenu>
     </>
   );

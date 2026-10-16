@@ -7,31 +7,37 @@ import {
   createSession,
   deleteSession,
   findOpenInvitation,
+  findOpenSignInReset,
   findSession,
   findUserByEmail,
   getUser,
   invitationTotpSecret,
   membershipsOf,
   setInvitationTotpSecret,
+  setSignInResetTotpSecret,
+  signInResetTotpSecret,
   switchSessionAccount,
+  useSignInReset,
   useTotpStep,
   type Db,
   type Session,
 } from "@ystara/db";
-import { ROLE_PERMISSIONS, type AuthenticatorSetup, type InvitationOffer, type Me } from "@ystara/shared";
+import { ROLE_PERMISSIONS, type AuthenticatorSetup, type InvitationOffer, type Me, type ResetOffer } from "@ystara/shared";
 import { clearSessionCookie, PENDING_MINUTES, SESSION_MINUTES, setSessionCookie, signedIn } from "../auth/access.js";
 import { hashPassword, passwordProblem, verifyPassword } from "../auth/passwords.js";
 import type { SecretBox } from "../auth/secrets.js";
 import { matchTotp, newTotpSecret, otpauthUri } from "../auth/totp.js";
 
 /**
- * Signing in, and joining an account through an invitation link, under /api.
+ * Signing in, joining an account through an invitation link, and choosing a
+ * new password and authenticator through a reset link, under /api.
  *
  * Signing in takes two steps: email and password start a short "pending"
  * session; the code from the authenticator app turns it into a real one (a
  * new token, so a token seen before the code is worthless after it).
  * There is no sign-up: users only arrive through invitations, which an
- * account admin (or `npm run account:create`) creates.
+ * account admin (or `npm run account:create`) creates. Reset links come
+ * from the operator panel (routes/operator.ts).
  */
 const email = z.string().trim().toLowerCase().email().max(254);
 const code = z.string().trim().max(10);
@@ -39,7 +45,8 @@ const Login = z.object({ email, password: z.string().min(1).max(1000) });
 const Code = z.object({ code });
 const SwitchAccount = z.object({ accountId: z.string().uuid() });
 const Token = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{20,100}$/) });
-const NewUser = z.object({ password: z.string().max(1000), code });
+/** A new password and a code from the authenticator app, to prove the secret the server made for the link works. */
+const NewSignIn = z.object({ password: z.string().max(1000), code });
 
 /**
  * Wrong authenticator codes in a row (counted per user, across sign-ins)
@@ -64,6 +71,7 @@ const byPendingUser = limitedBy((req) => req.pending?.userId ?? "");
 const byLink = limitedBy((req) => String((req.params as { token?: unknown }).token ?? ""));
 
 const INVITATION_GONE = "This invitation link is no longer valid. Ask your admin for a new one.";
+const RESET_GONE = "This link is no longer valid. Ask for a new one.";
 
 export function authRoutes(db: Db, secrets: SecretBox) {
   // An unknown email is checked against this hash, so it takes as long as a wrong password and
@@ -86,6 +94,28 @@ export function authRoutes(db: Db, secrets: SecretBox) {
     clearSessionCookie(reply);
     const minutes = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60_000));
     return reply.code(429).send({ error: `Too many wrong codes. Wait ${minutes === 1 ? "a minute" : `${minutes} minutes`}, then sign in again.`, restart: true });
+  }
+
+  /**
+   * A new secret for the authenticator app, made here and kept (sealed) on the link by `keep`: the browser
+   * shows it once as a QR code and never sends it back, so nobody can choose their own. Opening the setup
+   * again replaces it. Undefined when the link closed in the meantime.
+   */
+  async function authenticatorSetup(email: string, keep: (sealed: string) => Promise<boolean>): Promise<AuthenticatorSetup | undefined> {
+    const secret = newTotpSecret();
+    if (!(await keep(secrets.seal(secret)))) return undefined;
+    return { secret, otpauthUri: otpauthUri(secret, email) };
+  }
+
+  /** Checks a new password and a code from the link's secret (sealed); the stored form of both, or why they are refused. */
+  async function newSignIn(body: unknown, sealedSecret: string | undefined): Promise<{ problem: string } | { passwordHash: string; totpSecret: string; totpStep: number }> {
+    const input = NewSignIn.parse(body);
+    const problem = passwordProblem(input.password);
+    if (problem) return { problem };
+    if (!sealedSecret) return { problem: "Set up the authenticator app first: open the link again." };
+    const step = matchTotp(secrets.open(sealedSecret), input.code);
+    if (step === undefined) return { problem: "That code is not right. Check that the app shows Ystara and try the next code." };
+    return { passwordHash: await hashPassword(input.password), totpSecret: sealedSecret, totpStep: step };
   }
 
   return async (app: FastifyInstance) => {
@@ -142,17 +172,13 @@ export function authRoutes(db: Db, secrets: SecretBox) {
       return { account: invitation.account.name, email: invitation.email, role: invitation.role, existingUser } satisfies InvitationOffer;
     });
 
-    // A new secret for the authenticator app, made here and kept (sealed) on the invitation: the
-    // browser shows it once as a QR code and never sends it back, so nobody can choose their own.
-    // Opening the setup again replaces it.
     app.post("/invitations/:token/authenticator", { config: { access: "public", ...byLink } }, async (req, reply) => {
       const { token } = Token.parse(req.params);
       const invitation = await findOpenInvitation(db, token);
       if (!invitation) return reply.code(404).send({ error: INVITATION_GONE });
       if (await findUserByEmail(db, invitation.email)) return reply.code(409).send({ error: "This email already has a user: sign in instead" });
-      const secret = newTotpSecret();
-      if (!(await setInvitationTotpSecret(db, token, secrets.seal(secret)))) return reply.code(404).send({ error: INVITATION_GONE });
-      return { secret, otpauthUri: otpauthUri(secret, invitation.email) } satisfies AuthenticatorSetup;
+      const setup = await authenticatorSetup(invitation.email, (sealed) => setInvitationTotpSecret(db, token, sealed));
+      return setup ?? reply.code(404).send({ error: INVITATION_GONE });
     });
 
     app.post("/invitations/:token/accept", { config: { access: "public", ...byLink } }, async (req, reply) => {
@@ -170,21 +196,42 @@ export function authRoutes(db: Db, secrets: SecretBox) {
         return me(db, (await findSession(db, req.sessionToken!))!);
       }
 
-      // A new user chooses a password and proves the authenticator app works with one code
-      // from the secret the server made for this link.
-      const input = NewUser.parse(req.body);
-      const problem = passwordProblem(input.password);
-      if (problem) return reply.code(400).send({ error: problem });
-      const sealedSecret = await invitationTotpSecret(db, token);
-      if (!sealedSecret) return reply.code(400).send({ error: "Set up the authenticator app first: open the link again." });
-      const step = matchTotp(secrets.open(sealedSecret), input.code);
-      if (step === undefined) return reply.code(400).send({ error: "That code is not right. Check that the app shows Ystara and try the next code." });
-      const joined = await acceptInvitation(db, token, {
-        newUser: { passwordHash: await hashPassword(input.password), totpSecret: sealedSecret, totpStep: step },
-      });
+      // A new user chooses a password and proves the authenticator app works with one code.
+      const signIn = await newSignIn(req.body, await invitationTotpSecret(db, token));
+      if ("problem" in signIn) return reply.code(400).send({ error: signIn.problem });
+      const joined = await acceptInvitation(db, token, { newUser: signIn });
       if (!joined) return reply.code(404).send({ error: INVITATION_GONE });
       const session = await startSession(req, reply, { ...joined, verified: true });
       return reply.code(201).send(await me(db, (await findSession(db, session))!));
+    });
+
+    // --- Reset links (/reset/<token> in the web app), made on the operator panel
+
+    app.get("/resets/:token", { config: { access: "public", ...byLink } }, async (req, reply) => {
+      const reset = await findOpenSignInReset(db, Token.parse(req.params).token);
+      return reset ? ({ email: reset.email } satisfies ResetOffer) : reply.code(404).send({ error: RESET_GONE });
+    });
+
+    app.post("/resets/:token/authenticator", { config: { access: "public", ...byLink } }, async (req, reply) => {
+      const { token } = Token.parse(req.params);
+      const reset = await findOpenSignInReset(db, token);
+      const setup = reset && (await authenticatorSetup(reset.email, (sealed) => setSignInResetTotpSecret(db, token, sealed)));
+      return setup ?? reply.code(404).send({ error: RESET_GONE });
+    });
+
+    // The new password and authenticator replace the old ones, every other sign-in of the user ends, and this browser is signed in.
+    app.post("/resets/:token/accept", { config: { access: "public", ...byLink } }, async (req, reply) => {
+      const { token } = Token.parse(req.params);
+      if (!(await findOpenSignInReset(db, token))) return reply.code(404).send({ error: RESET_GONE });
+      const signIn = await newSignIn(req.body, await signInResetTotpSecret(db, token));
+      if ("problem" in signIn) return reply.code(400).send({ error: signIn.problem });
+      const userId = await useSignInReset(db, token, signIn);
+      if (!userId) return reply.code(404).send({ error: RESET_GONE });
+      req.log.info({ userId }, "sign-in reset link used: new password and authenticator");
+      const [account] = await membershipsOf(db, userId);
+      if (!account) return reply.code(403).send({ error: "Your sign-in is reset, but you are no longer a member of any account. Ask an admin to invite you again." });
+      const session = await startSession(req, reply, { userId, accountId: account.id, verified: true });
+      return me(db, (await findSession(db, session))!);
     });
   };
 }
@@ -198,5 +245,6 @@ async function me(db: Db, session: Session): Promise<Me> {
     role: session.role,
     permissions: ROLE_PERMISSIONS[session.role],
     accounts,
+    operator: session.operator,
   };
 }

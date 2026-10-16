@@ -11,12 +11,13 @@ import { can, type Permission } from "@ystara/shared";
  *   "public"     anyone (health, sign-in, invitation links)
  *   "pending"    password checked, authenticator code still to come
  *   "signed-in"  password and code checked (the default)
+ *   "operator"   signed in as Ystara's operator (the operator panel, routes/operator.ts)
  *   a Permission signed in, and the role in the current account allows it (packages/shared/src/roles.ts)
  *
  * A route only sees its own account's data: it reads the account from
  * req.auth, never from the request, and answers 404 for another account's ids.
  */
-export type Access = "public" | "pending" | "signed-in" | Permission;
+export type Access = "public" | "pending" | "signed-in" | "operator" | Permission;
 
 declare module "fastify" {
   interface FastifyContextConfig {
@@ -60,6 +61,10 @@ export function installAccess(app: FastifyInstance, db: Db): void {
       return;
     }
     if (!req.auth) return reply.code(401).send({ error: "Sign in to continue" });
+    if (access === "operator") {
+      if (!req.auth.operator) return reply.code(403).send({ error: "Only Ystara's operator can do this" });
+      return;
+    }
     if (access !== "signed-in" && !can(req.auth.role, access)) {
       return reply.code(403).send({ error: `Your role (${req.auth.role.replace("_", " ")}) can't do this` });
     }

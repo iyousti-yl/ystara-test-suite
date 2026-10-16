@@ -386,6 +386,9 @@ section.block > ui5-title {
 .you {
   margin-left: 0.25rem;
 }
+.tag-after {
+  margin-left: 0.5rem;
+}
 .copy-row {
   display: flex;
   gap: 0.5rem;

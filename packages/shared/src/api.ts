@@ -114,6 +114,8 @@ export interface Me {
   permissions: Permission[];
   /** Every account the user belongs to. */
   accounts: (Account & { role: Role })[];
+  /** Ystara's operator: sees the operator panel. */
+  operator: boolean;
 }
 
 /** A user's membership of the signed-in account (GET /api/members). */
@@ -153,6 +155,35 @@ export interface AuthenticatorSetup {
   secret: string;
   /** What the QR code holds. */
   otpauthUri: string;
+}
+
+/** GET /api/operator/accounts: every customer account, with counts only (the operator sees no lineage data). */
+export interface AccountOverview extends Account {
+  createdAt: Date;
+  members: number;
+  admins: number;
+  tenants: number;
+  openInvitations: number;
+}
+
+/** GET /api/operator/users: every user, with the accounts they belong to. */
+export interface UserOverview {
+  id: string;
+  email: string;
+  operator: boolean;
+  createdAt: Date;
+  accounts: (Account & { role: Role })[];
+}
+
+/** POST /api/operator/users/:id/reset: a one-time link (/reset/<token>) to choose a new password and authenticator. Shown once. */
+export interface CreatedReset {
+  token: string;
+  expiresAt: Date;
+}
+
+/** GET /api/resets/:token: whose sign-in the link resets. */
+export interface ResetOffer {
+  email: string;
 }
 
 /** GET /api/invitations/:token: what the link offers, before it is accepted. */

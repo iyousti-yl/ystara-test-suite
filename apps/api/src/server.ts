@@ -14,6 +14,7 @@ import { installAccess } from "./auth/access.js";
 import { masterKeyFromEnv, secretBox, type SecretBox } from "./auth/secrets.js";
 import { authRoutes } from "./routes/auth.js";
 import { discoveryRoutes } from "./routes/discovery.js";
+import { operatorRoutes } from "./routes/operator.js";
 import { teamRoutes } from "./routes/team.js";
 
 /**
@@ -21,7 +22,8 @@ import { teamRoutes } from "./routes/team.js";
  * (apps/web, built into apps/web/dist), so one port serves both and the
  * browser never makes a cross-origin call. Routes arrive per phase:
  *   phase 1: tenants, scans, lineage, pipelines (routes/discovery.ts)
- *            sign-in and invitations (routes/auth.ts), users and roles (routes/team.ts)
+ *            sign-in and invitations (routes/auth.ts), users and roles (routes/team.ts),
+ *            the operator panel (routes/operator.ts)
  *   later:   snapshots, runs, alerts; scenarios
  *
  * Every route needs a signed-in user unless it says otherwise; auth/access.ts
@@ -117,6 +119,7 @@ export async function buildServer(deps: { db: Db; queue: JobQueue; secrets: Secr
       api.get("/meta", open, async () => ({ roles: ROLES, version: process.env.npm_package_version ?? "dev" }));
       await api.register(authRoutes(deps.db, deps.secrets));
       await api.register(teamRoutes(deps.db));
+      await api.register(operatorRoutes(deps.db));
       await api.register(discoveryRoutes(deps.db, deps.queue));
     },
     { prefix: "/api" },

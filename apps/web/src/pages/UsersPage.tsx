@@ -4,7 +4,6 @@ import {
   Dialog,
   Input,
   Label,
-  MessageStrip,
   Option,
   Select,
   Table,
@@ -17,6 +16,7 @@ import {
 import { ROLES, type Role } from "@ystara/shared";
 import { useCan, useChangeRole, useInvite, useMe, useRemoveMember, useTeam, useWithdrawInvitation } from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
+import { LinkToSend } from "../components/LinkToSend";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
 import { ROLE_LABEL, ROLE_SUMMARY } from "../roles";
@@ -168,17 +168,15 @@ function InviteDialog({ onClose }: { onClose: () => void }) {
   const invite = useInvite();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("developer");
-  const [copied, setCopied] = useState(false);
-  const link = invite.data && `${window.location.origin}/invite/${invite.data.token}`;
 
   return (
     <Dialog
       open
-      headerText={link ? "Send this link" : "Invite someone"}
+      headerText={invite.data ? "Send this link" : "Invite someone"}
       onClose={onClose}
       footer={
         <div className="dialog-footer">
-          {link ? (
+          {invite.data ? (
             <Button design="Emphasized" onClick={onClose}>
               Done
             </Button>
@@ -195,30 +193,13 @@ function InviteDialog({ onClose }: { onClose: () => void }) {
         </div>
       }
     >
-      {link ? (
-        <div className="dialog-body">
-          <p>
-            Send this link to {invite.data!.invitation.email}. It works once, until {formatDateTime(invite.data!.invitation.expiresAt)}. There they
-            choose a password and set up an authenticator app.
-          </p>
-          <div className="copy-row">
-            <Input readonly value={link} className="mono" accessibleName="Invitation link" />
-            <Button
-              icon="copy"
-              onClick={() =>
-                void navigator.clipboard.writeText(link).then(
-                  () => setCopied(true),
-                  () => setCopied(false),
-                )
-              }
-            >
-              {copied ? "Copied" : "Copy"}
-            </Button>
-          </div>
-          <MessageStrip design="Critical" hideCloseButton>
-            Ystara shows this link only now. If it gets lost, withdraw the invitation and create a new one.
-          </MessageStrip>
-        </div>
+      {invite.data ? (
+        <LinkToSend
+          path={`/invite/${invite.data.token}`}
+          to={invite.data.invitation.email}
+          until={invite.data.invitation.expiresAt}
+          purpose="There they choose a password and set up an authenticator app."
+        />
       ) : (
         <div className="dialog-body">
           <Label for="invite-email" required>
