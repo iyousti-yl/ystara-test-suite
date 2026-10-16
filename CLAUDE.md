@@ -9,7 +9,9 @@ Regression and scenario testing for SAP Datasphere pipelines. Read `docs/archite
 
 ## How we work
 
-- **Repeated, isolated jobs get their own agent and skill.** When a job is run again and again on its own (a scan, a report, a check), define a subagent in `.claude/agents/<name>.md` (narrow tools, its own rules and report format) and a skill in `.claude/skills/<name>/SKILL.md` with `context: fork` and `agent: <name>` that hands it the task. Example: `/datasphere-scan HR --output V_HEADCOUNT_OUT` runs the `datasphere-scanner` agent.
+- **Repeated, isolated jobs get their own agent and skill.** When a job is run again and again on its own (a scan, a report, a check), define a subagent in `.claude/agents/<name>.md` (narrow tools, its own rules and report format) and a skill in `.claude/skills/<name>/SKILL.md` with `context: fork` and `agent: <name>` that hands it the task. Example: `/datasphere-scan HR --output V_HEADCOUNT_OUT` runs the `datasphere-scanner` agent. Watch for new ones and suggest them without being asked.
+- **Before every push, run `/tenant-content-check`** (`--base <branch>` for a stacked PR, `--file <pr-body.md>` for a PR description). A BLOCKED verdict stops the push until the names are replaced with synthetic ones.
+- **After a change to the web app, run `/browser-check`** before a PR is marked ready: every page at several widths, console, CSP, outside requests and the screenshots.
 - Every PR starts with the note in `docs/pr-note-template.md`: what changed in plain language, why, how, how to check, what it doesn't do yet.
 - Issam develops on Windows: build paths with `path`, `fileURLToPath` and `pathToFileURL`, never by string concatenation of `import.meta.url`.
 - Record decisions in `docs/architecture/decisions-log.md`.
@@ -27,4 +29,6 @@ npm run db:migrate                                   # apply packages/db/migrati
 npm run db:import -- --from <scan folder> --tenant <NAME> [--account <NAME>]   # load a saved scan, no tenant calls
 npm run account:create -- --name <ACCOUNT> --admin <email>   # create an account, print its first admin's invitation link
 npm run operator:grant -- --email <email> [--revoke]         # make an existing user the operator (operator panel)
+npm run check:tenant-content -- [--base <branch>] [--file <path>]   # tenant names in what is about to be pushed
+npm run check:browser -- [--as <email>] [--page /path] [--dark]     # the local web app in Chromium at 4 widths, with screenshots
 ```

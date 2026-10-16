@@ -8,6 +8,7 @@ dist/
 coverage/
 tools/spike/output/
 tools/scan/output/
+tools/check/output/
 .DS_Store
 
 # Tenant-specific notes (naming conventions, process rules). Never committed.

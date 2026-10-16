@@ -6,7 +6,11 @@
       "Bash(npm run typecheck)",
       "Bash(npm run lint)",
       "Bash(npm test)",
-      "Bash(datasphere --version)"
+      "Bash(datasphere --version)",
+      "Bash(npm run check:browser)",
+      "Bash(npm run check:browser *)",
+      "Bash(npm run check:tenant-content)",
+      "Bash(npm run check:tenant-content *)"
     ],
     "deny": [
       "Bash(datasphere * create *)",

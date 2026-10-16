@@ -21,7 +21,9 @@
     "db:migrate": "tsc -b && node packages/db/dist/run-migrations.js",
     "db:import": "tsc -b && tsx tools/db/import-scan.ts",
     "account:create": "tsc -b && tsx tools/db/create-account.ts",
-    "operator:grant": "tsc -b && tsx tools/db/operator-grant.ts"
+    "operator:grant": "tsc -b && tsx tools/db/operator-grant.ts",
+    "check:browser": "tsc -b && tsx tools/check/browser.ts",
+    "check:tenant-content": "tsc -b && tsx tools/check/tenant-content.ts"
   },
   "engines": {
     "node": ">=22"
@@ -31,6 +33,7 @@
     "@types/node": "^22.10.0",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "playwright": "1.56.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.0",
