@@ -3,7 +3,7 @@ import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CliOutputError, DatasphereCli } from "./cli.js";
+import { CliOutputError, DatasphereCli, describeCliFailure } from "./cli.js";
 import { WriteAttemptError } from "./readonly.js";
 
 // Stand-ins for the Datasphere CLI, written in Node. Shell scripts, so not on Windows.
@@ -129,6 +129,13 @@ process.stdin.on("end", () => process.exit(0));`,
     await expect(cli.initCache()).resolves.toBeUndefined();
   });
 
+  it("lists the spaces the login can see", async () => {
+    const spacesBin = path.join(dir, "fake-spaces");
+    await writeFile(spacesBin, `#!/usr/bin/env node\nconsole.log(JSON.stringify(["SALES", { technicalName: "FINANCE" }]));\n`);
+    await chmod(spacesBin, 0o755);
+    expect(await new DatasphereCli({ host, bin: spacesBin }).listSpaces()).toEqual(["SALES", "FINANCE"]);
+  });
+
   it("refuses a client without a folder of its own", () => {
     expect(() => new DatasphereCli({ host, bin, client })).toThrow(/configDir/);
   });
@@ -140,5 +147,21 @@ process.stdin.on("end", () => process.exit(0));`,
     const write = { group: "objects", kind: "views", verb: "delete" } as unknown as Parameters<DatasphereCli["exec"]>[0];
     await expect(cli.exec(write)).rejects.toThrow(WriteAttemptError);
     expect(existsSync(path.join(dir, "called"))).toBe(false);
+  });
+});
+
+describe("a failed CLI call, described for a person", () => {
+  it("keeps the last lines of what the CLI printed, without the secret", () => {
+    const failure = Object.assign(new Error("Command failed with exit code 1"), {
+      stdout: "",
+      stderr: ["step 1", "step 2", "", "POST https://synthetic.example.com/oauth/token client_secret=hunter2-synthetic", "401 Unauthorized  "].join("\n"),
+    });
+    expect(describeCliFailure(failure, ["hunter2-synthetic"], 2)).toBe("POST https://synthetic.example.com/oauth/token client_secret=<secret>\n401 Unauthorized");
+  });
+
+  it("says why the CLI never answered", () => {
+    expect(describeCliFailure(Object.assign(new Error("long text"), { shortMessage: "Command timed out after 120000 milliseconds" }))).toBe(
+      "Command timed out after 120000 milliseconds",
+    );
   });
 });

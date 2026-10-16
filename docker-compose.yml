@@ -6,7 +6,7 @@
 # Ports are published on 127.0.0.1 only: everything speaks plain http, which is fine on your own
 # machine and nowhere else. To use other host ports, set YSTARA_DB_PORT / YSTARA_API_PORT in your
 # shell or in .env (the only settings .env may hold: Compose reads that file and can print its values;
-# app settings live in .env.local). The API needs the key file .master-key (see README).
+# app settings live in .env.local). The API and the worker need the key file .master-key (see README).
 
 x-app: &app
   image: ystara:dev
@@ -60,14 +60,18 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # Scans run here with the Datasphere CLI. Until the connection wizard stores tenant credentials,
-  # the container has no CLI login: to scan a tenant, stop this service and run `npm run dev:worker`
-  # on your machine, where `datasphere login` works. Imported scans need no worker.
+  # Checks connections and runs scans with the Datasphere CLI, logged in with each tenant's technical
+  # client (entered with Connect on the tenant page; it opens their secrets with the key in .master-key).
+  # A tenant without one would need the CLI's own login, which this container doesn't
+  # have: for that, stop this service and run `npm run dev:worker` on your machine after
+  # `datasphere login`. Imported scans need no worker.
   worker:
     <<: *app
     command: ["node", "apps/worker/dist/main.js"]
     environment:
       DATABASE_URL: postgres://ystara:ystara@postgres:5432/ystara
+      MASTER_KEY_FILE: /run/secrets/master_key
+    secrets: [master_key]
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -143,6 +143,11 @@ export class DatasphereCli {
     return stdout.trim();
   }
 
+  /** The technical names of the spaces this login can see. */
+  async listSpaces(): Promise<string[]> {
+    return parseListing(await this.exec({ group: "spaces", verb: "list" })).map((s) => s.technicalName);
+  }
+
   async listObjects(space: string, kind: CliObjectKind, top = 1000): Promise<ListedObject[]> {
     const out = await this.exec({ group: "objects", kind, verb: "list" }, { space, top: String(top) });
     return parseListing(out);
@@ -198,4 +203,20 @@ export function parseListing(stdout: string): ListedObject[] {
       return null;
     })
     .filter((x): x is ListedObject => x !== null);
+}
+
+/**
+ * What a failed CLI call printed, for a person to read: its last lines (or the
+ * reason it never ran, e.g. a timeout), with each of `hide` (secrets) masked.
+ */
+export function describeCliFailure(e: unknown, hide: string[] = [], lines = 10): string {
+  const err = e as { stderr?: string; stdout?: string; shortMessage?: string; message?: string };
+  let text = [err.stdout, err.stderr].filter(Boolean).join("\n") || err.shortMessage || err.message || String(e);
+  for (const secret of hide.filter(Boolean)) text = text.replaceAll(secret, "<secret>");
+  return text
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim())
+    .slice(-lines)
+    .join("\n");
 }

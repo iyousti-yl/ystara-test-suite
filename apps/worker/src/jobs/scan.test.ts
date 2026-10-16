@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ObjectSource } from "@ystara/connector";
 import { createAccount, createScan, createTenant, loadGraph, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
-import { runScan } from "./scan.js";
+import { runScan, type TenantAccess } from "./scan.js";
 
 // A tiny synthetic space: DF_LOAD (write step "producer1") loads LT_DATA, V_OUT reads it.
 const SPACE: Record<string, Record<string, unknown>> = {
@@ -14,6 +14,8 @@ const SPACE: Record<string, Record<string, unknown>> = {
   },
   views: { V_OUT: { definitions: { V_OUT: { kind: "entity", "@DataWarehouse.sqlEditor.query": 'SELECT * FROM "LT_DATA"' } } } },
 };
+
+const access = (source: ObjectSource, more: Partial<TenantAccess> = {}) => async (): Promise<TenantAccess> => ({ source, login: "client", hide: [], ...more });
 
 const fakeTenant: ObjectSource = {
   async listObjects(_space, kind) {
@@ -38,33 +40,39 @@ describe("runScan", () => {
   it("reads the spaces and stores the lineage graph", async () => {
     const tenant = await createTenant(db, { accountId, name: "Fake", host: "https://fake.example.com" });
     const scan = await createScan(db, tenant.id, ["S"]);
-    const done = await runScan(db, scan.id, () => fakeTenant);
+    let closed = false;
+    const done = await runScan(db, scan.id, access(fakeTenant, { close: async () => void (closed = true) }));
     expect(done).toMatchObject({ status: "succeeded", objectCount: 3, edgeCount: 2, warnings: [] });
+    expect(closed).toBe(true); // the client's folder, with its token, is gone
     const edges = (await loadGraph(db, scan.id)).edges.map((e) => `${e.from.technicalName} ${e.kind} ${e.to.technicalName}`);
     expect(edges.sort()).toEqual(["DF_LOAD writes_to LT_DATA", "LT_DATA reads_from V_OUT"]);
   });
 
-  it("fails clearly when nothing can be read, e.g. an expired login", async () => {
-    const tenant = await createTenant(db, { accountId, name: "Logged out", host: "https://fake.example.com" });
-    const scan = await createScan(db, tenant.id, ["S"]);
+  it("fails clearly when nothing can be read, says what to check for that login, and hides the secret", async () => {
     const loggedOut: ObjectSource = {
       async listObjects() {
-        throw new Error("401 Unauthorized: run datasphere login");
+        throw new Error("401 Unauthorized for client secret synthetic-secret");
       },
       async readObject() {
         throw new Error("unreachable");
       },
     };
-    const done = await runScan(db, scan.id, () => loggedOut);
-    expect(done?.status).toBe("failed");
-    expect(done?.error).toMatch(/Nothing could be read.*401 Unauthorized/);
-    expect(done?.warnings.length).toBeGreaterThan(0);
+    const tenant = await createTenant(db, { accountId, name: "Logged out", host: "https://fake.example.com" });
+
+    const withClient = await runScan(db, (await createScan(db, tenant.id, ["S"])).id, access(loggedOut, { hide: ["synthetic-secret"] }));
+    expect(withClient?.status).toBe("failed");
+    expect(withClient?.error).toMatch(/Nothing could be read.*technical client.*401 Unauthorized/);
+    expect(JSON.stringify(withClient)).not.toContain("synthetic-secret");
+    expect(withClient?.warnings.length).toBeGreaterThan(0);
+
+    const onMachine = await runScan(db, (await createScan(db, tenant.id, ["S"])).id, access(loggedOut, { login: "machine" }));
+    expect(onMachine?.error).toMatch(/Nothing could be read.*CLI logged in on the machine/);
   });
 
   it("fails with the reason when the tenant can't be reached at all", async () => {
     const tenant = await createTenant(db, { accountId, name: "Imported only", host: null });
     const scan = await createScan(db, tenant.id, ["S"]);
-    const done = await runScan(db, scan.id, () => {
+    const done = await runScan(db, scan.id, async () => {
       throw new Error('Tenant "Imported only" has no Datasphere URL');
     });
     expect(done).toMatchObject({ status: "failed", error: 'Tenant "Imported only" has no Datasphere URL' });

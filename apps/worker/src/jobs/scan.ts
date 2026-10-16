@@ -1,4 +1,4 @@
-import { graphFromRaw, readSpaces, type ObjectSource, type ScanOptions } from "@ystara/connector";
+import { describeCliFailure, graphFromRaw, readSpaces, type ObjectSource, type ScanOptions } from "@ystara/connector";
 import { getScan, getTenant, markScanFailed, markScanRunning, saveScanResult, type Db, type Scan, type Tenant } from "@ystara/db";
 
 /**
@@ -8,10 +8,26 @@ import { getScan, getTenant, markScanFailed, markScanRunning, saveScanResult, ty
  * Not retried on failure: almost every failure (expired login, missing rights,
  * wrong URL) needs a person, so the scan is marked failed with the reason.
  */
+
+/** How one job reaches a tenant (tenant-login.ts), and how it tidies up afterwards. */
+export interface TenantAccess {
+  source: ObjectSource;
+  /** The tenant's technical client, or the CLI login on the worker's machine: says what to check when nothing can be read. */
+  login: "client" | "machine";
+  /** Secrets to mask in error messages. */
+  hide: string[];
+  close?(): Promise<void>;
+}
+
+const HINTS: Record<TenantAccess["login"], string> = {
+  client: "Is the tenant's technical client a member of these spaces, with a role that may see their objects? Check again on the tenant page to test its login.",
+  machine: "Is the Datasphere CLI logged in on the machine the worker runs on, with read rights on these spaces? Or connect the tenant with a technical client.",
+};
+
 export async function runScan(
   db: Db,
   scanId: string,
-  sourceFor: (tenant: Tenant) => ObjectSource,
+  accessFor: (tenant: Tenant) => Promise<TenantAccess>,
   opts: ScanOptions = {},
 ): Promise<Scan | undefined> {
   const scan = await getScan(db, scanId);
@@ -20,17 +36,21 @@ export async function runScan(
   if (!tenant) return undefined;
 
   await markScanRunning(db, scanId);
+  let access: TenantAccess | undefined;
   try {
-    const { raw, warnings } = await readSpaces(sourceFor(tenant), scan.spaces, opts);
+    access = await accessFor(tenant);
+    const { raw, warnings } = await readSpaces(access.source, scan.spaces, opts);
     if (raw.length === 0 && warnings.length > 0) {
-      // Nothing could be listed or read at all, usually an expired login or missing rights.
-      const hint = "Is the Datasphere CLI logged in on the machine the worker runs on, with read rights on these spaces?";
-      await markScanFailed(db, scanId, `Nothing could be read. ${hint} First problem: ${warnings[0]}`, warnings);
+      // Nothing could be listed or read at all, usually a login or missing rights.
+      const hide = (text: string) => access!.hide.reduce((t, secret) => t.replaceAll(secret, "<secret>"), text);
+      await markScanFailed(db, scanId, `Nothing could be read. ${HINTS[access.login]} First problem: ${hide(warnings[0])}`, warnings.map(hide));
       return getScan(db, scanId);
     }
     return await saveScanResult(db, scanId, raw, graphFromRaw(raw, scan.spaces, warnings));
   } catch (e) {
-    await markScanFailed(db, scanId, e instanceof Error ? e.message : String(e));
+    await markScanFailed(db, scanId, describeCliFailure(e, access?.hide));
     return getScan(db, scanId);
+  } finally {
+    await access?.close?.();
   }
 }
