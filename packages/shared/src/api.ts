@@ -1,4 +1,5 @@
 import type { DspEdge, DspObject, DspObjectRef, Pipeline } from "./objects.js";
+import type { Permission, Role } from "./roles.js";
 
 /**
  * What the API stores and sends, shared by the API (which sends it) and the web
@@ -10,6 +11,7 @@ import type { DspEdge, DspObject, DspObjectRef, Pipeline } from "./objects.js";
 
 export interface Tenant {
   id: string;
+  accountId: string;
   name: string;
   /** Datasphere URL. Null for a tenant that only has imported scans. */
   host: string | null;
@@ -89,6 +91,74 @@ export interface SavedPipelineResult extends PipelineResult {
 export interface ObjectDetails {
   object: DspObject;
   edges: DspEdge[];
+}
+
+/**
+ * Sign-in. A customer account has users, each with one role in it (a user can
+ * belong to several accounts). Everyone signs in with email, password and a
+ * code from an authenticator app.
+ */
+export interface Account {
+  id: string;
+  name: string;
+}
+
+/** The shortest password allowed (apps/api/src/auth/passwords.ts checks it; the pages say it). */
+export const MIN_PASSWORD_LENGTH = 12;
+
+/** GET /api/auth/me: who is signed in, in which account, and what their role allows there. */
+export interface Me {
+  user: { id: string; email: string };
+  account: Account;
+  role: Role;
+  permissions: Permission[];
+  /** Every account the user belongs to. */
+  accounts: (Account & { role: Role })[];
+}
+
+/** A user's membership of the signed-in account (GET /api/members). */
+export interface Member {
+  userId: string;
+  email: string;
+  role: Role;
+  joinedAt: Date;
+}
+
+/** An open invitation to join the account. The link itself is shown only once, when it is created. */
+export interface Invitation {
+  id: string;
+  email: string;
+  role: Role;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+/** GET /api/team: the account's members and open invitations (admins only). */
+export interface Team {
+  members: Member[];
+  invitations: Invitation[];
+}
+
+/** POST /api/team/invitations: the new invitation and its token, for the link /invite/<token>. Shown once. */
+export interface CreatedInvitation {
+  invitation: Invitation;
+  token: string;
+}
+
+/** POST /api/invitations/:token/authenticator: a new secret for the authenticator app, before the user exists. */
+export interface AuthenticatorSetup {
+  secret: string;
+  /** What the QR code holds. */
+  otpauthUri: string;
+}
+
+/** GET /api/invitations/:token: what the link offers, before it is accepted. */
+export interface InvitationOffer {
+  account: string;
+  email: string;
+  role: Role;
+  /** The email already has a Ystara user (from another account): sign in and accept. */
+  existingUser: boolean;
 }
 
 /** A value as it arrives over HTTP (JSON): dates become ISO strings. */

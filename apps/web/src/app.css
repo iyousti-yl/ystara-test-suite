@@ -302,3 +302,119 @@ section.block > ui5-title {
 .react-flow__minimap-node.minimap-other {
   fill: var(--sapNeutralElementColor);
 }
+
+/* --- Signing in and invitations (components/AuthFrame.tsx) */
+
+.auth-card {
+  max-width: 26rem;
+  margin: 3rem auto;
+  padding: 1.5rem 1.75rem;
+  background: var(--sapGroup_ContentBackground);
+  border: 1px solid var(--sapGroup_ContentBorderColor);
+  border-radius: var(--sapElement_BorderCornerRadius);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.auth-card p {
+  margin: 0;
+  line-height: 1.4;
+}
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.auth-label {
+  color: var(--sapContent_LabelColor);
+  font-size: var(--sapFontSize);
+  margin-top: 0.25rem;
+}
+.auth-label::after {
+  content: "*";
+  color: var(--sapField_RequiredColor);
+  margin-left: 0.125rem;
+}
+/* Looks like a ui5-input (see Field in components/AuthFrame.tsx for why it isn't one). */
+.auth-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 2.25rem;
+  padding: 0 0.625rem;
+  font: inherit;
+  color: var(--sapField_TextColor);
+  background: var(--sapField_Background);
+  border: var(--sapField_BorderWidth, 1px) solid var(--sapField_BorderColor);
+  border-bottom-color: var(--sapField_BottomBorderColor, var(--sapField_BorderColor));
+  border-radius: var(--sapField_BorderCornerRadius);
+}
+.auth-input:hover {
+  background: var(--sapField_Hover_Background);
+  border-color: var(--sapField_Hover_BorderColor);
+}
+.auth-input:focus {
+  outline: var(--sapContent_FocusWidth) var(--sapContent_FocusStyle) var(--sapContent_FocusColor);
+  outline-offset: 1px;
+}
+.auth-input[aria-invalid="true"] {
+  background: var(--sapField_InvalidBackground);
+  border-color: var(--sapField_InvalidColor);
+}
+.auth-input::placeholder {
+  color: var(--sapField_PlaceholderTextColor);
+  font-style: italic;
+}
+.auth-form ui5-button[design="Emphasized"] {
+  margin-top: 0.5rem;
+}
+/* The QR code stays black on white in dark mode too: authenticator apps read that best. */
+.auth-qr {
+  width: 12rem;
+  height: 12rem;
+  align-self: center;
+  background: #fff;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+}
+
+/* --- Users and roles */
+
+.shell-account {
+  color: var(--sapShell_InteractiveTextColor);
+  border-left: 1px solid var(--sapShell_BorderColor);
+  padding-left: 0.75rem;
+}
+.you {
+  margin-left: 0.25rem;
+}
+.copy-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.copy-row ui5-input {
+  flex: 1;
+}
+.roles {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.375rem 1.5rem;
+  margin: 0.25rem 0 0;
+}
+.roles > div {
+  display: contents;
+}
+.roles dt {
+  font-weight: bold;
+}
+.roles dd {
+  margin: 0;
+  color: var(--sapContent_LabelColor);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

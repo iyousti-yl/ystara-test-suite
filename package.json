@@ -19,7 +19,8 @@
     "spike:cli": "tsc -b && node tools/spike/cli-capabilities.mjs",
     "scan": "tsc -b && tsx tools/scan/scan.ts",
     "db:migrate": "tsc -b && node packages/db/dist/run-migrations.js",
-    "db:import": "tsc -b && tsx tools/db/import-scan.ts"
+    "db:import": "tsc -b && tsx tools/db/import-scan.ts",
+    "account:create": "tsc -b && tsx tools/db/create-account.ts"
   },
   "engines": {
     "node": ">=22"

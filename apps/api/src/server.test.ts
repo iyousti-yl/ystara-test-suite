@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
+import { testSecrets } from "./auth/testing.js";
 import { buildServer } from "./server.js";
 
 // A stand-in for apps/web/dist: index.html plus one hashed asset.
@@ -16,12 +17,12 @@ writeFileSync(path.join(webRoot, "assets", "index-abc123.js"), "console.log(1)")
 let db: Db;
 let withWeb: FastifyInstance;
 let apiOnly: FastifyInstance;
-const queue = { send: async () => undefined };
+const deps = () => ({ db, queue: { send: async () => undefined }, secrets: testSecrets });
 
 beforeAll(async () => {
   db = await createTestDb();
-  withWeb = await buildServer({ db, queue }, { logger: false, webRoot });
-  apiOnly = await buildServer({ db, queue }, { logger: false });
+  withWeb = await buildServer(deps(), { logger: false, webRoot });
+  apiOnly = await buildServer(deps(), { logger: false });
 });
 afterAll(async () => {
   await withWeb.close();

@@ -24,5 +24,6 @@ npm run scan -- --space <SPACE> [--output <OBJECT>]   # read-only discovery scan
 docker compose up -d --build                         # Postgres, migrations, API + web app on :4000, worker (127.0.0.1 only)
 npm run dev:web                                      # web app with instant reload on :5173, /api forwarded to the API
 npm run db:migrate                                   # apply packages/db/migrations and create job queues
-npm run db:import -- --from <scan folder> --tenant <NAME>   # load a saved scan, no tenant calls
+npm run db:import -- --from <scan folder> --tenant <NAME> [--account <NAME>]   # load a saved scan, no tenant calls
+npm run account:create -- --name <ACCOUNT> --admin <email>   # create an account, print its first admin's invitation link
 ```

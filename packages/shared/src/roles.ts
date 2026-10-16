@@ -10,6 +10,7 @@ export const PERMISSIONS = [
   "account.manage",
   "tenant.connect",
   "users.manage",
+  "discovery.run",
   "pipelines.read",
   "pipelines.write",
   "scenarios.read",
@@ -26,6 +27,7 @@ const ALL: Permission[] = [...PERMISSIONS];
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   admin: ALL,
   developer: [
+    "discovery.run",
     "pipelines.read",
     "pipelines.write",
     "scenarios.read",

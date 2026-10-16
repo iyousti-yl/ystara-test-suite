@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button, Dialog, Input, Label, Token, Tokenizer } from "@ui5/webcomponents-react";
 import type { PipelineResult } from "@ystara/shared";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { pipelineQuery, useDeletePipeline, usePipelineOnScan, useSavedPipeline, useSavePipeline, useScan, useTenant } from "../api";
+import { pipelineQuery, useCan, useDeletePipeline, usePipelineOnScan, useSavedPipeline, useSavePipeline, useScan, useTenant } from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
@@ -16,6 +16,7 @@ export function PipelineOnScanPage() {
   const { scanId = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
+  const can = useCan();
   const output = params.get("output") ?? "";
   const excludeWriters = params.getAll("excludeWriter");
   const scan = useScan(scanId);
@@ -42,9 +43,11 @@ export function PipelineOnScanPage() {
           </span>
         }
         actions={
-          <Button design="Emphasized" icon="save" disabled={!result.data || !scan.data} onClick={() => setSaving(true)}>
-            Save pipeline
-          </Button>
+          can("pipelines.write") && (
+            <Button design="Emphasized" icon="save" disabled={!result.data || !scan.data} onClick={() => setSaving(true)}>
+              Save pipeline
+            </Button>
+          )
         }
       />
       <Exclusions patterns={excludeWriters} onRemove={(p) => setExclusions(excludeWriters.filter((x) => x !== p))} />
@@ -75,6 +78,7 @@ export function PipelineOnScanPage() {
 export function SavedPipelinePage() {
   const { pipelineId = "" } = useParams();
   const navigate = useNavigate();
+  const can = useCan();
   const result = useSavedPipeline(pipelineId);
   const remove = useDeletePipeline();
   const definition = result.data?.definition;
@@ -107,18 +111,20 @@ export function SavedPipelinePage() {
             >
               Change exclusions
             </Button>
-            <Button
-              design="Transparent"
-              icon="delete"
-              disabled={remove.isPending}
-              onClick={() => {
-                if (window.confirm(`Delete the saved pipeline "${definition.name}"? Nothing changes in Datasphere.`)) {
-                  remove.mutate(definition, { onSuccess: () => navigate(`/tenants/${definition.tenantId}`) });
-                }
-              }}
-            >
-              Delete
-            </Button>
+            {can("pipelines.write") && (
+              <Button
+                design="Transparent"
+                icon="delete"
+                disabled={remove.isPending}
+                onClick={() => {
+                  if (window.confirm(`Delete the saved pipeline "${definition.name}"? Nothing changes in Datasphere.`)) {
+                    remove.mutate(definition, { onSuccess: () => navigate(`/tenants/${definition.tenantId}`) });
+                  }
+                }}
+              >
+                Delete
+              </Button>
+            )}
           </>
         }
       />

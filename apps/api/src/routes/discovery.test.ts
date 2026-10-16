@@ -4,6 +4,7 @@ import { graphFromRaw, type RawObject } from "@ystara/connector";
 import { createScan, saveScanResult, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import type { Pipeline } from "@ystara/shared";
+import { testSecrets, testUser, type TestUser } from "../auth/testing.js";
 import { buildServer } from "../server.js";
 
 // Synthetic space: two flows write LT_DATA (one from another process), V_OUT reads it.
@@ -34,19 +35,23 @@ const RAW: RawObject[] = [
 
 let db: Db;
 let app: FastifyInstance;
+let admin: TestUser;
 const sent: { name: string; data: object }[] = [];
 
 beforeAll(async () => {
   db = await createTestDb();
-  app = await buildServer({ db, queue: { send: async (name, data) => sent.push({ name, data }) } }, { logger: false });
+  app = await buildServer({ db, queue: { send: async (name, data) => sent.push({ name, data }) }, secrets: testSecrets }, { logger: false });
+  admin = await testUser(db, { account: "Customer", email: "admin@customer.example.com", role: "admin" });
 });
 afterAll(async () => {
   await app.close();
   await db.close();
 });
 
-const post = (url: string, payload: object) => app.inject({ method: "POST", url: `/api${url}`, payload });
-const get = (url: string) => app.inject({ method: "GET", url: `/api${url}` });
+// As the account's admin, unless another user is given.
+const post = (url: string, payload: object, as = admin) => app.inject({ method: "POST", url: `/api${url}`, payload, headers: { cookie: as.cookie } });
+const get = (url: string, as = admin) => app.inject({ method: "GET", url: `/api${url}`, headers: { cookie: as.cookie } });
+const del = (url: string, as = admin) => app.inject({ method: "DELETE", url: `/api${url}`, headers: { cookie: as.cookie } });
 
 async function tenantWithScan(name: string) {
   const tenant = (await post("/tenants", { name, host: "https://synthetic.example.com" })).json();
@@ -149,7 +154,7 @@ describe("pipelines", () => {
     expect(res.scanId).toBe(scan.id);
     expect(res.pipeline.steps).toHaveLength(3);
     expect((await get(`/tenants/${tenant.id}/pipelines`)).json()).toHaveLength(1);
-    expect((await app.inject({ method: "DELETE", url: `/api/pipelines/${created.json().id}` })).statusCode).toBe(204);
+    expect((await del(`/pipelines/${created.json().id}`)).statusCode).toBe(204);
   });
 
   it("explain what is missing instead of failing", async () => {
@@ -163,5 +168,60 @@ describe("pipelines", () => {
     const fresh = (await post("/tenants", { name: "Never scanned", host: "https://new.example.com" })).json();
     const p = (await post(`/tenants/${fresh.id}/pipelines`, { name: "Early", output: "S.V_OUT" })).json();
     expect((await get(`/pipelines/${p.id}`)).json().error).toMatch(/no successful scan/);
+  });
+});
+
+describe("access", () => {
+  it("needs a signed-in user", async () => {
+    for (const url of ["/tenants", "/scans/00000000-0000-4000-8000-000000000000"]) {
+      expect((await app.inject({ method: "GET", url: `/api${url}` })).statusCode, url).toBe(401);
+    }
+    expect((await app.inject({ method: "POST", url: "/api/tenants", payload: { name: "Anon", host: "https://anon.example.com" } })).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: "/api/tenants", headers: { cookie: "ystara_session=made-up" } })).statusCode).toBe(401);
+  });
+
+  it("lets each role do what roles.ts allows", async () => {
+    const { tenant, scan } = await tenantWithScan("Roles");
+    const viewer = await testUser(db, { account: "Customer", email: "viewer@customer.example.com", role: "viewer" });
+    const developer = await testUser(db, { account: "Customer", email: "dev@customer.example.com", role: "developer" });
+
+    expect((await get(`/scans/${scan.id}/pipeline?output=V_OUT`, viewer)).statusCode).toBe(200);
+    expect((await post("/tenants", { name: "By viewer", host: "https://v.example.com" }, viewer)).statusCode).toBe(403);
+    expect((await post(`/tenants/${tenant.id}/scans`, { spaces: ["S"] }, viewer)).statusCode).toBe(403);
+    expect((await post(`/tenants/${tenant.id}/pipelines`, { name: "By viewer", output: "S.V_OUT" }, viewer)).json().error).toBe("Your role (viewer) can't do this");
+
+    expect((await post("/tenants", { name: "By developer", host: "https://d.example.com" }, developer)).statusCode).toBe(403);
+    expect((await post(`/tenants/${tenant.id}/scans`, { spaces: ["S"] }, developer)).statusCode).toBe(202);
+    const pipeline = await post(`/tenants/${tenant.id}/pipelines`, { name: "By developer", output: "S.V_OUT" }, developer);
+    expect(pipeline.statusCode).toBe(201);
+    expect((await del(`/pipelines/${pipeline.json().id}`, viewer)).statusCode).toBe(403);
+    expect((await del(`/pipelines/${pipeline.json().id}`, developer)).statusCode).toBe(204);
+  });
+
+  it("shows each account only its own tenants, scans and pipelines", async () => {
+    const { tenant, scan } = await tenantWithScan("Private");
+    const pipeline = (await post(`/tenants/${tenant.id}/pipelines`, { name: "Private", output: "S.V_OUT" })).json();
+    const outsider = await testUser(db, { account: "Other customer", email: "admin@other.example.com", role: "admin" });
+
+    expect((await get("/tenants", outsider)).json()).toEqual([]);
+    for (const url of [
+      `/tenants/${tenant.id}`,
+      `/tenants/${tenant.id}/scans`,
+      `/tenants/${tenant.id}/pipelines`,
+      `/scans/${scan.id}`,
+      `/scans/${scan.id}/graph`,
+      `/scans/${scan.id}/objects/S/V_OUT`,
+      `/scans/${scan.id}/pipeline?output=V_OUT`,
+      `/pipelines/${pipeline.id}`,
+    ]) {
+      expect((await get(url, outsider)).statusCode, url).toBe(404);
+    }
+    expect((await post(`/tenants/${tenant.id}/scans`, { spaces: ["S"] }, outsider)).statusCode).toBe(404);
+    expect((await post(`/tenants/${tenant.id}/pipelines`, { name: "Theirs", output: "S.V_OUT" }, outsider)).statusCode).toBe(404);
+    expect((await del(`/pipelines/${pipeline.id}`, outsider)).statusCode).toBe(404);
+    expect((await get(`/pipelines/${pipeline.id}`)).statusCode).toBe(200);
+
+    // The same tenant name is fine in another account.
+    expect((await post("/tenants", { name: "Private", host: "https://other.example.com" }, outsider)).statusCode).toBe(201);
   });
 });

@@ -3,9 +3,10 @@
 #   docker compose up -d postgres migrate    only the database, to run the API or worker with npm on your machine
 #   docker compose down              stop (add -v to also delete the database)
 #
-# Ports are published on 127.0.0.1 only: there is no sign-in yet. To use other host ports,
-# set YSTARA_DB_PORT / YSTARA_API_PORT in your shell or in .env (the only settings .env may hold:
-# Compose reads that file and can print its values; app settings live in .env.local).
+# Ports are published on 127.0.0.1 only: everything speaks plain http, which is fine on your own
+# machine and nowhere else. To use other host ports, set YSTARA_DB_PORT / YSTARA_API_PORT in your
+# shell or in .env (the only settings .env may hold: Compose reads that file and can print its values;
+# app settings live in .env.local). The API needs MASTER_KEY in .env.local (see README).
 
 x-app: &app
   image: ystara:dev
@@ -50,6 +51,15 @@ services:
       YSTARA_API_PORT: 4000
     ports:
       - "127.0.0.1:${YSTARA_API_PORT:-4000}:4000"
+    # The API reads MASTER_KEY from .env.local itself, as it does outside Docker. Compose only mounts the
+    # file and never parses it, so no secret goes through Compose's variable handling. The values above win.
+    volumes:
+      - type: bind
+        source: ./.env.local
+        target: /app/.env.local
+        read_only: true
+        bind:
+          create_host_path: false # no .env.local: stop with an error instead of mounting an empty folder
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -1,12 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  AuthenticatorSetup,
+  CreatedInvitation,
+  InvitationOffer,
   Json,
+  Me,
   ObjectDetails,
+  Permission,
+  Role,
   PipelineDefinition,
   PipelineResult,
   SavedPipelineResult,
   Scan,
   ScanGraph,
+  Team,
   Tenant,
 } from "@ystara/shared";
 
@@ -18,21 +25,30 @@ import type {
  * Each read is a hook on TanStack Query, which caches answers per key, shares
  * them between components and refetches when told to (e.g. while a scan runs).
  * Response types come from packages/shared/src/api.ts, with dates as strings.
+ *
+ * The session cookie travels with every call on its own (HttpOnly: this code
+ * never sees it). An answer 401 means "not signed in": main.tsx then asks
+ * for /auth/me again, and App.tsx sends the browser to the sign-in page.
  */
 export type TenantJson = Json<Tenant>;
 export type ScanJson = Json<Scan>;
 export type PipelineDefinitionJson = Json<PipelineDefinition>;
+export type TeamJson = Json<Team>;
 
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The whole answer, for fields beyond `error`. */
+    readonly body?: unknown,
   ) {
     super(message);
   }
 }
 
-async function request<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
+export const isUnauthorized = (e: unknown) => e instanceof ApiError && e.status === 401;
+
+async function request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
     headers: body === undefined ? {} : { "content-type": "application/json" },
@@ -40,7 +56,7 @@ async function request<T>(method: "GET" | "POST" | "DELETE", path: string, body?
   });
   if (res.status === 204) return undefined as T;
   const data: unknown = await res.json().catch(() => undefined);
-  if (!res.ok) throw new ApiError(res.status, errorMessage(data) ?? `The API answered ${res.status} ${res.statusText}`);
+  if (!res.ok) throw new ApiError(res.status, errorMessage(data) ?? `The API answered ${res.status} ${res.statusText}`, data);
   return data as T;
 }
 
@@ -50,6 +66,81 @@ export function errorMessage(data: unknown): string | undefined {
   const issues = "issues" in data && Array.isArray(data.issues) ? data.issues.map((i: { message?: string }) => i.message).filter(Boolean) : [];
   return issues.length ? `${data.error}: ${issues.join("; ")}` : data.error;
 }
+
+// --- Signing in
+
+export const ME = ["me"];
+
+/** Who is signed in, in which account, and what their role allows. An ApiError 401 when nobody is. */
+export const useMe = () => useQuery({ queryKey: ME, queryFn: () => request<Me>("GET", "/auth/me"), retry: false, staleTime: Infinity });
+
+/** Whether the signed-in role allows something. Only hides buttons: the API checks every call itself. */
+export function useCan() {
+  const permissions = useMe().data?.permissions;
+  return (permission: Permission) => permissions?.includes(permission) ?? false;
+}
+
+/**
+ * After signing in, joining or switching accounts: forget everything cached for the previous
+ * one. The pages on screen fetch their data again, now for this account.
+ */
+function useStartWith() {
+  const client = useQueryClient();
+  return (me: Me) => {
+    client.setQueryData(ME, me);
+    void client.resetQueries({ predicate: (q) => q.queryKey[0] !== ME[0] });
+  };
+}
+
+export const useLogin = () => useMutation({ mutationFn: (input: { email: string; password: string }) => request<{ next: "code" }>("POST", "/auth/login", input) });
+
+export function useCode() {
+  const startWith = useStartWith();
+  return useMutation({ mutationFn: (code: string) => request<Me>("POST", "/auth/code", { code }), onSuccess: startWith });
+}
+
+export function useSignOut() {
+  const client = useQueryClient();
+  return useMutation({ mutationFn: () => request<void>("POST", "/auth/logout"), onSettled: () => client.clear() });
+}
+
+export function useSwitchAccount() {
+  const startWith = useStartWith();
+  return useMutation({ mutationFn: (accountId: string) => request<Me>("POST", "/auth/account", { accountId }), onSuccess: startWith });
+}
+
+// --- Invitation links
+
+export const useInvitation = (token: string) =>
+  useQuery({ queryKey: ["invitations", token], queryFn: () => request<InvitationOffer>("GET", `/invitations/${token}`), retry: false, staleTime: Infinity });
+
+export const useAuthenticatorSetup = (token: string) =>
+  useMutation({ mutationFn: () => request<AuthenticatorSetup>("POST", `/invitations/${token}/authenticator`) });
+
+/** A new user sends a password, the authenticator secret and a code from it; an existing user (signed in) sends nothing. */
+export function useAcceptInvitation(token: string) {
+  const startWith = useStartWith();
+  return useMutation({
+    mutationFn: (input: { password: string; totpSecret: string; code: string } | Record<string, never>) => request<Me>("POST", `/invitations/${token}/accept`, input),
+    onSuccess: startWith,
+  });
+}
+
+// --- Users and roles (admins)
+
+const TEAM = ["team"];
+
+export const useTeam = (allowed: boolean) => useQuery({ queryKey: TEAM, queryFn: () => request<TeamJson>("GET", "/team"), enabled: allowed });
+
+function useTeamChange<I, O>(mutationFn: (input: I) => Promise<O>) {
+  const client = useQueryClient();
+  return useMutation({ mutationFn, onSettled: () => client.invalidateQueries({ queryKey: TEAM }) });
+}
+
+export const useInvite = () => useTeamChange((input: { email: string; role: Role }) => request<Json<CreatedInvitation>>("POST", "/team/invitations", input));
+export const useWithdrawInvitation = () => useTeamChange((id: string) => request<void>("DELETE", `/team/invitations/${id}`));
+export const useChangeRole = () => useTeamChange((input: { userId: string; role: Role }) => request<void>("PATCH", `/team/members/${input.userId}`, { role: input.role }));
+export const useRemoveMember = () => useTeamChange((userId: string) => request<void>("DELETE", `/team/members/${userId}`));
 
 const active = (status: Scan["status"]) => status === "queued" || status === "running";
 const pollWhile = (busy: boolean) => (busy ? 3000 : false);

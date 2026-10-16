@@ -8,18 +8,19 @@ Regression and scenario testing for SAP Datasphere pipelines: discover the full 
 
 ```
 apps/
-  api/        Fastify REST API (accounts, tenants, pipelines, runs)
+  api/        Fastify REST API (sign-in, accounts and roles, tenants, pipelines, runs)
   worker/     Background jobs: discovery scans, snapshot capture, scenario runs
   web/        React UI (UI5 Web Components, Fiori-like); the API serves it
 packages/
   shared/     Types, scenario YAML schema, validation (used by all apps)
   connector/  The only code that talks to Datasphere (CLI + HANA SQL)
-  db/         Postgres access: SQL migrations, tenants, scans, pipelines
+  db/         Postgres access: SQL migrations, accounts, tenants, scans, pipelines
 docs/
   architecture/  Architecture decisions and diagrams
 tools/
   scan/       `npm run scan`: read-only discovery from your machine
   db/         `npm run db:import`: load a saved scan into the database
+              `npm run account:create`: create a customer account and invite its first admin
   spike/      One-off feasibility scripts (not shipped)
 ```
 
@@ -30,34 +31,41 @@ Read [docs/architecture/overview.md](docs/architecture/overview.md) first.
 ```bash
 npm install
 cp .env.example .env.local     # fill in values (not .env: see below)
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"   # put the output in .env.local as MASTER_KEY=...
 npm run typecheck
 npm test
 ```
+
+`MASTER_KEY` encrypts the secrets Ystara keeps (each user's authenticator secret now, tenant credentials later). The API refuses to start without it. Keep a copy somewhere safe: without it, every user has to set up their authenticator again.
 
 ### Run the app locally (Docker)
 
 ```bash
 docker compose up -d --build          # Postgres, migrations, API, worker and the web app
-open http://127.0.0.1:4000            # the web app; the API is under /api (curl http://127.0.0.1:4000/api/health)
+npm run account:create -- --name "My company" --admin you@example.com   # prints an invitation link
+open <the link>                       # choose a password, set up an authenticator app, and you are in
 docker compose down                   # stop; add -v to also delete the database
 ```
 
+**Signing in.** There is no sign-up page: customer accounts are created with `npm run account:create`, which prints a one-time link (valid 7 days) for the account's first admin. Everyone signs in with email, password and a 6-digit code from an authenticator app (Microsoft or Google Authenticator, 1Password, ...). Admins invite the rest of their team, set roles (admin, developer, test coordinator, viewer) and remove people on the **Users and roles** page; Ystara sends no email, the admin passes the link on. One person can belong to several accounts and switches between them in the user menu. Tenants from before sign-in are in an account named `Default`: run `npm run account:create -- --name Default --admin you@example.com` to get in.
+
 The web app lists tenants and their scans, the objects each scan found (with the likely outputs first), and the pipeline behind any object as a lineage picture: entry tables, the output, tables with several writers and loops are marked, and clicking an object shows what it reads and writes and its definition. Writers that belong to another process can be excluded with a click, and the pipeline saved.
 
-The API (with the web app) and Postgres are published on 127.0.0.1 only: there is no sign-in yet. Everything stored is metadata (definitions and lineage), never table rows.
+The API (with the web app) and Postgres are published on 127.0.0.1 only, because they speak plain http; https comes with hosting. Everything stored is metadata (definitions and lineage), never table rows.
 
 **Ports.** Postgres is on host port 55432 (not 5432, so it never meets another Postgres on your machine) and the API on 4000. To change them, set `YSTARA_DB_PORT` / `YSTARA_API_PORT` in `.env`: Compose and the npm tools both read it, so they always agree. The API, worker and `db:*` tools check that the database they reach is Ystara's and stop with a clear message otherwise.
 
 **Settings.** App settings and secrets go in `.env.local`. `.env` may only hold the `YSTARA_*` ports, because Compose reads `.env` and can print parts of its values (a `$` in a secret is read as a variable); the tools refuse to start when `.env` holds anything else and name the keys to move. Shell variables win over both files.
 
-Load a scan you already saved with `npm run scan`, without calling the tenant, then open it in the web app or ask the API for a pipeline:
+Load a scan you already saved with `npm run scan`, without calling the tenant, then open it in the web app (the command prints the link):
 
 ```bash
-npm run db:import -- --from tools/scan/output/<run> --tenant Partner
-curl "http://127.0.0.1:4000/api/scans/<scan id>/pipeline?output=<SPACE.VIEW>&excludeWriter=<OTHER_FLOW>"
+npm run db:import -- --from tools/scan/output/<run> --tenant Partner [--account "My company"]
 ```
 
-API routes (all JSON, all under `/api`): `GET/POST /tenants`, `GET /tenants/:id`, `GET/POST /tenants/:id/scans` (POST queues a read-only scan for the worker), `GET /scans/:id`, `GET /scans/:id/graph`, `GET /scans/:id/objects/:space/:name` (one object with its definition and links), `GET /scans/:id/pipeline?output=...&excludeWriter=...`, `GET/POST /tenants/:id/pipelines`, `GET/DELETE /pipelines/:id` (a saved pipeline, computed on the tenant's latest successful scan). Response types are in `packages/shared/src/api.ts`.
+`--account` can be left out while there is only one account.
+
+API routes (all JSON, all under `/api`, all but sign-in and invitation links need a signed-in user; `apps/api/src/auth/access.ts` explains the checks). Sign-in: `POST /auth/login`, `POST /auth/code`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/account` (switch account), `GET /invitations/:token`, `POST /invitations/:token/authenticator`, `POST /invitations/:token/accept`. Users and roles (admins): `GET /team`, `POST /team/invitations`, `DELETE /team/invitations/:id`, `PATCH/DELETE /team/members/:userId`. Discovery: `GET/POST /tenants`, `GET /tenants/:id`, `GET/POST /tenants/:id/scans` (POST queues a read-only scan for the worker), `GET /scans/:id`, `GET /scans/:id/graph`, `GET /scans/:id/objects/:space/:name` (one object with its definition and links), `GET /scans/:id/pipeline?output=...&excludeWriter=...`, `GET/POST /tenants/:id/pipelines`, `GET/DELETE /pipelines/:id` (a saved pipeline, computed on the tenant's latest successful scan). Response types are in `packages/shared/src/api.ts`.
 
 **Working on the web app.** `npm run dev:web` serves it on http://127.0.0.1:5173 with instant reload and forwards `/api` to the API on `YSTARA_API_PORT` (Docker's, or `npm run dev:api`). See `apps/web/README.md`.
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button, Dialog, Form, FormItem, Input, Label, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow } from "@ui5/webcomponents-react";
 import { useNavigate } from "react-router";
-import { useCreateTenant, useTenants } from "../api";
+import { useCan, useCreateTenant, useTenants } from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
@@ -9,6 +9,7 @@ import { formatDateTime } from "../format";
 /** Home: every tenant, and adding one by its Datasphere URL. */
 export function TenantsPage() {
   const tenants = useTenants();
+  const can = useCan();
   const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
 
@@ -18,9 +19,11 @@ export function TenantsPage() {
         title="Tenants"
         subtitle="Datasphere tenants Ystara reads from. Read-only: it only lists and reads object definitions."
         actions={
-          <Button design="Emphasized" icon="add" onClick={() => setAdding(true)}>
-            Add tenant
-          </Button>
+          can("tenant.connect") && (
+            <Button design="Emphasized" icon="add" onClick={() => setAdding(true)}>
+              Add tenant
+            </Button>
+          )
         }
       />
       <ErrorStrip error={tenants.error} />

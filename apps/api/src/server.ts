@@ -1,5 +1,7 @@
 import Fastify, { type FastifyError } from "fastify";
+import cookie from "@fastify/cookie";
 import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -8,18 +10,25 @@ import { ZodError } from "zod";
 import { assertYstaraDatabase, connect, databaseUrl, type Db } from "@ystara/db";
 import { ROLES } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
+import { installAccess } from "./auth/access.js";
+import { masterKeyFromEnv, secretBox, type SecretBox } from "./auth/secrets.js";
+import { authRoutes } from "./routes/auth.js";
 import { discoveryRoutes } from "./routes/discovery.js";
+import { teamRoutes } from "./routes/team.js";
 
 /**
  * API entry point. Every route is under /api; anything else is the web app
  * (apps/web, built into apps/web/dist), so one port serves both and the
  * browser never makes a cross-origin call. Routes arrive per phase:
  *   phase 1: tenants, scans, lineage, pipelines (routes/discovery.ts)
- *   later:   sign-in, accounts and roles; snapshots, runs, alerts; scenarios
+ *            sign-in and invitations (routes/auth.ts), users and roles (routes/team.ts)
+ *   later:   snapshots, runs, alerts; scenarios
  *
- * There is no sign-in yet, so the API listens on 127.0.0.1 only (inside
- * Docker it listens on all interfaces, and docker-compose.yml publishes it on
- * 127.0.0.1 only). Never expose it before sign-in exists.
+ * Every route needs a signed-in user unless it says otherwise; auth/access.ts
+ * explains the rules. The API still listens on 127.0.0.1 only (inside Docker
+ * it listens on all interfaces, and docker-compose.yml publishes it on
+ * 127.0.0.1 only): it speaks plain http, so it stays local until it is hosted
+ * behind https.
  */
 
 /** Where background jobs go: pg-boss in the running app, a list in tests. */
@@ -33,8 +42,11 @@ export interface ServerOptions {
   webRoot?: string;
 }
 
-export async function buildServer(deps: { db: Db; queue: JobQueue }, opts: ServerOptions = {}) {
+export async function buildServer(deps: { db: Db; queue: JobQueue; secrets: SecretBox }, opts: ServerOptions = {}) {
   const app = Fastify({ logger: opts.logger ?? true });
+  await app.register(cookie);
+  // Only routes that ask for it are limited (sign-in, codes, invitation links).
+  await app.register(rateLimit, { global: false });
   await app.register(helmet, {
     contentSecurityPolicy: {
       directives: {
@@ -58,8 +70,12 @@ export async function buildServer(deps: { db: Db; queue: JobQueue }, opts: Serve
 
   await app.register(
     async (api) => {
-      api.get("/health", async () => ({ status: "ok", service: "ystara-api", time: new Date().toISOString() }));
-      api.get("/meta", async () => ({ roles: ROLES, version: process.env.npm_package_version ?? "dev" }));
+      installAccess(api, deps.db);
+      const open = { config: { access: "public" } } as const;
+      api.get("/health", open, async () => ({ status: "ok", service: "ystara-api", time: new Date().toISOString() }));
+      api.get("/meta", open, async () => ({ roles: ROLES, version: process.env.npm_package_version ?? "dev" }));
+      await api.register(authRoutes(deps.db, deps.secrets));
+      await api.register(teamRoutes(deps.db));
       await api.register(discoveryRoutes(deps.db, deps.queue));
     },
     { prefix: "/api" },
@@ -87,6 +103,7 @@ export async function buildServer(deps: { db: Db; queue: JobQueue }, opts: Serve
 // pathToFileURL keeps this check working on Windows (C:\... vs file:///C:/...).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   loadLocalEnv(fileURLToPath(new URL("../../../", import.meta.url)));
+  const secrets = secretBox(masterKeyFromEnv()); // before anything else, so a missing key stops the start at once
 
   const url = databaseUrl();
   const db = connect(url);
@@ -96,6 +113,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   await boss.start(); // queues are created by `npm run db:migrate`
 
   const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
-  const app = await buildServer({ db, queue: boss }, { webRoot: existsSync(webRoot) ? webRoot : undefined });
+  const app = await buildServer({ db, queue: boss, secrets }, { webRoot: existsSync(webRoot) ? webRoot : undefined });
   await app.listen({ port: Number(process.env.YSTARA_API_PORT ?? 4000), host: process.env.API_HOST ?? "127.0.0.1" });
 }

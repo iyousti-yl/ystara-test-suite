@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button, Dialog, Input, Label, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Title } from "@ui5/webcomponents-react";
 import { useNavigate, useParams } from "react-router";
-import { usePipelines, useScans, useStartScan, useTenant } from "../api";
+import { useCan, usePipelines, useScans, useStartScan, useTenant } from "../api";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
@@ -10,6 +10,7 @@ import { formatDateTime } from "../format";
 export function TenantPage() {
   const { tenantId = "" } = useParams();
   const navigate = useNavigate();
+  const can = useCan();
   const tenant = useTenant(tenantId);
   const scans = useScans(tenantId);
   const pipelines = usePipelines(tenantId);
@@ -25,9 +26,11 @@ export function TenantPage() {
         title={tenant.data.name}
         subtitle={tenant.data.host ?? "No Datasphere URL: this tenant only has imported scans."}
         actions={
-          <Button design="Emphasized" icon="refresh" disabled={!tenant.data.host} onClick={() => setScanning(true)}>
-            Scan spaces
-          </Button>
+          can("discovery.run") && (
+            <Button design="Emphasized" icon="refresh" disabled={!tenant.data.host} onClick={() => setScanning(true)}>
+              Scan spaces
+            </Button>
+          )
         }
       />
 

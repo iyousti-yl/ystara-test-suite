@@ -35,7 +35,7 @@ _Phase 1 version. Written so one person can maintain the whole system. Update it
 | `apps/api` | Auth, accounts, roles, CRUD for tenants/pipelines/scenarios, enqueue jobs, serve results (all under `/api`), serve the web app | Talk to Datasphere directly |
 | `apps/worker` | Run jobs: scans, snapshots, scenario runs, alerts | Hold secrets longer than a job |
 | `packages/connector` | The only code that talks to Datasphere (CLI wrapper, SQL client, discovery parser) | Persist anything |
-| `packages/db` | The platform's own Postgres: SQL migrations, job queue setup, queries for tenants, scans and pipelines | Talk to Datasphere |
+| `packages/db` | The platform's own Postgres: SQL migrations, job queue setup, queries for accounts, users, sessions, tenants, scans and pipelines | Talk to Datasphere |
 | `packages/shared` | Types, scenario YAML schema (Zod), role model | Depend on any app |
 
 ## Key design decisions
@@ -56,20 +56,23 @@ _Phase 1 version. Written so one person can maintain the whole system. Update it
 | 12 | Pipelines are stored as an output plus writer exclusions; their steps are computed from the latest successful scan | Steps follow the tenant as it changes, and nothing goes stale | Tests attach to steps (phase 2), which may need stored step lists per scan |
 | 13 | Local settings: app settings and secrets in `.env.local`; `.env` holds only the `YSTARA_*` host ports (Postgres 55432, API 4000) that Compose substitutes. Programs refuse a database without Ystara's migrations | Compose never sees a secret, and no tool silently uses another Postgres on the machine | Hosting (decision 7) brings a secrets store |
 | 14 | One origin: the API serves the web app at `/` and itself under `/api` (Vite forwards `/api` in development). No CORS | No cross-origin calls to secure; one port to publish and, later, to put behind sign-in | The web app needs a CDN or its own host |
+| 16 | Sign-in is email + password (scrypt) + a mandatory authenticator code (TOTP, RFC 6238); server-side sessions in an HttpOnly, SameSite=Strict cookie; no public sign-up, accounts are created by the operator (`npm run account:create`) and people join by one-time invitation links. Every API route checks a permission from `packages/shared/src/roles.ts` and only sees its own account (another account's ids answer 404) | Small, no identity provider to run or pay for, and strong enough for the first customers' security reviews (Issam chose "You create them", 2026-10-16) | First enterprise customer that needs SSO (decision 8) |
 | 15 | The web app loads nothing from third parties: SAP's 72 font is bundled from `@sap-theming/theming-base-content` instead of UI5's default CDN, and the API's Content-Security-Policy only allows fonts and styles from Ystara itself | GDPR (no visitor IPs to a CDN) and works offline; the policy blocks a regression instead of letting it leak | Never |
 
 ## Data model
 
 In place (`packages/db/migrations/`):
 
-- `tenants` (name, host). Credentials arrive with the connection wizard.
+- `accounts` (customer organisations) → `memberships` (user, role) → `users` (email, scrypt password hash, encrypted authenticator secret, last code used)
+- `invitations` (account, email, role, token hash, expiry, accepted at) and `sessions` (token hash, user, account, verified by code or not, expiry). Only hashes of links and cookies are stored
+- `tenants` (account, name unique per account, host). Credentials arrive with the connection wizard.
 - `scans` (tenant, spaces, source tenant/import, status queued/running/succeeded/failed, counts, warnings, error) → `scan_objects` (space, name, type, CLI kind, definition hash) and `scan_edges` (from, to, kind)
 - `object_definitions` (tenant, hash, definition JSONB): each distinct definition once per tenant
 - `pipelines` (tenant, name, output, writer exclusions)
 
 Planned:
 
-- `accounts` (customer organisations) → `memberships` (user, role, optional space scope) → `users`; tenants then belong to an account
+- a space scope on `memberships` (a role limited to some spaces)
 - encrypted OAuth and DB credentials on `tenants`
 - `pipeline_steps` if tests need stored step lists
 - `snapshots` (object, metrics JSONB, captured at, run id)
@@ -77,7 +80,15 @@ Planned:
 - `runs` → `run_steps` → `assertion_results`
 - `alert_channels`, `audit_log`
 
-Credentials are encrypted with a master key held only in the worker/API environment (libsodium secretbox). Rotating the master key re-encrypts rows in a migration.
+Secrets are encrypted with `MASTER_KEY`, held only in the API/worker environment (AES-256-GCM, `apps/api/src/auth/secrets.ts`; authenticator secrets now, tenant credentials with the wizard). Rotating the master key re-encrypts rows in a migration.
+
+## Sign-in and accounts (phase 1d)
+
+1. The operator runs `npm run account:create -- --name <Account> --admin <email>`, which prints a one-time link for the account's first admin.
+2. Opening the link, a new user chooses a password and scans a QR code with an authenticator app; the first code from the app proves it works and creates the user. Someone who already uses Ystara in another account signs in as that email and joins.
+3. Signing in takes the password (a 10-minute "pending" session), then a code (a new 12-hour session: the cookie changes). Each code works once; five wrong codes end the pending session. Login, code and invitation routes allow ten tries a minute per address. Changes from another site's pages are refused (Origin check, on top of the SameSite cookie).
+4. Admins manage their account on the Users and roles page: invite by email and role, change roles, remove people. An account always keeps one admin. Removing someone ends their sign-in to that account at once.
+5. The web app hides what a role can't do, but only the API enforces it (`config.access` on every route, `apps/api/src/auth/access.ts`).
 
 ## How discovery works (phase 1)
 
@@ -104,6 +115,7 @@ Open questions for phase 3: how delta loads and upserts in transformation flows 
 ## Security posture (short form for the security pack)
 
 - Read-only by design: CLI limited to `list`/`read` in code, database user with `SELECT` rights only, no writes, deploys or task runs.
+- Sign-in with password and a mandatory authenticator code; roles checked on every API call; each account sees only its own data.
 - Secrets encrypted at rest, TLS in transit, EU hosting, daily encrypted backups, 30-day retention of results by default.
 - No customer row data stored unless explicitly enabled per account.
 - Full audit log of connections, scans, runs and user actions.

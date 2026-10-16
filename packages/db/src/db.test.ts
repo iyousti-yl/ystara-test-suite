@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { LineageGraph } from "@ystara/shared";
+import type { Account, LineageGraph } from "@ystara/shared";
+import { createAccount } from "./accounts.js";
 import { connect, type Db } from "./db.js";
 import { assertYstaraDatabase, migrate } from "./migrate.js";
 import { createPipeline, deletePipeline, getPipeline, listPipelines } from "./pipelines.js";
@@ -41,8 +42,10 @@ const graph = (hashes: Record<string, string>): LineageGraph => ({
 });
 
 let db: Db;
+let account: Account;
 beforeAll(async () => {
   db = await createTestDb();
+  account = await createAccount(db, "Synthetic customer");
 });
 afterAll(async () => {
   await db.close();
@@ -56,20 +59,24 @@ describe("migrations", () => {
 
 describe("tenants", () => {
   it("are created, listed and found by id and name", async () => {
-    const t = await createTenant(db, { name: "Partner", host: "https://partner.example.com" });
-    expect((await listTenants(db)).map((x) => x.name)).toContain("Partner");
-    expect((await getTenant(db, t.id))?.host).toBe("https://partner.example.com");
-    expect((await findTenantByName(db, "Partner"))?.id).toBe(t.id);
+    const t = await createTenant(db, { accountId: account.id, name: "Partner", host: "https://partner.example.com" });
+    expect((await listTenants(db, account.id)).map((x) => x.name)).toContain("Partner");
+    expect(await getTenant(db, t.id)).toMatchObject({ accountId: account.id, host: "https://partner.example.com" });
+    expect((await findTenantByName(db, account.id, "Partner"))?.id).toBe(t.id);
   });
 
-  it("have unique names", async () => {
-    await expect(createTenant(db, { name: "Partner", host: null })).rejects.toThrow();
+  it("have unique names within an account, and belong to it alone", async () => {
+    await expect(createTenant(db, { accountId: account.id, name: "Partner", host: null })).rejects.toThrow();
+    const other = await createAccount(db, "Other customer");
+    const theirs = await createTenant(db, { accountId: other.id, name: "Partner", host: null });
+    expect((await listTenants(db, other.id)).map((x) => x.id)).toEqual([theirs.id]);
+    expect((await findTenantByName(db, other.id, "Partner"))?.id).toBe(theirs.id);
   });
 });
 
 describe("scans", () => {
   it("go from queued to running to succeeded and keep their graph", async () => {
-    const tenant = await createTenant(db, { name: "Scanned", host: null });
+    const tenant = await createTenant(db, { accountId: account.id, name: "Scanned", host: null });
     const queued = await createScan(db, tenant.id, ["S"]);
     expect(queued).toMatchObject({ status: "queued", spaces: ["S"], source: "tenant", objectCount: null });
 
@@ -101,7 +108,7 @@ describe("scans", () => {
   });
 
   it("store each definition once per tenant, however often it is scanned", async () => {
-    const tenant = await createTenant(db, { name: "Rescanned", host: null });
+    const tenant = await createTenant(db, { accountId: account.id, name: "Rescanned", host: null });
     for (const v of ["h-v1", "h-v1", "h-v2"]) {
       const scan = await createScan(db, tenant.id, ["S"]);
       await saveScanResult(db, scan.id, raw, graph({ V_OUT: v }));
@@ -111,7 +118,7 @@ describe("scans", () => {
   });
 
   it("can be saved again without duplicating rows", async () => {
-    const tenant = await createTenant(db, { name: "Retried", host: null });
+    const tenant = await createTenant(db, { accountId: account.id, name: "Retried", host: null });
     const scan = await createScan(db, tenant.id, ["S"]);
     await saveScanResult(db, scan.id, raw, graph({}));
     await saveScanResult(db, scan.id, raw, graph({}));
@@ -119,7 +126,7 @@ describe("scans", () => {
   });
 
   it("keep the task chain edges that run a step and that clear a table", async () => {
-    const tenant = await createTenant(db, { name: "Chained", host: null });
+    const tenant = await createTenant(db, { accountId: account.id, name: "Chained", host: null });
     const scan = await createScan(db, tenant.id, ["S"], "import");
     const tc = { space: "S", technicalName: "TC_DAILY", type: "task_chain" as const };
     const g = graph({});
@@ -131,7 +138,7 @@ describe("scans", () => {
   });
 
   it("record why they failed, and only succeeded scans count as latest", async () => {
-    const tenant = await createTenant(db, { name: "Failing", host: null });
+    const tenant = await createTenant(db, { accountId: account.id, name: "Failing", host: null });
     const ok = await createScan(db, tenant.id, ["S"]);
     await saveScanResult(db, ok.id, raw, graph({}));
     const bad = await createScan(db, tenant.id, ["S"]);
@@ -145,7 +152,7 @@ describe("scans", () => {
 
 describe("pipelines", () => {
   it("are created, listed, read and deleted", async () => {
-    const tenant = await createTenant(db, { name: "With pipelines", host: null });
+    const tenant = await createTenant(db, { accountId: account.id, name: "With pipelines", host: null });
     const p = await createPipeline(db, { tenantId: tenant.id, name: "Headcount", output: { space: "S", technicalName: "V_OUT" }, excludeWriters: ["DF_OTHER_*"] });
     expect(await getPipeline(db, p.id)).toMatchObject({ name: "Headcount", output: { space: "S", technicalName: "V_OUT" }, excludeWriters: ["DF_OTHER_*"] });
     expect((await listPipelines(db, tenant.id)).map((x) => x.id)).toEqual([p.id]);

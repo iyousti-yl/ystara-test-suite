@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ObjectSource } from "@ystara/connector";
-import { createScan, createTenant, loadGraph, type Db } from "@ystara/db";
+import { createAccount, createScan, createTenant, loadGraph, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import { runScan } from "./scan.js";
 
@@ -25,8 +25,10 @@ const fakeTenant: ObjectSource = {
 };
 
 let db: Db;
+let accountId: string;
 beforeAll(async () => {
   db = await createTestDb();
+  accountId = (await createAccount(db, "Synthetic customer")).id;
 });
 afterAll(async () => {
   await db.close();
@@ -34,7 +36,7 @@ afterAll(async () => {
 
 describe("runScan", () => {
   it("reads the spaces and stores the lineage graph", async () => {
-    const tenant = await createTenant(db, { name: "Fake", host: "https://fake.example.com" });
+    const tenant = await createTenant(db, { accountId, name: "Fake", host: "https://fake.example.com" });
     const scan = await createScan(db, tenant.id, ["S"]);
     const done = await runScan(db, scan.id, () => fakeTenant);
     expect(done).toMatchObject({ status: "succeeded", objectCount: 3, edgeCount: 2, warnings: [] });
@@ -43,7 +45,7 @@ describe("runScan", () => {
   });
 
   it("fails clearly when nothing can be read, e.g. an expired login", async () => {
-    const tenant = await createTenant(db, { name: "Logged out", host: "https://fake.example.com" });
+    const tenant = await createTenant(db, { accountId, name: "Logged out", host: "https://fake.example.com" });
     const scan = await createScan(db, tenant.id, ["S"]);
     const loggedOut: ObjectSource = {
       async listObjects() {
@@ -60,7 +62,7 @@ describe("runScan", () => {
   });
 
   it("fails with the reason when the tenant can't be reached at all", async () => {
-    const tenant = await createTenant(db, { name: "Imported only", host: null });
+    const tenant = await createTenant(db, { accountId, name: "Imported only", host: null });
     const scan = await createScan(db, tenant.id, ["S"]);
     const done = await runScan(db, scan.id, () => {
       throw new Error('Tenant "Imported only" has no Datasphere URL');
