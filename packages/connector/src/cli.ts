@@ -28,7 +28,9 @@ import { assertReadOnly, commandPath, type CliObjectKind, type ReadCommand } fro
  *  - `--host` only counts after the command and its flags. Before the
  *    command the CLI ignores it.
  *  - When it lacks something, such as the host, the CLI asks for it and exits
- *    with code 0, so exit code 0 alone doesn't mean it answered.
+ *    with code 0, so exit code 0 alone doesn't mean it answered. A `list`
+ *    must print an array of names, a `read` an object, and `config cache
+ *    init` no line that reports an error.
  *  - `spaces list` and `spaces read` need a tenant-wide privilege that a
  *    technical client with a role in its spaces doesn't have. Scans don't
  *    use them.
@@ -103,9 +105,19 @@ export class DatasphereCli {
       const asked = clip(this.withoutSecret(question.slice(1).trim()));
       throw new CliOutputError(`${name} asked "${asked}" instead of answering. Ystara gives the CLI no input: check the host and the login.`, output);
     }
-    if (["list", "read"].includes(command[command.length - 1]) && !isJson(stdout)) {
-      const first = lines(stdout)[0];
-      throw new CliOutputError(`${name} printed ${first ? `"${clip(this.withoutSecret(first))}"` : "nothing"} instead of JSON.`, output);
+    const verb = command[command.length - 1];
+    const first = lines(stdout)[0];
+    const quoted = first ? `"${clip(this.withoutSecret(first))}"` : "nothing";
+    if (verb === "list" || verb === "read") {
+      const json = parseJson(stdout);
+      if (!json.ok) throw new CliOutputError(`${name} printed ${quoted} instead of JSON.`, output);
+      // JSON of another shape, such as an error object, would otherwise read as an empty list or a definition.
+      const problem = verb === "list" ? listingProblem(json.value) : definitionProblem(json.value);
+      if (problem) throw new CliOutputError(`${name} printed ${problem}: ${quoted}.`, output);
+    } else {
+      // `config cache init` prints no JSON, and exit code 0 doesn't mean it worked: a line that reports an error is a failure.
+      const error = [...lines(stdout), ...lines(stderr)].find((l) => ERROR_LINE.test(l));
+      if (error) throw new CliOutputError(`${name} reported "${clip(this.withoutSecret(error))}".`, output);
     }
   }
 
@@ -168,34 +180,47 @@ export class CliOutputError extends Error {
   }
 }
 
-function isJson(text: string): boolean {
+function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
   try {
-    JSON.parse(text);
-    return true;
+    return { ok: true, value: JSON.parse(text) as unknown };
   } catch {
-    return false;
+    return { ok: false };
   }
+}
+
+/** A line in which the CLI reports a failure: "Error: ...", "Failed to ...", "401 Unauthorized", "403 Forbidden". */
+const ERROR_LINE = /^\W*error\b|\bfailed\b|\bunauthori[sz]ed\b|\bforbidden\b/i;
+
+/** Why `value` isn't what `list` prints (an array of names, or of objects with a technicalName or name), if it isn't. */
+function listingProblem(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return "JSON that isn't a list";
+  if (!value.every((item) => typeof item === "string" || typeof listedName(item) === "string")) return "a list with an item that has no name";
+  return undefined;
+}
+
+/** Why `value` isn't what `read` prints (an object definition), if it isn't. */
+function definitionProblem(value: unknown): string | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? undefined : "JSON that isn't an object definition";
+}
+
+function listedName(item: unknown): unknown {
+  if (!item || typeof item !== "object") return undefined;
+  const o = item as Record<string, unknown>;
+  return o.technicalName ?? o.name;
 }
 
 function clip(text: string): string {
   return text.length > 120 ? `${text.slice(0, 120)}...` : text;
 }
 
-/** Accepts the shapes seen so far: an array of strings or of objects with technicalName/name. */
+/** What `list` printed: an array of names, or of objects with technicalName (or name). Throws for any other shape. */
 export function parseListing(stdout: string): ListedObject[] {
   const parsed = JSON.parse(stdout) as unknown;
-  const items = Array.isArray(parsed) ? parsed : [];
-  return items
-    .map((item): ListedObject | null => {
-      if (typeof item === "string") return { technicalName: item };
-      if (item && typeof item === "object") {
-        const o = item as Record<string, unknown>;
-        const name = o.technicalName ?? o.name;
-        if (typeof name === "string") {
-          return { technicalName: name, businessName: typeof o.businessName === "string" ? o.businessName : undefined };
-        }
-      }
-      return null;
-    })
-    .filter((x): x is ListedObject => x !== null);
+  const problem = listingProblem(parsed);
+  if (problem) throw new Error(`Not a listing: ${problem}.`);
+  return (parsed as unknown[]).map((item) => {
+    if (typeof item === "string") return { technicalName: item };
+    const { businessName } = item as Record<string, unknown>;
+    return { technicalName: listedName(item) as string, businessName: typeof businessName === "string" ? businessName : undefined };
+  });
 }
