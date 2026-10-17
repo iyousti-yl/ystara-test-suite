@@ -56,6 +56,8 @@ export async function checkSpacesWith(host: string, client: TechnicalClient, spa
     const results: ConnectionSpace[] = [];
     for (const space of spaces) {
       try {
+        // Readable only when both print a list: anything else, even with exit code 0 (an error object, a question),
+        // makes listObjects throw.
         await cli.listObjects(space, "views", 1);
         await cli.listObjects(space, "local-tables", 1);
         results.push({ space, readable: true, error: null });

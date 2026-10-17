@@ -13,7 +13,9 @@ import { checkSpacesWith, removeStaleFolders, tenantAccess } from "./tenant-logi
 const host = "https://synthetic.eu10.hcs.cloud.sap";
 const tokenUrl = "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token";
 
-// A stand-in for the Datasphere CLI that prints how it was started. A shell script, so not on Windows.
+// A stand-in for the Datasphere CLI that prints how it was started, for a list as its one item. A shell script, so not on
+// Windows. Like the real CLI, a space the client can't read fails; in ERROR_OBJECT, a list prints an error object with
+// exit code 0, which must not count as readable.
 describe.skipIf(process.platform === "win32")("how a scan logs in to a tenant", () => {
   const secrets = secretBox(randomBytes(32));
   let db: Db;
@@ -42,7 +44,12 @@ if (args[args.indexOf("--space") + 1] === "LOCKED") {
   console.error("error: 403 Forbidden, client secret " + JSON.parse(fs.readFileSync(args[i + 1], "utf8")).client_secret);
   process.exit(1);
 }
-console.log(JSON.stringify({ args, home: process.env.HOME, secrets: i >= 0 ? JSON.parse(fs.readFileSync(args[i + 1], "utf8")) : null }));
+if (args[args.indexOf("--space") + 1] === "ERROR_OBJECT") {
+  console.log(JSON.stringify({ error: "Space not found" }));
+  process.exit(0);
+}
+const started = { technicalName: "STAND_IN", args, home: process.env.HOME, secrets: i >= 0 ? JSON.parse(fs.readFileSync(args[i + 1], "utf8")) : null };
+console.log(JSON.stringify(args.includes("list") ? [started] : started));
 `,
     );
     await chmod(bin, 0o755);
@@ -52,7 +59,7 @@ console.log(JSON.stringify({ args, home: process.env.HOME, secrets: i >= 0 ? JSO
     await rm(dir, { recursive: true, force: true });
   });
 
-  const run = async (cli: DatasphereCli) => JSON.parse(await cli.exec({ group: "spaces", verb: "list" }));
+  const run = async (cli: DatasphereCli) => (JSON.parse(await cli.exec({ group: "spaces", verb: "list" })) as { home: string; secrets: unknown }[])[0];
   async function connected(name: string, more: { host?: string; tokenUrl?: string } = {}) {
     const tenant = await createTenant(db, { accountId, name, host: more.host ?? host });
     const sealedSecret = secrets.seal("synthetic-secret", connectionSecretContext(tenant.id));
@@ -101,16 +108,19 @@ console.log(JSON.stringify({ args, home: process.env.HOME, secrets: i >= 0 ? JSO
   it("checks each space by listing one view and one local table, never with the spaces commands", async () => {
     await rm(path.join(dir, "calls"), { force: true });
     const client = { clientId: "sb-synthetic", clientSecret: "synthetic-secret", tokenUrl };
-    const results = await checkSpacesWith(host, client, ["SALES", "LOCKED"], bin);
+    const results = await checkSpacesWith(host, client, ["SALES", "LOCKED", "ERROR_OBJECT"], bin);
     expect(results).toEqual([
       { space: "SALES", readable: true, error: null },
       { space: "LOCKED", readable: false, error: "error: 403 Forbidden, client secret <secret>" },
+      // Exit code 0, but no list: not readable.
+      { space: "ERROR_OBJECT", readable: false, error: expect.stringMatching(/^datasphere objects views list printed JSON that isn't a list: "\{"error":"Space not found"\}"\./) },
     ]);
     const calls = (await readFile(path.join(dir, "calls"), "utf8")).trim().split("\n");
     expect(calls.filter((c) => c.includes("objects"))).toEqual([
       "objects views list --space SALES --top 1",
       "objects local-tables list --space SALES --top 1",
       "objects views list --space LOCKED --top 1",
+      "objects views list --space ERROR_OBJECT --top 1",
     ]);
     expect(calls.some((c) => c.includes("spaces"))).toBe(false);
   });
