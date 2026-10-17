@@ -24,8 +24,21 @@ export interface Hit extends Line {
   source: string;
 }
 
-/** Files that must never be committed: .env and .env.* (except .env.example), .master-key, *.local.md and *.local.json, scan and check output. */
-export const NEVER_COMMIT = [/(^|\/)\.env$/, /(^|\/)\.env\.(?!example$)[^/]+$/, /(^|\/)\.master-key$/, /\.local\.(md|json)$/, /^tools\/(scan|spike|check)\/output\//];
+/**
+ * Where a text to check with `--file` goes, such as a PR description before it is posted: inside the repository
+ * (`--file` reads nothing outside it) and git-ignored, so it is never committed.
+ */
+export const DRAFTS_FOLDER = "tools/check/drafts/";
+
+/** Files that must never be committed: .env and .env.* (except .env.example), .master-key, *.local.md and *.local.json, scan and check output, --file drafts. */
+export const NEVER_COMMIT = [
+  /(^|\/)\.env$/,
+  /(^|\/)\.env\.(?!example$)[^/]+$/,
+  /(^|\/)\.master-key$/,
+  /\.local\.(md|json)$/,
+  /^tools\/(scan|spike|check)\/output\//,
+  /^tools\/check\/drafts\//,
+];
 
 /** `relativePath` is relative to the repository, with "/" between folders. */
 export function mustNeverCommit(relativePath: string): boolean {
@@ -33,19 +46,25 @@ export function mustNeverCommit(relativePath: string): boolean {
 }
 
 /**
- * True when `--file <file>` must not be read: a file that must never be
- * committed (.master-key included), any .env* file or any *.local.* file. The check prints the lines
- * that match, so it would otherwise be a way around the rule that these files
- * are never read. Decided on the name alone, before anything is read.
- * `cwd` is the folder `file` is relative to, `root` the repository.
+ * True when `--file <file>` must not be read. The check prints the lines that
+ * match, so it would otherwise be a way to show any file without a prompt.
+ * Refused: anything outside the repository (a CLI token folder,
+ * ~/.git-credentials), git's own folder (.git/config can hold a token), any
+ * .env* or *.local.* file, and files that must never be committed (.master-key,
+ * scan and check output), except the drafts folder made for --file. Decided on
+ * the path alone, before anything is read. `cwd` is the folder `file` is
+ * relative to, `root` the repository.
  */
 export function refusedFile(file: string, cwd: string, root: string): boolean {
   // Resolved first, so ./.env.local, sub/../.env.local and an absolute path all look the same.
   const full = path.resolve(cwd, file);
+  const fromRoot = path.relative(root, full);
+  if (fromRoot === "" || fromRoot === ".." || fromRoot.startsWith(`..${path.sep}`) || path.isAbsolute(fromRoot)) return true;
   // Lower case: on Windows, .ENV.Local is the same file as .env.local.
-  const relative = path.relative(root, full).split(path.sep).join("/").toLowerCase();
+  const relative = fromRoot.split(path.sep).join("/").toLowerCase();
   const name = path.basename(full).toLowerCase();
-  return name.startsWith(".env") || name.includes(".local.") || mustNeverCommit(relative);
+  if (relative === ".git" || relative.startsWith(".git/") || name.startsWith(".env") || name.includes(".local.")) return true;
+  return mustNeverCommit(relative) && !relative.startsWith(DRAFTS_FOLDER);
 }
 
 /**

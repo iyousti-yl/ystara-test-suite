@@ -22,16 +22,28 @@ describe("refusedFile", () => {
     expect(refused("./.Master-Key")).toBe(true);
   });
 
-  it("refuses scan and check output, and .env files outside the repository", () => {
+  it("refuses scan and check output, and git's own folder", () => {
     expect(refused("tools/scan/output/run-1/lineage.md")).toBe(true);
     expect(refused("tools/check/output/browser-1/report.json")).toBe(true);
-    expect(refused(path.resolve("/elsewhere/.env"))).toBe(true);
+    expect(refused(".git/config")).toBe(true);
+    expect(refused(".GIT/config")).toBe(true);
+    expect(refused(".git")).toBe(true);
   });
 
-  it("reads anything else", () => {
+  it("refuses anything outside the repository, however the path is written", () => {
+    for (const file of [path.resolve("/tmp/pr-body.md"), path.resolve("/tmp/ystara-tenant-1/ystara-client.json"), path.resolve("/home/me/.git-credentials"), "../other/notes.md", "sub/../../x.md", ".", ".."]) {
+      expect(refused(file), file).toBe(true);
+    }
+    // A file name that only starts with two dots is inside.
+    expect(refused("..notes.md")).toBe(false);
+  });
+
+  it("reads anything else in the repository, the drafts folder included", () => {
     expect(refused("pr-body.md")).toBe(false);
     expect(refused("docs/env-notes.md")).toBe(false);
-    expect(refused(path.resolve("/tmp/pr-body.md"))).toBe(false);
+    expect(refused("tools/check/drafts/pr-11.md")).toBe(false);
+    expect(refused(path.join(root, "tools", "check", "drafts", "pr-11.md"))).toBe(false);
+    expect(refused("tools/check/drafts/.env.local")).toBe(true);
   });
 });
 

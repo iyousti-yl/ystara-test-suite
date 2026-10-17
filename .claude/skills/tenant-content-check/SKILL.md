@@ -23,7 +23,7 @@ Arguments: $ARGUMENTS
 How to read the arguments:
 - Pass `--base` and every `--file` to `npm run check:tenant-content -- ...` exactly as given.
 - Without `--base`, the branch is compared with `origin/main`. For a PR stacked on another branch, the caller passes that branch.
-- `--file` is for text that leaves another way, such as a PR description saved to a file. The check refuses a file that must never be committed (`.env*`, `*.local.*`, scan and check output); report that, don't work around it.
+- `--file` is for text that leaves another way, such as a PR description saved to a file in `tools/check/drafts/` (inside the repository, git-ignored). The check reads no file outside the repository, none in `.git`, and none that must never be committed (`.env*`, `.master-key`, `*.local.*`, scan and check output); report a refusal, don't work around it.
 
 Then follow your procedure: run the check, apply the git-ignored tenant notes, judge every hit, open added images, and return the report in your standard format with a CLEAN or BLOCKED verdict.
 

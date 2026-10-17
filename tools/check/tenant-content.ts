@@ -41,19 +41,22 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { connect, databaseUrl } from "@ystara/db";
 import { loadLocalEnv } from "@ystara/shared/env";
-import { addedLines, buildMatcher, EXAMPLE_DOMAIN, findIn, longEnough, mustNeverCommit, refusedFile, type Hit, type Line, type Term } from "./tenant-rules.js";
+import { addedLines, buildMatcher, DRAFTS_FOLDER, EXAMPLE_DOMAIN, findIn, longEnough, mustNeverCommit, refusedFile, type Hit, type Line, type Term } from "./tenant-rules.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const { values } = parseArgs({ options: { base: { type: "string" }, head: { type: "string" }, file: { type: "string", multiple: true } } });
 
-// The check prints the lines that match, so --file could otherwise read .env.local
-// or tenant notes. The name decides, before anything is read; a link is judged by
-// where it points too.
+// The check prints the lines that match, so --file could otherwise show .env.local,
+// tenant notes or any file on the machine. The path decides, before anything is
+// read; a link is judged by where it points too.
 for (const file of values.file ?? []) {
   const full = path.resolve(file);
-  if (refusedFile(file, process.cwd(), root) || (existsSync(full) && refusedFile(realpathSync(full), process.cwd(), root))) {
-    stop(`--file ${file}: refused. Files that must never be committed (.env*, *.local.*, scan and check output) are not read by this check either.`);
+  if (refusedFile(file, process.cwd(), root) || (existsSync(full) && refusedFile(realpathSync(full), realpathSync(root), realpathSync(root)))) {
+    stop(
+      `--file ${file}: refused. Only files inside the repository are read: put the text in ${DRAFTS_FOLDER} (git ignores it). ` +
+        "Files that must never be committed (.env*, .master-key, *.local.*, scan and check output) and .git are not read either.",
+    );
   }
 }
 
