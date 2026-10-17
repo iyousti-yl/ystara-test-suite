@@ -4,8 +4,14 @@
  *
  * Strictly read-only: it fills the CLI's local command cache, tries to list
  * the tenant's spaces, checks that each given space is readable, then lists
- * and reads views and lists local tables in it, all through the connector's
+ * every kind of object a scan reads (views, local and remote tables, flows,
+ * task chains, ...) and reads the first of each, all through the connector's
  * read-only gate. Nothing is created or changed in the tenant.
+ *
+ * To find the smallest role that is enough, run it once per client (e.g. one
+ * with broad roles, one with only a Viewer scoped role) and compare the counts
+ * per kind it prints at the end: a kind that one client lists and the other
+ * can't, or lists as 0, is hidden by that client's role.
  *
  * Before running it, in the tenant (an admin does this once):
  *   1. System > Administration > App Integration > Add a New OAuth Client,
@@ -34,7 +40,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { CliOutputError, DatasphereCli, maskSecrets, parseListing } from "@ystara/connector";
+import { CLI_OBJECT_KINDS, CliOutputError, DatasphereCli, maskSecrets, parseListing } from "@ystara/connector";
 import { loadLocalEnv } from "@ystara/shared/env";
 
 loadLocalEnv(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".."));
@@ -105,6 +111,8 @@ try {
   console.log(`Technical client ${client.clientId} on ${host}, ${spaces.length === 1 ? "space" : "spaces"} ${spaces.join(", ")}${verbose ? " (verbose)" : ""}\n`);
   // Spaces the client can't scan, until it has read them.
   const cannot = new Set(spaces);
+  // Per readable space, how many objects of each kind the client lists.
+  const counts: string[] = [];
   await step("CLI version", () => cli.version(), (v) => v);
   if (!failures) await step("fill the CLI's command cache with the client", () => cli.initCache(), () => "done");
   if (!failures) {
@@ -123,17 +131,25 @@ try {
       if (seen) readable.push(space);
     }
 
+    // Every kind a scan reads. A scan carries on without a kind it can't list, with a
+    // warning, but its lineage then misses those objects: here that is a failure.
     for (const space of readable) {
       const before = failures;
-      const views = await step(`list views in ${space}`, () => cli.listObjects(space, "views"), (list) => `${list.length} views`);
-      if (views?.length) {
-        const name = views[0].technicalName;
-        await step(`read view ${space}.${name}`, () => cli.readObject(space, "views", name), (o) => `${JSON.stringify(o).length} characters of definition`);
+      const perKind: string[] = [];
+      for (const kind of CLI_OBJECT_KINDS) {
+        const list = await step(`list ${kind} in ${space}`, () => cli.listObjects(space, kind), (l) => `${l.length}`);
+        perKind.push(`${kind} ${list ? list.length : "not listed"}`);
+        if (list?.length) {
+          const name = list[0].technicalName;
+          await step(`read ${kind} ${space}.${name}`, () => cli.readObject(space, kind, name), (o) => `${JSON.stringify(o).length} characters of definition`);
+        }
       }
-      await step(`list local tables in ${space}`, () => cli.listObjects(space, "local-tables"), (list) => `${list.length} local tables`);
+      counts.push(`  ${space}: ${perKind.join(", ")}`);
       if (failures === before) cannot.delete(space);
     }
   }
+
+  if (counts.length) console.log(`\nObjects per kind (run it with another client and compare: a kind one client can't see is hidden by its role):\n${counts.join("\n")}`);
 
   const can = spaces.filter((s) => !cannot.has(s));
   console.log(
