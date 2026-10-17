@@ -39,7 +39,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { databaseUserProblem, metricsQuery, quoteIdentifier, SqlReader } from "@ystara/connector";
+import { metricsQuery, quoteIdentifier, SqlReader } from "@ystara/connector";
+import { databaseUserProblem } from "@ystara/shared";
 import { loadLocalEnv, unquotedHashKeys } from "@ystara/shared/env";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -67,7 +68,7 @@ const env = (name: string) => {
 const db = { host: env("DSP_DB_HOST"), port: Number(process.env.DSP_DB_PORT?.trim() || 443), user: env("DSP_DB_USER"), password: env("DSP_DB_PASSWORD") };
 const userProblem = databaseUserProblem(db.user);
 if (userProblem) {
-  console.error(`DSP_DB_USER: ${userProblem}. Nothing was sent to the tenant.`);
+  console.error(`DSP_DB_USER: ${userProblem}. In .env.local, quote the value (DSP_DB_USER='SPACE#SUFFIX'): an unquoted # starts a comment. Nothing was sent to the tenant.`);
   process.exit(1);
 }
 // The space the user belongs to, when DSP_SPACE lists it; else the first one.

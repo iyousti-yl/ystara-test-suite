@@ -14,6 +14,7 @@ import { masterKeyFromEnv, secretBox, type SecretBox } from "@ystara/shared/secr
 import { installAccess } from "./auth/access.js";
 import { authRoutes } from "./routes/auth.js";
 import { connectionRoutes } from "./routes/connections.js";
+import { databaseUserRoutes } from "./routes/database-users.js";
 import { discoveryRoutes } from "./routes/discovery.js";
 import { operatorRoutes } from "./routes/operator.js";
 import { teamRoutes } from "./routes/team.js";
@@ -26,6 +27,7 @@ import { teamRoutes } from "./routes/team.js";
  *            each tenant's technical client (routes/connections.ts),
  *            sign-in and invitations (routes/auth.ts), users and roles (routes/team.ts),
  *            the operator panel (routes/operator.ts)
+ *   phase 2: each space's database user (routes/database-users.ts)
  *   later:   snapshots, runs, alerts; scenarios
  *
  * Every route needs a signed-in user unless it says otherwise; auth/access.ts
@@ -124,6 +126,7 @@ export async function buildServer(deps: { db: Db; queue: JobQueue; secrets: Secr
       await api.register(operatorRoutes(deps.db));
       await api.register(discoveryRoutes(deps.db, deps.queue));
       await api.register(connectionRoutes(deps.db, deps.queue, deps.secrets));
+      await api.register(databaseUserRoutes(deps.db, deps.queue, deps.secrets));
     },
     { prefix: "/api" },
   );

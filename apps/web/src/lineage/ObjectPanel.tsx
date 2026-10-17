@@ -2,12 +2,12 @@ import { Button, MessageStrip, Panel, Tag, Text, Title } from "@ui5/webcomponent
 import { refKey, type DspObjectRef } from "@ystara/shared";
 import { useObject } from "../api";
 import { typeColor, typeLabel } from "../objectTypes";
-import type { LineageNode } from "./model";
+import { whyNotMeasurable, type LineageNode } from "./model";
 
 /**
  * Details of the selected object: what it reads and writes, which facts the
- * picture marks on it and why, its definition as the CLI returned it, and
- * the actions that apply to it.
+ * picture marks on it and why (including whether a snapshot can measure it),
+ * its definition as the CLI returned it, and the actions that apply to it.
  */
 export function ObjectPanel(props: {
   scanId: string;
@@ -37,7 +37,9 @@ export function ObjectPanel(props: {
         {node.output && <Tag design="Positive">Output of this pipeline</Tag>}
         {node.entry && <Tag design="Information">Entry table: fixtures go here</Tag>}
         {node.excluded && <Tag design="Neutral">Excluded writer</Tag>}
+        {node.measurement?.measurable && <Tag design="Information">Measurable by snapshots</Tag>}
       </div>
+      {node.measurement && !node.measurement.measurable && <Text className="muted">{whyNotMeasurable(node.measurement.reason, ref)}</Text>}
       {node.severalWriters && (
         <MessageStrip design="Critical" hideCloseButton>
           Several flows write this table, and all of them were followed. Select the writer that belongs to another process and exclude it.

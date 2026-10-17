@@ -71,18 +71,18 @@ In place (`packages/db/migrations/`):
 - `scans` (tenant, spaces, source tenant/import, status queued/running/succeeded/failed, counts, warnings, error) → `scan_objects` (space, name, type, CLI kind, definition hash) and `scan_edges` (from, to, kind)
 - `object_definitions` (tenant, hash, definition JSONB): each distinct definition once per tenant
 - `pipelines` (tenant, name, output, writer exclusions)
+- `space_database_users` (tenant, space, host, user name, password encrypted with `MASTER_KEY`, status checking/connected/failed, the views and tables it saw at its last check, who changed it): one per space, for snapshots
 
 Planned:
 
 - a space scope on `memberships` (a role limited to some spaces)
-- encrypted HANA database credentials for SQL snapshots (phase 2)
 - `pipeline_steps` if tests need stored step lists
 - `snapshots` (object, metrics JSONB, captured at, run id)
 - `scenarios` (pipeline, YAML text, version) → `fixtures`
 - `runs` → `run_steps` → `assertion_results`
 - `alert_channels`, `audit_log`
 
-Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `packages/shared/src/secrets.ts`: authenticator secrets and tenant client secrets). The key lives alone in the git-ignored file `.master-key`, which Docker Compose passes as a secret to the API and the worker; a hosting platform can set `MASTER_KEY` instead. The API seals a client secret for its tenant (the tenant ID is the additional authenticated data); only the worker opens it, for one job at a time. Rotating the master key re-encrypts rows in a migration.
+Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `packages/shared/src/secrets.ts`: authenticator secrets, tenant client secrets and database user passwords). The key lives alone in the git-ignored file `.master-key`, which Docker Compose passes as a secret to the API and the worker; a hosting platform can set `MASTER_KEY` instead. The API seals a client secret for its tenant (the tenant ID is the additional authenticated data), and a database password for its tenant and space; only the worker opens them, for one job at a time. Rotating the master key re-encrypts rows in a migration.
 
 ## Sign-in and accounts (phase 1d)
 
@@ -104,6 +104,8 @@ Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `packages/shared/src/secre
 ## Reading a space with SQL (phase 2, in progress)
 
 Snapshot tests measure views with SQL, through a database user of the space (Space Management > Database Access, with read access only). `packages/connector/src/sql.ts` connects with hdb, SAP's open-source JavaScript client (TLS on port 443), and sends only statements that pass `assertSelectOnly` (one SELECT: no semicolon, comment, INTO or row lock; values as `?` parameters). `metricsQuery` measures an object in one pass: the row count and, per column, non-null and distinct counts, min and max for ordered types and a sum for numbers. Only these results are to be stored, never rows; how min and max are stored is Issam's GDPR decision (see the decisions log). `npm run spike:sql` checks a database user on a real tenant.
+
+**Database users on the tenant page (phase 2b).** An admin adds one database user per space (Datasphere names them SPACE#SUFFIX and each reads only its own space, so the space comes from the name): host, user name and password. The host must be `<id>.hana.<region>.hanacloud.ondemand.com`, because the worker sends it the password; the API, the worker and `SqlReader.connect` all check it. The password is sealed for that tenant and space and never sent back. The worker's `database-check` job (`checkDatabaseUser` in the connector) signs in once, fails a user with any privilege on the space's schema beyond SELECT, SELECT METADATA and SELECT CDS METADATA, and stores the views and tables it sees there. The tenant page lists each user with its status, what it sees, and why a check failed. Anyone who can scan may check one again. Each pipeline page marks the steps a snapshot can measure, from that list only (`measurability` in `@ystara/shared`), and says for each other step why not: a flow or task chain, no database user for its space yet, not checked, a failed check, or not exposed for consumption (with the hint that a modeler can expose a view).
 
 **What a database user can read** (Issam's run, 2026-10-17): SELECT on the space's schema, but only the **views exposed for consumption**. No other view and no local table is visible, so of a pipeline usually only its output can be measured. That shapes phases 2 and 3:
 

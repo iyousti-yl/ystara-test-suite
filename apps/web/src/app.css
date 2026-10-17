@@ -114,6 +114,12 @@ section.block > ui5-title {
 .space-results li + li {
   margin-top: 0.35rem;
 }
+.database-user-visible ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  max-height: 12rem;
+  overflow: auto;
+}
 .steps-to-do {
   margin: 0 0 0.5rem;
   padding-left: 1.25rem;
@@ -281,6 +287,12 @@ section.block > ui5-title {
 }
 .flag-error {
   color: var(--sapNegativeTextColor);
+}
+.flag-measurable {
+  color: var(--sapAccentColor7);
+}
+.steps-flag {
+  margin-left: 0.5rem;
 }
 .react-flow__edge.lineage-edge.is-write path.react-flow__edge-path {
   stroke-width: 2;

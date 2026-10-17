@@ -6,7 +6,7 @@ import type { LineageNode } from "./model";
 export type ObjectNodeType = Node<{ node: LineageNode; multiSpace: boolean; width: number }, "object">;
 
 export function ObjectNode({ data, selected }: NodeProps<ObjectNodeType>) {
-  const { ref, output, entry, excluded, severalWriters, inLoop } = data.node;
+  const { ref, output, entry, excluded, severalWriters, inLoop, measurement } = data.node;
   const classes = ["lineage-node", selected && "is-selected", excluded && "is-excluded", output && "is-output"].filter(Boolean).join(" ");
   return (
     <div className={classes} style={{ width: data.width, borderLeftColor: typeColor(ref.type) }}>
@@ -23,6 +23,7 @@ export function ObjectNode({ data, selected }: NodeProps<ObjectNodeType>) {
         {excluded && <span className="flag flag-muted">Excluded</span>}
         {severalWriters && <span className="flag flag-warning">Several writers</span>}
         {inLoop && <span className="flag flag-error">Loop</span>}
+        {measurement?.measurable && <span className="flag flag-measurable">Measurable</span>}
       </div>
       <Handle type="source" position={Position.Right} isConnectable={false} />
     </div>

@@ -138,9 +138,11 @@ export function SavedPipelinePage() {
 function Summary({ result }: { result: PipelineResult | undefined }) {
   if (!result) return null;
   const { pipeline } = result;
+  const measurable = Object.values(result.measurement).filter((m) => m.measurable).length;
   return (
     <span>
-      {pipeline.steps.length} steps, {pipeline.entryPoints.length} entry {pipeline.entryPoints.length === 1 ? "table" : "tables"}
+      {pipeline.steps.length} steps, {pipeline.entryPoints.length} entry {pipeline.entryPoints.length === 1 ? "table" : "tables"}, {measurable} measurable by
+      snapshots
     </span>
   );
 }

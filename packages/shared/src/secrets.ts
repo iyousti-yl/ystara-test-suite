@@ -3,7 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 
 /**
  * Secrets the platform has to read back later (each user's authenticator
- * secret, each tenant's technical client secret) are stored encrypted with
+ * secret, each tenant's technical client secret, each database user's
+ * password) are stored encrypted with
  * MASTER_KEY: AES-256-GCM, which also detects any change to the stored text.
  * A copy of the database alone reveals none of them. The API and the worker
  * both use it (Node only: import it as @ystara/shared/secrets, never from the web app).
@@ -23,6 +24,9 @@ export interface SecretBox {
 
 /** The context a tenant's technical client secret is sealed and opened with. */
 export const connectionSecretContext = (tenantId: string) => `tenant-connection:${tenantId}`;
+
+/** The context the password of a space's database user is sealed and opened with: it opens for that tenant and space only. */
+export const databaseUserSecretContext = (tenantId: string, space: string) => `database-user:${tenantId}:${space}`;
 
 const TAG_LENGTH = 16; // bytes; set on both sides, so a shortened tag is refused instead of checked with fewer bits
 
@@ -56,10 +60,10 @@ export const MASTER_KEY_COMMAND = `node -e "require('fs').writeFileSync('.master
  * only the containers that need it get. A MASTER_KEY variable works too (a hosting platform's secret
  * store); if both are there, they must hold the same key.
  * Refuses to start without one, rather than run with a weak or shared key. Errors never show the key.
- * Losing the key means every user sets up their authenticator again, and every tenant's client secret is entered again.
+ * Losing the key means every user sets up their authenticator again, and every tenant's client secret and database password is entered again.
  */
 export function masterKeyFromEnv(env: NodeJS.ProcessEnv = process.env): Buffer {
-  const help = `Create one in the repository root with\n  ${MASTER_KEY_COMMAND}\nIt writes .master-key, which git ignores. Keep it secret and keep a copy: losing it means every user sets up their authenticator again, and every tenant's client secret is entered again.`;
+  const help = `Create one in the repository root with\n  ${MASTER_KEY_COMMAND}\nIt writes .master-key, which git ignores. Keep it secret and keep a copy: losing it means every user sets up their authenticator again, and every tenant's client secret and database password is entered again.`;
   const file = env.MASTER_KEY_FILE?.trim();
   if (file && !existsSync(file)) throw new Error(`MASTER_KEY_FILE names ${file}, which doesn't exist. ${help}`);
   // A BOM appears when an editor on Windows saves the file as "UTF-8 with BOM".

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DspEdge, DspObjectRef, GraphNode, Pipeline } from "@ystara/shared";
 import { layoutLeftToRight, NODE_MAX_WIDTH, NODE_MIN_WIDTH, nodeWidth } from "./layout";
-import { exclusionFor, lineageModel } from "./model";
+import { exclusionFor, lineageModel, whyNotMeasurable } from "./model";
 
 // Synthetic pipeline: DF_LOAD and DF_OTHER both write LT_DATA (DF_OTHER excluded), V_OUT reads LT_DATA and LT_CONFIG.
 const ref = (technicalName: string, type: DspObjectRef["type"], space = "S"): GraphNode => ({ space, technicalName, type });
@@ -82,5 +82,25 @@ describe("layout", () => {
     const longest = "X".repeat(50); // Datasphere's limit for technical names
     expect(nodeWidth({ type: "SQL view", technicalName: longest })).toBeGreaterThanOrEqual(50 * 8 + 28);
     expect(nodeWidth({ type: "SQL view", technicalName: "V_OUT", businessName: "Long business name ".repeat(10) })).toBe(NODE_MAX_WIDTH);
+  });
+});
+
+describe("what snapshots can measure", () => {
+  it("is marked on each step, and not on an excluded writer", () => {
+    const model = lineageModel(pipeline, graph, {
+      "S.V_OUT": { measurable: true },
+      "S.LT_DATA": { measurable: false, reason: "not-visible" },
+      "S.DF_LOAD": { measurable: false, reason: "process" },
+    });
+    const node = (name: string) => model.nodes.find((n) => n.ref.technicalName === name)!;
+    expect(node("V_OUT").measurement).toEqual({ measurable: true });
+    expect(node("LT_DATA").measurement).toEqual({ measurable: false, reason: "not-visible" });
+    expect(node("DF_OTHER").measurement).toBeUndefined();
+  });
+
+  it("says what to expose for a view, and never suggests Ystara does it", () => {
+    expect(whyNotMeasurable("not-visible", V_OUT)).toMatch(/Expose for Consumption.*Ystara never changes the tenant/);
+    expect(whyNotMeasurable("not-visible", LT_DATA)).not.toMatch(/Expose for Consumption in its properties/);
+    expect(whyNotMeasurable("no-database-user", V_OUT)).toContain("space S has no database user");
   });
 });

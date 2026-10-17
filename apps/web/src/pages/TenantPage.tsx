@@ -20,10 +20,12 @@ import { useCan, useConnection, usePipelines, useScans, useStartScan, useTenant,
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
+import { DatabaseUsersSection } from "./DatabaseUsers";
 import { ConnectionSection, parseSpaces } from "./TenantConnection";
 
 /**
- * One tenant: how the worker logs in to it, its scans (newest first, refreshed
+ * One tenant: how the worker logs in to it (its technical client, and the
+ * database users snapshots read each space with), its scans (newest first, refreshed
  * while one runs) and its saved pipelines. `?connect=1` (after adding a
  * tenant) opens the Connect wizard.
  */
@@ -58,6 +60,7 @@ export function TenantPage() {
       />
 
       {tenant.data.host && <ConnectionSection tenant={tenant.data} connecting={connecting} onConnecting={setConnecting} />}
+      {tenant.data.host && <DatabaseUsersSection tenant={tenant.data} />}
 
       <section className="block">
         <Title level="H4">Scans</Title>

@@ -1,4 +1,4 @@
-import { refKey, type DspEdge, type GraphNode, type Pipeline } from "@ystara/shared";
+import { refKey, type DspEdge, type GraphNode, type Measurability, type Pipeline } from "@ystara/shared";
 
 /**
  * Turns a pipeline (from the API) into what the lineage picture draws: one
@@ -20,6 +20,8 @@ export interface LineageNode {
   competingWriter: boolean;
   /** Part of a loop, so the step order around it is a guess. */
   inLoop: boolean;
+  /** Whether a snapshot can measure it with SQL, and if not, why. Undefined for an excluded writer, which is no step. */
+  measurement?: Measurability;
 }
 
 export interface LineageEdge {
@@ -31,7 +33,11 @@ export interface LineageEdge {
   excluded: boolean;
 }
 
-export function lineageModel(pipeline: Pipeline, graph: { nodes: GraphNode[]; edges: DspEdge[] }): { nodes: LineageNode[]; edges: LineageEdge[] } {
+export function lineageModel(
+  pipeline: Pipeline,
+  graph: { nodes: GraphNode[]; edges: DspEdge[] },
+  measurement: Record<string, Measurability> = {},
+): { nodes: LineageNode[]; edges: LineageEdge[] } {
   const excluded = new Set(pipeline.excludedWriters.map((x) => refKey(x.writer)));
   const entry = new Set(pipeline.entryPoints.map(refKey));
   const ambiguousTables = new Set(pipeline.ambiguousWriters.map((a) => refKey(a.table)));
@@ -52,6 +58,7 @@ export function lineageModel(pipeline: Pipeline, graph: { nodes: GraphNode[]; ed
         severalWriters: ambiguousTables.has(key),
         competingWriter: competing.has(key),
         inLoop: inLoop.has(key),
+        measurement: measurement[key],
       };
     })
     .sort((a, b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity));
@@ -72,4 +79,23 @@ export function lineageModel(pipeline: Pipeline, graph: { nodes: GraphNode[]; ed
 export function exclusionFor(ref: GraphNode, pipeline: Pipeline): string {
   const spaces = new Set(pipeline.steps.map((s) => s.space));
   return spaces.size > 1 ? refKey(ref) : ref.technicalName;
+}
+
+/** Why a snapshot can't measure a step, in a sentence for the object's details. */
+export function whyNotMeasurable(reason: Exclude<Measurability, { measurable: true }>["reason"], ref: GraphNode): string {
+  const space = ref.space;
+  switch (reason) {
+    case "process":
+      return "A flow or task chain holds no data of its own: snapshots measure the tables and views around it.";
+    case "no-database-user":
+      return `Snapshots can't measure it yet: space ${space} has no database user. An admin adds one on the tenant page.`;
+    case "not-checked":
+      return `Snapshots can measure it once the database user of ${space} has been checked.`;
+    case "check-failed":
+      return `Snapshots can't measure it: the database user of ${space} failed its last check (see the tenant page).`;
+    case "not-visible":
+      return ref.type === "sql_view" || ref.type === "graphical_view"
+        ? `Snapshots can't measure it: it isn't exposed for consumption, so the database user of ${space} doesn't see it. A Datasphere modeler can switch on Expose for Consumption in its properties. Ystara never changes the tenant.`
+        : `Snapshots can't measure it: the database user of ${space} doesn't see it. Database users only see what is exposed for consumption.`;
+  }
 }

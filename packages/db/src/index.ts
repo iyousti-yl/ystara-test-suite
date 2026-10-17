@@ -5,5 +5,6 @@ export * from "./accounts.js";
 export * from "./operator.js";
 export * from "./tenants.js";
 export * from "./connections.js";
+export * from "./database-users.js";
 export * from "./scans.js";
 export * from "./pipelines.js";

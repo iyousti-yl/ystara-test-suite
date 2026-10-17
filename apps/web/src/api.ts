@@ -18,6 +18,7 @@ import type {
   SavedPipelineResult,
   Scan,
   ScanGraph,
+  SpaceDatabaseUser,
   Team,
   Tenant,
   TenantConnection,
@@ -42,6 +43,7 @@ export type ScanJson = Json<Scan>;
 export type PipelineDefinitionJson = Json<PipelineDefinition>;
 export type TeamJson = Json<Team>;
 export type ConnectionJson = Json<TenantConnection>;
+export type DatabaseUserJson = Json<SpaceDatabaseUser>;
 
 export class ApiError extends Error {
   constructor(
@@ -235,6 +237,30 @@ export const useSetConnectionSpaces = (tenantId: string) =>
 export const useCheckConnection = (tenantId: string) => useConnectionChange(tenantId, () => request<ConnectionJson>("POST", `/tenants/${tenantId}/connection/check`));
 export const useDisconnect = (tenantId: string) => useConnectionChange(tenantId, () => request<void>("DELETE", `/tenants/${tenantId}/connection`));
 
+// --- Each space's database user (snapshots)
+
+/** Refetches every few seconds while the worker checks one of them. */
+export const useDatabaseUsers = (tenantId: string) =>
+  useQuery({
+    queryKey: ["tenants", tenantId, "database-users"],
+    queryFn: () => request<DatabaseUserJson[]>("GET", `/tenants/${tenantId}/database-users`),
+    refetchInterval: (q) => pollWhile(q.state.data?.some((u) => u.status === "checking") ?? false),
+  });
+
+function useDatabaseUserChange<I, O>(tenantId: string, mutationFn: (input: I) => Promise<O>) {
+  const client = useQueryClient();
+  return useMutation({ mutationFn, onSettled: () => client.invalidateQueries({ queryKey: ["tenants", tenantId, "database-users"] }) });
+}
+
+export const useSetDatabaseUser = (tenantId: string) =>
+  useDatabaseUserChange(tenantId, (input: { host: string; user: string; password: string }) =>
+    request<DatabaseUserJson>("PUT", `/tenants/${tenantId}/database-users`, input),
+  );
+export const useCheckDatabaseUser = (tenantId: string) =>
+  useDatabaseUserChange(tenantId, (space: string) => request<DatabaseUserJson>("POST", `/tenants/${tenantId}/database-users/${space}/check`));
+export const useRemoveDatabaseUser = (tenantId: string) =>
+  useDatabaseUserChange(tenantId, (space: string) => request<void>("DELETE", `/tenants/${tenantId}/database-users/${space}`));
+
 // --- Scans
 
 /** Refetches every few seconds while one of the scans is queued or running. */
@@ -274,12 +300,14 @@ export const useObject = (scanId: string, ref: { space: string; technicalName: s
 
 // --- Pipelines
 
-/** The pipeline behind `output` on one scan, with writers excluded by pattern (as `npm run scan -- --exclude-writer`). */
+/**
+ * The pipeline behind `output` on one scan, with writers excluded by pattern (as `npm run scan -- --exclude-writer`).
+ * Asked for again each time the page opens: which steps a snapshot can measure follows the database users' checks.
+ */
 export const usePipelineOnScan = (scanId: string, output: string, excludeWriters: string[]) =>
   useQuery({
     queryKey: ["scans", scanId, "pipeline", output, excludeWriters],
     queryFn: () => request<PipelineResult>("GET", `/scans/${scanId}/pipeline?${pipelineQuery(output, excludeWriters)}`),
-    staleTime: Infinity,
     // While an exclusion is applied, keep showing the current picture of the same output.
     placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[3] === output ? previous : undefined),
   });

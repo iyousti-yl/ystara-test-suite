@@ -3,23 +3,27 @@
  * separate queue service. Job types arrive per phase:
  *   discovery-scan    (phase 1) read spaces of a tenant into a stored lineage graph
  *   connection-check  (phase 1) log in with a tenant's technical client and check it can read its spaces
+ *   database-check    (phase 2) sign in with a space's database user and list what it can read there
  *   snapshot.capture  (phase 2) metrics of pipeline objects
  *   snapshot.compare  (phase 2)
  *   scenario.run      (phase 3) read-only simulation of a pipeline on fixtures
  *
- * Datasphere access: each tenant's technical client, whose secret the worker
- * opens with MASTER_KEY. A tenant without one is not scanned, unless this
+ * Datasphere access: each tenant's technical client for the CLI, and each
+ * space's database user for SQL. The worker opens their secrets with
+ * MASTER_KEY. A tenant without a client is not scanned, unless this
  * worker runs on a developer's computer with YSTARA_WORKER_MACHINE_LOGIN=1:
  * then it uses the Datasphere CLI's own login there (see tenant-login.ts).
  * Everything stays read-only.
  */
 import { fileURLToPath } from "node:url";
 import PgBoss from "pg-boss";
+import { checkDatabaseUser } from "@ystara/connector";
 import { assertYstaraDatabase, connect, databaseUrl } from "@ystara/db";
-import { JOBS, type ConnectionCheckJobData, type ScanJobData } from "@ystara/shared";
+import { JOBS, type ConnectionCheckJobData, type DatabaseCheckJobData, type ScanJobData } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 import { masterKeyFromEnv, secretBox } from "@ystara/shared/secrets";
 import { runConnectionCheck } from "./jobs/connection-check.js";
+import { runDatabaseCheck } from "./jobs/database-check.js";
 import { runScan } from "./jobs/scan.js";
 import { checkSpacesWith, removeStaleFolders, tenantAccess, type LoginOptions } from "./tenant-login.js";
 
@@ -46,6 +50,10 @@ await boss.work<ScanJobData>(JOBS.scan, async ([job]) => {
 await boss.work<ConnectionCheckJobData>(JOBS.connectionCheck, async ([job]) => {
   const connection = await runConnectionCheck(db, job.data.tenantId, secrets, (host, client, spaces) => checkSpacesWith(host, client, spaces, login.bin));
   console.log(`[worker] connection check of tenant ${job.data.tenantId}: ${connection?.status ?? "gone"}`);
+});
+await boss.work<DatabaseCheckJobData>(JOBS.databaseCheck, async ([job]) => {
+  const user = await runDatabaseCheck(db, job.data, secrets, checkDatabaseUser);
+  console.log(`[worker] database check of space ${job.data.space} in tenant ${job.data.tenantId}: ${user?.status ?? "gone"}`);
 });
 console.log("[worker] started");
 

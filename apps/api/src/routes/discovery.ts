@@ -11,6 +11,7 @@ import {
   getScan,
   getTenant,
   latestSucceededScan,
+  listDatabaseUsers,
   listPipelines,
   listScans,
   listTenants,
@@ -18,7 +19,17 @@ import {
   loadObject,
   type Db,
 } from "@ystara/db";
-import { DATASPHERE_URL_HINT, isDatasphereUrl, JOBS, readableSpaces, type PipelineResult, type ScanGraph, type ScanJobData } from "@ystara/shared";
+import {
+  DATASPHERE_URL_HINT,
+  isDatasphereUrl,
+  JOBS,
+  measurability,
+  readableSpaces,
+  refKey,
+  type PipelineResult,
+  type ScanGraph,
+  type ScanJobData,
+} from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
 import type { JobQueue } from "../server.js";
 
@@ -36,7 +47,7 @@ import type { JobQueue } from "../server.js";
  */
 const read = { access: "pipelines.read" } as const;
 const id = z.object({ id: z.string().uuid() });
-const spaceId = z.string().regex(/^[A-Za-z0-9_]{1,64}$/, "Space IDs contain only letters, digits and underscores");
+export const spaceId = z.string().regex(/^[A-Za-z0-9_]{1,64}$/, "Space IDs contain only letters, digits and underscores");
 const objectName = z.object({ id: z.string().uuid(), space: spaceId, name: z.string().regex(/^[A-Za-z0-9_]{1,128}$/, "Technical names contain only letters, digits and underscores") });
 const objectRef = z.string().regex(/^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)?$/, "Use NAME or SPACE.NAME");
 const patterns = z.array(z.string().min(1).max(200)).max(50);
@@ -142,7 +153,7 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
       const output = toOutput(query.output, scan.spaces);
       if (!output) return reply.code(400).send({ error: "This scan covers several spaces; use SPACE.NAME" });
       const excludeWriters = patterns.parse(query.excludeWriter === undefined ? [] : [query.excludeWriter].flat());
-      const computed = await computePipeline(db, scan.id, output, excludeWriters);
+      const computed = await computePipeline(db, scan, output, excludeWriters);
       return computed ?? reply.code(404).send({ error: `${output.space}.${output.technicalName} is not in this scan` });
     });
 
@@ -167,7 +178,7 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
       if (!definition || !(await ownTenant(req, definition.tenantId))) return reply.code(404).send({ error: "Pipeline not found" });
       const scan = await latestSucceededScan(db, definition.tenantId);
       if (!scan) return reply.code(409).send({ error: "This tenant has no successful scan yet", definition });
-      const computed = await computePipeline(db, scan.id, definition.output, definition.excludeWriters);
+      const computed = await computePipeline(db, scan, definition.output, definition.excludeWriters);
       if (!computed) {
         const { space, technicalName } = definition.output;
         return reply.code(409).send({ error: `${space}.${technicalName} is not in the latest scan`, scanId: scan.id, definition });
@@ -193,15 +204,20 @@ function toOutput(output: string, spaces: string[]): { space: string; technicalN
   return spaces.length === 1 ? { space: spaces[0], technicalName: output } : undefined;
 }
 
-/** The pipeline behind `output` in one scan, or undefined when the scan doesn't contain `output`. */
+/**
+ * The pipeline behind `output` in one scan, or undefined when the scan doesn't contain `output`.
+ * With, for each step, whether a snapshot can measure it: from what the tenant's database users saw at their last check.
+ */
 async function computePipeline(
   db: Db,
-  scanId: string,
+  scan: { id: string; tenantId: string },
   output: { space: string; technicalName: string },
   excludeWriters: string[],
 ): Promise<PipelineResult | undefined> {
-  const graph = await loadGraph(db, scanId);
+  const graph = await loadGraph(db, scan.id);
   if (!graph.nodes.some((n) => n.space === output.space && n.technicalName === output.technicalName)) return undefined;
   const pipeline = buildPipeline(graph, output, { excludeWriters });
-  return { scanId, excludeWriters, pipeline, graph: pipelineGraph(graph, pipeline), mermaid: toMermaid(graph, pipeline) };
+  const users = await listDatabaseUsers(db, scan.tenantId);
+  const measurement = Object.fromEntries(pipeline.steps.map((step) => [refKey(step), measurability(step, users)]));
+  return { scanId: scan.id, excludeWriters, pipeline, graph: pipelineGraph(graph, pipeline), mermaid: toMermaid(graph, pipeline), measurement };
 }

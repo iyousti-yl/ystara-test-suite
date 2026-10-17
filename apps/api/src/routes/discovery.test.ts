@@ -1,7 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { graphFromRaw, type RawObject } from "@ystara/connector";
-import { createScan, getConnectionLogin, recordConnectionCheck, saveScanResult, setConnection, type Db } from "@ystara/db";
+import {
+  createScan,
+  getConnectionLogin,
+  getDatabaseUserLogin,
+  recordConnectionCheck,
+  recordDatabaseCheck,
+  saveScanResult,
+  setConnection,
+  setDatabaseUser,
+  type Db,
+} from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import type { Pipeline } from "@ystara/shared";
 import { testSecrets, testUser, type TestUser } from "../auth/testing.js";
@@ -176,6 +186,29 @@ describe("pipelines", () => {
     expect(res.pipeline.steps).toHaveLength(3);
     expect((await get(`/tenants/${tenant.id}/pipelines`)).json()).toHaveLength(1);
     expect((await del(`/pipelines/${created.json().id}`)).statusCode).toBe(204);
+  });
+
+  it("say which steps a snapshot can measure, from what the space's database user saw", async () => {
+    const { tenant, scan } = await tenantWithScan("Measured");
+    const url = `/scans/${scan.id}/pipeline?output=V_OUT&excludeWriter=DF_OTHER_RELOAD`;
+    expect((await get(url)).json().measurement).toEqual({
+      "S.LT_DATA": { measurable: false, reason: "no-database-user" },
+      "S.DF_LOAD": { measurable: false, reason: "process" },
+      "S.V_OUT": { measurable: false, reason: "no-database-user" },
+    });
+
+    const host = "synthetic.hana.prod-eu10.hanacloud.ondemand.com";
+    await setDatabaseUser(db, { tenantId: tenant.id, space: "S", host, user: "S#SYNTH", sealedPassword: "v1.sealed", updatedBy: null });
+    expect((await get(url)).json().measurement["S.V_OUT"]).toEqual({ measurable: false, reason: "not-checked" });
+    await recordDatabaseCheck(db, (await getDatabaseUserLogin(db, tenant.id, "S"))!, { visible: [{ name: "V_OUT", type: "VIEW" }] });
+    expect((await get(url)).json().measurement).toEqual({
+      "S.LT_DATA": { measurable: false, reason: "not-visible" },
+      "S.DF_LOAD": { measurable: false, reason: "process" },
+      "S.V_OUT": { measurable: true },
+    });
+
+    const saved = (await post(`/tenants/${tenant.id}/pipelines`, { name: "Measured", output: "S.V_OUT", excludeWriters: ["DF_OTHER_RELOAD"] })).json();
+    expect((await get(`/pipelines/${saved.id}`)).json().measurement["S.V_OUT"]).toEqual({ measurable: true });
   });
 
   it("explain what is missing instead of failing", async () => {

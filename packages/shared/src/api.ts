@@ -1,3 +1,4 @@
+import type { Measurability } from "./database-users.js";
 import type { DspEdge, DspObject, DspObjectRef, Pipeline } from "./objects.js";
 import type { Permission, Role } from "./roles.js";
 
@@ -63,6 +64,35 @@ export interface ConnectionState {
 }
 
 /**
+ * A database user of one space, which snapshots read its data with (SQL,
+ * read access only). Ystara stores its password encrypted and never sends it
+ * back. Lifecycle as for the technical client: checking (saved, or "Check
+ * again") -> connected | failed. The check signs in, makes sure the user can't
+ * change the space's schema, and lists what it sees there.
+ */
+export interface SpaceDatabaseUser {
+  tenantId: string;
+  /** The part of the user name before #. */
+  space: string;
+  /** The tenant's database host, <id>.hana.<region>.hanacloud.ondemand.com. */
+  host: string;
+  /** SPACE#SUFFIX */
+  user: string;
+  status: ConnectionStatus;
+  checkedAt: Date | null;
+  /** Why the last check failed, without the password. */
+  error: string | null;
+  /**
+   * The views and tables it saw in the space's schema at its last check: the
+   * objects a snapshot can measure. Null until a check got that far. Kept
+   * while it is checked again, and cleared when the user or password changes.
+   */
+  visible: { name: string; type: "VIEW" | "TABLE" }[] | null;
+  /** When it was entered or last changed. */
+  updatedAt: Date;
+}
+
+/**
  * Discovery scans: a request to read some spaces of a tenant, and, once done,
  * what was read (object definitions) and the lineage graph built from it.
  *
@@ -124,6 +154,8 @@ export interface PipelineResult {
   /** What to draw: every step and excluded writer, and the data edges between them. */
   graph: { nodes: GraphNode[]; edges: DspEdge[] };
   mermaid: string;
+  /** For each step (by SPACE.NAME), whether a snapshot can measure it with SQL, from what the database users saw at their last check. */
+  measurement: Record<string, Measurability>;
 }
 
 /** GET /api/pipelines/:id: a saved pipeline, computed on the tenant's latest successful scan. */

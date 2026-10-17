@@ -7,6 +7,8 @@ export const JOBS = {
   scan: "discovery-scan",
   /** Log in to a tenant with its technical client and check which of its spaces it can read. */
   connectionCheck: "connection-check",
+  /** Sign in with a space's database user and list what it can read there (SELECT only). */
+  databaseCheck: "database-check",
 } as const;
 
 export interface ScanJobData {
@@ -22,3 +24,14 @@ export interface ConnectionCheckJobData {
 
 /** A check is a login and two one-object lists per space: if it hangs, the person retries with "Check again". */
 export const CONNECTION_CHECK_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 5 * 60 };
+
+export interface DatabaseCheckJobData {
+  tenantId: string;
+  space: string;
+}
+
+/**
+ * One sign-in and three short SELECTs. No retries: a wrong password signed in
+ * again and again can lock the user, so another try waits for "Check again".
+ */
+export const DATABASE_CHECK_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 5 * 60 };

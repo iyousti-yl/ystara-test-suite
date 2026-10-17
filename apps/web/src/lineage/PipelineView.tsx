@@ -20,7 +20,7 @@ export function PipelineView(props: {
 }) {
   const { result, onExclusionsChange, onShowPipeline } = props;
   const { pipeline } = result;
-  const model = useMemo(() => lineageModel(pipeline, result.graph), [pipeline, result.graph]);
+  const model = useMemo(() => lineageModel(pipeline, result.graph, result.measurement), [pipeline, result.graph, result.measurement]);
   const [selected, setSelected] = useState<string>();
   const [view, setView] = useState<"lineage" | "steps">("lineage");
   const dark = useDarkMode();
@@ -82,6 +82,7 @@ export function PipelineView(props: {
             {pipeline.steps.map((s) => (
               <li key={refKey(s)}>
                 <span className="mono">{s.technicalName}</span> <span className="muted">{typeLabel(s.type)}</span>
+                {result.measurement[refKey(s)]?.measurable && <span className="flag flag-measurable steps-flag">Measurable</span>}
               </li>
             ))}
           </ol>
