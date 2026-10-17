@@ -103,7 +103,13 @@ Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `packages/shared/src/secre
 
 ## Reading a space with SQL (phase 2, in progress)
 
-Snapshot tests measure views and tables with SQL, through a database user of the space (Space Management > Database Access, with read access only). `packages/connector/src/sql.ts` connects with hdb, SAP's open-source JavaScript client (TLS on port 443), and sends only statements that pass `assertSelectOnly` (one SELECT: no semicolon, comment, INTO or row lock; values as `?` parameters). `metricsQuery` measures an object in one pass: the row count and, per column, non-null and distinct counts, min and max for ordered types and a sum for numbers. Only these results are to be stored, never rows. `npm run spike:sql` checks a database user on a real tenant before the Connect wizard asks for one.
+Snapshot tests measure views with SQL, through a database user of the space (Space Management > Database Access, with read access only). `packages/connector/src/sql.ts` connects with hdb, SAP's open-source JavaScript client (TLS on port 443), and sends only statements that pass `assertSelectOnly` (one SELECT: no semicolon, comment, INTO or row lock; values as `?` parameters). `metricsQuery` measures an object in one pass: the row count and, per column, non-null and distinct counts, min and max for ordered types and a sum for numbers. Only these results are to be stored, never rows; how min and max are stored is Issam's GDPR decision (see the decisions log). `npm run spike:sql` checks a database user on a real tenant.
+
+**What a database user can read** (Issam's run, 2026-10-17): SELECT on the space's schema, but only the **views exposed for consumption**. No other view and no local table is visible, so of a pipeline usually only its output can be measured. That shapes phases 2 and 3:
+
+- **A snapshot measures what is exposed.** A pipeline snapshot measures its exposed outputs and any exposed intermediate view. The pipeline page shows for each step whether SQL can measure it, from what the database user actually sees (the connection check lists it), never from an assumption that tables are readable. A step that isn't measurable says so and why ("not exposed for consumption"). **Ystara never exposes anything itself**; at most it tells the admin which views they could expose.
+- **Every step still gets checked, from its definition.** The CLI reads every object's definition, so a scan-to-scan comparison shows schema and logic changes for all steps, measurable or not. SQL adds the data side for the exposed ones.
+- **Phase 3 can't read intermediate views either.** So a simulation must not read any tenant object at all; see "How a scenario run works" below.
 
 ## How discovery works (phase 1)
 
@@ -117,15 +123,15 @@ Try it locally: `npm run scan -- --space <SPACE> --output <OBJECT>` writes a Mer
 
 ## How a scenario run works (phase 3 target, read-only simulation)
 
-Nothing is written to the tenant and no flow or task chain is run. Instead the platform tests the **logic** of the pipeline:
+Nothing is written to the tenant and no flow or task chain is run. Instead the platform tests the **logic** of the pipeline. **The query it runs reads no tenant object**, only fixtures inlined into the statement (and `DUMMY`): a standard database user sees only exposed views (above), so a simulation that needed SELECT on the pipeline's own views and tables would fail on a real tenant. Each step's logic comes from its definition, read with the CLI by the scan, not from the database:
 
 1. Load the scenario YAML and the pipeline.
 2. Turn each entry table's fixture rows into an inline data set (`SELECT ... FROM DUMMY UNION ALL ...`).
-3. Walk the pipeline from the entry points to each checkpoint and compose one `WITH` query: every view and SQL-based transformation flow becomes a CTE, with its references to upstream objects rewritten to the CTEs that replace them. A table loaded by a transformation flow is represented by that flow's `SELECT` (full-load semantics).
+3. Walk the pipeline from the entry points to each checkpoint and compose one query: every view and SQL-based transformation flow is compiled from its definition (the SQL of a SQL view; the CSN `query` of a graphical view) into a CTE or nested subquery, with its references to upstream objects rewritten to the parts that replace them. A table loaded by a transformation flow is represented by that flow's `SELECT` (full-load semantics). **Any reference that resolves to neither a fixture nor a compiled step stops the run** before anything is sent (a lookup or dimension outside the pipeline needs a fixture too), so the composed query can never fall back to reading a real object. `WITH` needs a reviewed change to `assertSelectOnly`, which today refuses it; nested subqueries would work without one.
 4. Run the composed `SELECT` through the read-only database user and evaluate the assertions on the result.
 5. Steps that cannot be expressed as SQL (data flows with script operators, replication flows, remote sources) stop the simulation at that point with a clear message; those parts of the chain are covered by snapshot tests instead.
 
-Open questions for phase 3: how delta loads and upserts in transformation flows should be simulated, and how graphical views' query model maps to SQL (likely via the CSN `query` that Datasphere also stores).
+Open questions for phase 3: how delta loads and upserts in transformation flows should be simulated; how far a compiler from the CSN `query` of graphical views to HANA SQL can go (joins, unions, calculated columns, aggregation, parameters), tested against the deployed SQL of exposed views, which the database user can read in `SYS.VIEWS`; which steps can't be inlined into one SELECT (SQLScript views and table functions, currency conversion that reads TCUR tables, `CURRENT_DATE` and session values, which need fixed fixture values). A phase-3 spike should compile one SQL view and one graphical view of a real pipeline into a fixture-only SELECT and run it through the database user before the engine is built.
 
 ## Security posture (short form for the security pack)
 
