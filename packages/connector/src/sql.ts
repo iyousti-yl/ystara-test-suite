@@ -21,6 +21,18 @@ export interface DatabaseUser {
 
 export type Row = Record<string, unknown>;
 
+/**
+ * Why `user` can't be a database user of a space, if it can't. Their names are
+ * SPACE#SUFFIX. A name without # is most often one that a settings file cut
+ * short (an unquoted # starts a comment in .env files), and signing in with it
+ * only fails; repeated failed sign-ins can lock the user. So it is refused
+ * before anyone signs in.
+ */
+export function databaseUserProblem(user: string): string | undefined {
+  if (/^[^#\s]+#[^#\s]+$/.test(user)) return undefined;
+  return "database user names look like SPACE#SUFFIX. In .env.local, quote the value (DSP_DB_USER='SPACE#SUFFIX'): an unquoted # starts a comment";
+}
+
 export class SqlReader {
   private constructor(
     private readonly client: ReturnType<typeof hdb.createClient>,

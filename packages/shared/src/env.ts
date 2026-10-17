@@ -45,3 +45,18 @@ export function envKeys(text: string): string[] {
     .map((line) => line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/)?.[1])
     .filter((key): key is string => key !== undefined);
 }
+
+/**
+ * The keys among `keys` whose value in a dotenv text has an unquoted #. Node's
+ * loader reads an unquoted # as the start of a comment, anywhere in the value,
+ * so `USER=SPACE#SUFFIX` gives "SPACE". In quotes it is kept: `USER='SPACE#SUFFIX'`.
+ * Like envKeys, it says which key, never what the value is.
+ */
+export function unquotedHashKeys(text: string, keys: string[]): string[] {
+  const found = new Set<string>();
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (m && keys.includes(m[1]) && !/^["'`]/.test(m[2]) && m[2].includes("#")) found.add(m[1]);
+  }
+  return [...found];
+}

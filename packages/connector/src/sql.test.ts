@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assertSelectOnly, NotSelectError } from "./readonly.js";
-import { columnMetrics, metricsQuery, quoteIdentifier, SqlReader } from "./sql.js";
+import { columnMetrics, databaseUserProblem, metricsQuery, quoteIdentifier, SqlReader } from "./sql.js";
 
 // A stand-in for hdb that records what reaches the database.
 const sent: { sql: string; params?: unknown[] }[] = [];
@@ -98,5 +98,14 @@ describe("metricsQuery", () => {
     );
     expect(() => assertSelectOnly(sql)).not.toThrow();
     expect(columns.map((c) => c.metrics.length)).toEqual([4, 5, 1]);
+  });
+});
+
+describe("databaseUserProblem", () => {
+  it("accepts SPACE#SUFFIX and refuses a name a settings file cut short", () => {
+    expect(databaseUserProblem("SALES#SYNTH")).toBeUndefined();
+    for (const user of ["SALES", "SALES#", "#SYNTH", "SALES#A#B", "SALES #SYNTH", ""]) {
+      expect(databaseUserProblem(user), user).toContain("quote the value");
+    }
   });
 });

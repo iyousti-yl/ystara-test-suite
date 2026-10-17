@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { COMPOSE_SETTING, envKeys, loadLocalEnv } from "./env.js";
+import { COMPOSE_SETTING, envKeys, loadLocalEnv, unquotedHashKeys } from "./env.js";
 
 const dirs: string[] = [];
 const touched = ["YSTARA_TEST_PORT", "YSTARA_TEST_SECRET", "MASTER_KEY_FILE"];
@@ -81,5 +81,19 @@ describe("docker-compose.yml", () => {
     const file = path.join(repo, ".env");
     const keys = existsSync(file) ? envKeys(readFileSync(file, "utf8")) : [];
     expect(keys.filter((k) => !COMPOSE_SETTING.test(k)), "move these keys from .env to .env.local").toEqual([]);
+  });
+});
+
+describe("unquotedHashKeys", () => {
+  it("finds a value that an unquoted # cuts short, and only for the keys asked about", () => {
+    const text = ["DSP_DB_USER=SALES#SYNTH", "DSP_DB_PASSWORD='pa#ss'", "export OTHER=a#b", "DSP_SPACE=SALES # the space"].join("\n");
+    expect(unquotedHashKeys(text, ["DSP_DB_USER", "DSP_DB_PASSWORD", "DSP_SPACE"])).toEqual(["DSP_DB_USER", "DSP_SPACE"]);
+    expect(unquotedHashKeys('DSP_DB_USER="SALES#SYNTH"\nDSP_DB_PASSWORD=`a#b`', ["DSP_DB_USER", "DSP_DB_PASSWORD"])).toEqual([]);
+  });
+
+  it("agrees with Node's loader", () => {
+    loadLocalEnv(root({ ".env.local": "YSTARA_TEST_SECRET=SALES#SYNTH\n" }));
+    expect(process.env.YSTARA_TEST_SECRET).toBe("SALES");
+    expect(unquotedHashKeys("YSTARA_TEST_SECRET=SALES#SYNTH", ["YSTARA_TEST_SECRET"])).toEqual(["YSTARA_TEST_SECRET"]);
   });
 });

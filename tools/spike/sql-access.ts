@@ -14,8 +14,15 @@
  *      (443), and let you ask for a password.
  * Then put in .env.local (never in .env or a committed file):
  *   DSP_DB_HOST, DSP_DB_USER, DSP_DB_PASSWORD (DSP_DB_PORT if not 443), and
- *   DSP_SPACE: the space ID, which is also its schema (the first one when it
- *   lists several).
+ *   DSP_SPACE: the space ID, which is also its schema. When it lists several,
+ *   the spike reads the one the user belongs to (the part of its name before #).
+ * Put DSP_DB_USER and DSP_DB_PASSWORD in single quotes (double quotes for a
+ * password with a ' in it):
+ *   DSP_DB_USER='SPACE#SUFFIX'
+ *   DSP_DB_PASSWORD='...'
+ * Unquoted, a # starts a comment and the rest of the value is lost. The spike
+ * refuses such a value before it signs in, because repeated failed sign-ins
+ * can lock the user.
  * Optionally DSP_SQL_OBJECT: the view or table to measure (by default, the
  * first view it can read). Then run `npm run spike:sql`.
  *
@@ -29,12 +36,25 @@
  *     snapshot metrics in one pass (per column: non-null and distinct counts,
  *     min and max, and a sum for numbers).
  */
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { metricsQuery, quoteIdentifier, SqlReader } from "@ystara/connector";
-import { loadLocalEnv } from "@ystara/shared/env";
+import { databaseUserProblem, metricsQuery, quoteIdentifier, SqlReader } from "@ystara/connector";
+import { loadLocalEnv, unquotedHashKeys } from "@ystara/shared/env";
 
-loadLocalEnv(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".."));
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+loadLocalEnv(root);
+
+// Before anyone signs in: a value cut short by an unquoted # only fails, and repeated failures can lock the user.
+const appFile = path.join(root, ".env.local");
+const cut = existsSync(appFile) ? unquotedHashKeys(readFileSync(appFile, "utf8"), ["DSP_DB_USER", "DSP_DB_PASSWORD"]) : [];
+if (cut.length) {
+  console.error(
+    `${cut.join(" and ")} in .env.local ${cut.length === 1 ? "has" : "have"} an unquoted #, which starts a comment, so only the part before it is read. ` +
+      "Put the value in single quotes (double quotes if it has a ' in it), e.g. DSP_DB_USER='SPACE#SUFFIX'. Nothing was sent to the tenant.",
+  );
+  process.exit(1);
+}
 
 const env = (name: string) => {
   const value = process.env[name]?.trim();
@@ -45,7 +65,15 @@ const env = (name: string) => {
   return value;
 };
 const db = { host: env("DSP_DB_HOST"), port: Number(process.env.DSP_DB_PORT?.trim() || 443), user: env("DSP_DB_USER"), password: env("DSP_DB_PASSWORD") };
-const space = env("DSP_SPACE").split(",")[0].trim();
+const userProblem = databaseUserProblem(db.user);
+if (userProblem) {
+  console.error(`DSP_DB_USER: ${userProblem}. Nothing was sent to the tenant.`);
+  process.exit(1);
+}
+// The space the user belongs to, when DSP_SPACE lists it; else the first one.
+const spaces = env("DSP_SPACE").split(",").map((s) => s.trim()).filter(Boolean);
+const own = db.user.split("#")[0];
+const space = spaces.includes(own) ? own : spaces[0];
 const target = process.env.DSP_SQL_OBJECT?.trim();
 /** Privileges that only read. Anything else on the space's schema could change it. */
 const READ_PRIVILEGES = new Set(["SELECT", "SELECT METADATA", "SELECT CDS METADATA"]);
