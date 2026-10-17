@@ -1,0 +1,134 @@
+import type { ColumnMeasures, Snapshot, SnapshotDetails, SnapshotObject, SnapshotStatus } from "@ystara/shared";
+import type { Queryable } from "./db.js";
+
+/**
+ * Snapshots of pipelines (migration 007; the lifecycle and the GDPR rules are
+ * on Snapshot in @ystara/shared) and each tenant's snapshot salt. The salt
+ * arrives here sealed with MASTER_KEY, as the other secrets do.
+ */
+export type { Snapshot, SnapshotDetails, SnapshotObject, SnapshotStatus };
+
+interface Row {
+  id: string;
+  tenant_id: string;
+  pipeline_id: string;
+  scan_id: string | null;
+  status: SnapshotStatus;
+  requested_at: Date;
+  started_at: Date | null;
+  finished_at: Date | null;
+  error: string | null;
+  pipeline_name: string;
+  measured: number;
+  not_measurable: number;
+  failed: number;
+}
+
+/** A snapshot with how many of its steps were measured, couldn't be, and failed. */
+const SELECT = `select s.*, p.name as pipeline_name,
+    (select count(*)::int from snapshot_objects o where o.snapshot_id = s.id and o.status = 'measured') as measured,
+    (select count(*)::int from snapshot_objects o where o.snapshot_id = s.id and o.status = 'not_measurable') as not_measurable,
+    (select count(*)::int from snapshot_objects o where o.snapshot_id = s.id and o.status = 'failed') as failed
+  from snapshots s join pipelines p on p.id = s.pipeline_id`;
+
+const toSnapshot = (r: Row): Snapshot => ({
+  id: r.id,
+  tenantId: r.tenant_id,
+  pipelineId: r.pipeline_id,
+  pipelineName: r.pipeline_name,
+  scanId: r.scan_id,
+  status: r.status,
+  requestedAt: r.requested_at,
+  startedAt: r.started_at,
+  finishedAt: r.finished_at,
+  error: r.error,
+  counts: { measured: r.measured, notMeasurable: r.not_measurable, failed: r.failed },
+});
+
+export async function createSnapshot(db: Queryable, input: { tenantId: string; pipelineId: string; requestedBy: string | null }): Promise<Snapshot> {
+  const { rows } = await db.query<{ id: string }>("insert into snapshots (tenant_id, pipeline_id, requested_by) values ($1, $2, $3) returning id", [
+    input.tenantId,
+    input.pipelineId,
+    input.requestedBy,
+  ]);
+  return (await getSnapshot(db, rows[0].id))!;
+}
+
+export async function getSnapshot(db: Queryable, id: string): Promise<Snapshot | undefined> {
+  const { rows } = await db.query<Row>(`${SELECT} where s.id = $1`, [id]);
+  return rows[0] && toSnapshot(rows[0]);
+}
+
+/** A pipeline's snapshots, newest first. */
+export async function listSnapshots(db: Queryable, pipelineId: string, limit = 50): Promise<Snapshot[]> {
+  const { rows } = await db.query<Row>(`${SELECT} where s.pipeline_id = $1 order by s.requested_at desc limit $2`, [pipelineId, limit]);
+  return rows.map(toSnapshot);
+}
+
+interface ObjectRow {
+  space: string;
+  technical_name: string;
+  type: SnapshotObject["type"];
+  definition_hash: string | null;
+  status: SnapshotObject["status"];
+  reason: string | null;
+  row_count: string | null;
+  columns: ColumnMeasures[] | null;
+  took_ms: number | null;
+}
+
+/** A snapshot with every step in pipeline order. */
+export async function getSnapshotDetails(db: Queryable, id: string): Promise<SnapshotDetails | undefined> {
+  const snapshot = await getSnapshot(db, id);
+  if (!snapshot) return undefined;
+  const { rows } = await db.query<ObjectRow>("select * from snapshot_objects where snapshot_id = $1 order by position", [id]);
+  const objects = rows.map(
+    (r): SnapshotObject => ({
+      space: r.space,
+      technicalName: r.technical_name,
+      type: r.type,
+      definitionHash: r.definition_hash,
+      status: r.status,
+      reason: r.reason,
+      rows: r.row_count === null ? null : Number(r.row_count),
+      columns: r.columns,
+      tookMs: r.took_ms,
+    }),
+  );
+  return { ...snapshot, objects };
+}
+
+/** The worker takes a queued snapshot: running, with the scan whose steps it measures. False when it is gone or already taken. */
+export async function startSnapshot(db: Queryable, id: string, scanId: string | null): Promise<boolean> {
+  const { rows } = await db.query("update snapshots set status = 'running', started_at = now(), scan_id = $2 where id = $1 and status = 'queued' returning id", [
+    id,
+    scanId,
+  ]);
+  return rows.length > 0;
+}
+
+/** One step's result, in pipeline order. */
+export async function saveSnapshotObject(db: Queryable, snapshotId: string, position: number, o: SnapshotObject): Promise<void> {
+  await db.query(
+    `insert into snapshot_objects (snapshot_id, position, space, technical_name, type, definition_hash, status, reason, row_count, columns, took_ms)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)`,
+    [snapshotId, position, o.space, o.technicalName, o.type, o.definitionHash, o.status, o.reason, o.rows, o.columns && JSON.stringify(o.columns), o.tookMs],
+  );
+}
+
+export async function finishSnapshot(db: Queryable, id: string, result: { status: "succeeded" | "failed"; error?: string }): Promise<void> {
+  await db.query("update snapshots set status = $2, error = $3, finished_at = now() where id = $1", [id, result.status, result.error ?? null]);
+}
+
+/**
+ * The tenant's sealed snapshot salt. Made once (`seal` is called only when
+ * there is none yet) and never replaced: two workers that race both read back
+ * the one that was stored first.
+ */
+export async function snapshotSalt(db: Queryable, tenantId: string, seal: () => string): Promise<string> {
+  const read = async () => (await db.query<{ salt: string }>("select salt from tenant_snapshot_salts where tenant_id = $1", [tenantId])).rows[0]?.salt;
+  const existing = await read();
+  if (existing) return existing;
+  await db.query("insert into tenant_snapshot_salts (tenant_id, salt) values ($1, $2) on conflict (tenant_id) do nothing", [tenantId, seal()]);
+  return (await read())!;
+}

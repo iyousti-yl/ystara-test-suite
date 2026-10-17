@@ -9,6 +9,8 @@ export const JOBS = {
   connectionCheck: "connection-check",
   /** Sign in with a space's database user and list what it can read there (SELECT only). */
   databaseCheck: "database-check",
+  /** Measure the steps of a pipeline with SQL (SELECT only) and store the measures, never rows. */
+  snapshot: "snapshot-capture",
 } as const;
 
 export interface ScanJobData {
@@ -35,3 +37,10 @@ export interface DatabaseCheckJobData {
  * again and again can lock the user, so another try waits for "Check again".
  */
 export const DATABASE_CHECK_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 5 * 60 };
+
+export interface SnapshotJobData {
+  snapshotId: string;
+}
+
+/** A snapshot reads every measurable step of a pipeline once; large views take a while. No retries: a person starts it again. */
+export const SNAPSHOT_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 60 * 60 };

@@ -170,6 +170,73 @@ export interface ObjectDetails {
 }
 
 /**
+ * Snapshots: the measures of a pipeline's steps at one moment, taken with SQL
+ * through each space's database user (phase 2). Never rows: per object its row
+ * count, and per column counts, and min, max and a sum as below.
+ *
+ * GDPR (Issam's choice, 2026-10-17): min and max are stored only as a salted
+ * hash made inside the tenant's database, never as the value: they are often
+ * one person's name, IBAN, salary or birth date. A sum stays plain, except on
+ * an object with fewer than 10 rows, where it could be one person's value and
+ * is hashed too. Equal hashes mean equal values, which is all a comparison
+ * needs. The salt is per tenant and sealed with MASTER_KEY.
+ *
+ * Lifecycle: queued (API) -> running (worker) -> succeeded | failed. Failed
+ * when a measurable step couldn't be measured; what was measured is kept.
+ */
+export type SnapshotStatus = "queued" | "running" | "succeeded" | "failed";
+
+/** One column's measures. A measure its type doesn't have is left out; a hash or sum is null when there is nothing to measure (no non-null value). */
+export interface ColumnMeasures {
+  name: string;
+  /** HANA's DATA_TYPE_NAME, e.g. NVARCHAR, DECIMAL, DATE. */
+  dataType: string;
+  nonNull: number;
+  distinct?: number;
+  /** SHA-256 (hex) of the salt and the smallest value as text. */
+  minHash?: string | null;
+  maxHash?: string | null;
+  /** The sum of a number column, as text, on an object with at least 10 rows. */
+  sum?: string | null;
+  /** On an object with fewer rows: the sum's hash instead. */
+  sumHash?: string | null;
+}
+
+/** One pipeline step in a snapshot. */
+export interface SnapshotObject extends DspObjectRef {
+  /** The definition's hash in the scan the snapshot used, so a comparison can tell a changed definition from changed data. */
+  definitionHash: string | null;
+  /** measured; not measurable (`reason` is the Measurability reason); failed (`reason` is the error). */
+  status: "measured" | "not_measurable" | "failed";
+  reason: string | null;
+  rows: number | null;
+  columns: ColumnMeasures[] | null;
+  /** How long its measuring took. */
+  tookMs: number | null;
+}
+
+export interface Snapshot {
+  id: string;
+  tenantId: string;
+  pipelineId: string;
+  pipelineName: string;
+  /** The scan whose steps were measured: the tenant's latest successful one when the snapshot ran. */
+  scanId: string | null;
+  status: SnapshotStatus;
+  requestedAt: Date;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+  error: string | null;
+  /** How many steps were measured, couldn't be measured, and failed. */
+  counts: { measured: number; notMeasurable: number; failed: number };
+}
+
+/** GET /api/snapshots/:id */
+export interface SnapshotDetails extends Snapshot {
+  objects: SnapshotObject[];
+}
+
+/**
  * Sign-in. A customer account has users, each with one role in it (a user can
  * belong to several accounts). Everyone signs in with email, password and a
  * code from an authenticator app.

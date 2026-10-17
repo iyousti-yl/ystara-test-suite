@@ -8,3 +8,4 @@ export * from "./connections.js";
 export * from "./database-users.js";
 export * from "./scans.js";
 export * from "./pipelines.js";
+export * from "./snapshots.js";

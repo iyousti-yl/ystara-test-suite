@@ -17,6 +17,8 @@ import type {
   Role,
   SavedPipelineResult,
   Scan,
+  Snapshot,
+  SnapshotDetails,
   ScanGraph,
   SpaceDatabaseUser,
   Team,
@@ -44,6 +46,8 @@ export type PipelineDefinitionJson = Json<PipelineDefinition>;
 export type TeamJson = Json<Team>;
 export type ConnectionJson = Json<TenantConnection>;
 export type DatabaseUserJson = Json<SpaceDatabaseUser>;
+export type SnapshotJson = Json<Snapshot>;
+export type SnapshotDetailsJson = Json<SnapshotDetails>;
 
 export class ApiError extends Error {
   constructor(
@@ -338,5 +342,30 @@ export function useDeletePipeline() {
   return useMutation({
     mutationFn: (pipeline: PipelineDefinitionJson) => request<void>("DELETE", `/pipelines/${pipeline.id}`),
     onSuccess: (_done, pipeline) => client.invalidateQueries({ queryKey: ["tenants", pipeline.tenantId, "pipelines"] }),
+  });
+}
+
+// --- Snapshots
+
+/** Refetches every few seconds while one of them is queued or running. */
+export const useSnapshots = (pipelineId: string) =>
+  useQuery({
+    queryKey: ["pipelines", pipelineId, "snapshots"],
+    queryFn: () => request<SnapshotJson[]>("GET", `/pipelines/${pipelineId}/snapshots`),
+    refetchInterval: (q) => pollWhile(q.state.data?.some((s) => active(s.status)) ?? false),
+  });
+
+export const useSnapshot = (id: string) =>
+  useQuery({
+    queryKey: ["snapshots", id],
+    queryFn: () => request<SnapshotDetailsJson>("GET", `/snapshots/${id}`),
+    refetchInterval: (q) => pollWhile(q.state.data ? active(q.state.data.status) : false),
+  });
+
+export function useTakeSnapshot(pipelineId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => request<SnapshotJson>("POST", `/pipelines/${pipelineId}/snapshots`),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["pipelines", pipelineId, "snapshots"] }),
   });
 }

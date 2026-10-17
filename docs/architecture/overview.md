@@ -72,17 +72,19 @@ In place (`packages/db/migrations/`):
 - `object_definitions` (tenant, hash, definition JSONB): each distinct definition once per tenant
 - `pipelines` (tenant, name, output, writer exclusions)
 - `space_database_users` (tenant, space, host, user name, password encrypted with `MASTER_KEY`, status checking/connected/failed, the views and tables it saw at its last check, who changed it): one per space, for snapshots
+- `tenant_snapshot_salts` (tenant, salt encrypted with `MASTER_KEY`): the salt of every snapshot hash of a tenant, made once
+- `snapshots` (tenant, pipeline, the scan whose steps were measured, status queued/running/succeeded/failed, who asked, when, error) → `snapshot_objects` (each step in order: definition hash, measured/not measurable/failed with the reason, row count, per-column measures JSONB, time taken)
 
 Planned:
 
 - a space scope on `memberships` (a role limited to some spaces)
 - `pipeline_steps` if tests need stored step lists
-- `snapshots` (object, metrics JSONB, captured at, run id)
+- snapshot comparisons and the tests built on them
 - `scenarios` (pipeline, YAML text, version) → `fixtures`
 - `runs` → `run_steps` → `assertion_results`
 - `alert_channels`, `audit_log`
 
-Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `packages/shared/src/secrets.ts`: authenticator secrets, tenant client secrets and database user passwords). The key lives alone in the git-ignored file `.master-key`, which Docker Compose passes as a secret to the API and the worker; a hosting platform can set `MASTER_KEY` instead. The API seals a client secret for its tenant (the tenant ID is the additional authenticated data), and a database password for its tenant and space; only the worker opens them, for one job at a time. Rotating the master key re-encrypts rows in a migration.
+Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `packages/shared/src/secrets.ts`: authenticator secrets, tenant client secrets, database user passwords and snapshot salts). The key lives alone in the git-ignored file `.master-key`, which Docker Compose passes as a secret to the API and the worker; a hosting platform can set `MASTER_KEY` instead. The API seals a client secret for its tenant (the tenant ID is the additional authenticated data), a database password for its tenant and space, and the worker seals a tenant's snapshot salt for that tenant; only the worker opens them, for one job at a time. Rotating the master key re-encrypts rows in a migration.
 
 ## Sign-in and accounts (phase 1d)
 
@@ -103,9 +105,11 @@ Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `packages/shared/src/secre
 
 ## Reading a space with SQL (phase 2, in progress)
 
-Snapshot tests measure views with SQL, through a database user of the space (Space Management > Database Access, with read access only). `packages/connector/src/sql.ts` connects with hdb, SAP's open-source JavaScript client (TLS on port 443), and sends only statements that pass `assertSelectOnly` (one SELECT: no semicolon, comment, INTO or row lock; values as `?` parameters). `metricsQuery` measures an object in one pass: the row count and, per column, non-null and distinct counts, min and max for ordered types and a sum for numbers. Only these results are to be stored, never rows; how min and max are stored is Issam's GDPR decision (see the decisions log). `npm run spike:sql` checks a database user on a real tenant.
+Snapshot tests measure views with SQL, through a database user of the space (Space Management > Database Access, with read access only). `packages/connector/src/sql.ts` connects with hdb, SAP's open-source JavaScript client (TLS on port 443), and sends only statements that pass `assertSelectOnly` (one SELECT: no semicolon, comment, INTO or row lock; values as `?` parameters). `metricsQuery` measures an object in one pass: the row count and, per column, non-null and distinct counts, min and max for ordered types and a sum for numbers. Min and max leave the tenant's database only as a salted SHA-256 made there (`HASH_SHA256`), and so does the sum of an object with fewer than 10 rows (Issam's GDPR choice, see the decisions log). Only these results are stored, never rows. `npm run spike:sql` checks a database user on a real tenant.
 
 **Database users on the tenant page (phase 2b).** An admin adds one database user per space (Datasphere names them SPACE#SUFFIX and each reads only its own space, so the space comes from the name): host, user name and password. The host must be `<id>.hana.<region>.hanacloud.ondemand.com` (`hna1`, `hna2`… in place of `hana` on newer tenants), because the worker sends it the password; the API, the worker and `SqlReader.connect` all check it. The password is sealed for that tenant and space and never sent back. The worker's `database-check` job (`checkDatabaseUser` in the connector) signs in once, fails a user with any privilege on the space's schema beyond SELECT, SELECT METADATA and SELECT CDS METADATA, and stores the views and tables it sees there. The tenant page lists each user with its status, what it sees, and why a check failed. Anyone who can scan may check one again. Each pipeline page marks the steps a snapshot can measure, from that list only (`measurability` in `@ystara/shared`), and says for each other step why not: a flow or task chain, no database user for its space yet, not checked, a failed check, or not exposed for consumption (with the hint that a modeler can expose a view).
+
+**Snapshots (phase 2c).** On a saved pipeline, anyone who can run tests clicks **Take snapshot** (the API refuses when no step is measurable). The worker's `snapshot-capture` job (`runSnapshot`) takes the steps from the tenant's latest successful scan, as the pipeline page does, and stores every step in order: its definition hash in that scan, and either its measures, the reason it can't be measured, or the error that stopped it. Each space's user signs in once per snapshot, only for a space with something to measure; `measureObject` reads the object's columns from `sys.view_columns` or `sys.table_columns` and runs `metricsQuery` with the tenant's salt. A failed sign-in fails that space's steps without a second try. The snapshot fails when a measurable step couldn't be measured, or when none could be, and keeps what was measured. The pipeline page lists its snapshots; a snapshot's page shows each measured object's columns (min, max and small sums as the first characters of their hash) and what happened to every step.
 
 **What a database user can read** (Issam's run, 2026-10-17): SELECT on the space's schema, but only the **views exposed for consumption**. No other view and no local table is visible, so of a pipeline usually only its output can be measured. That shapes phases 2 and 3:
 

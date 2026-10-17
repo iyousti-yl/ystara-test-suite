@@ -8,7 +8,7 @@
  * (Apache-2.0, no native build). Datasphere's database takes TLS on port 443.
  */
 import hdb from "hdb";
-import { DATABASE_HOST_HINT, databaseUserProblem, isDatabaseHost } from "@ystara/shared";
+import { DATABASE_HOST_HINT, databaseUserProblem, isDatabaseHost, type ColumnMeasures } from "@ystara/shared";
 import { assertSelectOnly } from "./readonly.js";
 
 export interface DatabaseUser {
@@ -127,40 +127,100 @@ export function quoteIdentifier(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
-/** What a snapshot measures on a column, depending on its type. */
-export type ColumnMetric = "nonNull" | "distinct" | "min" | "max" | "sum";
+/** What a snapshot measures on a column, depending on its type (ColumnMeasures in @ystara/shared). */
+export type ColumnMetric = "nonNull" | "distinct" | "minHash" | "maxHash" | "sum" | "sumHash";
 
 const NUMERIC = new Set(["TINYINT", "SMALLINT", "INTEGER", "BIGINT", "DECIMAL", "SMALLDECIMAL", "REAL", "DOUBLE", "FLOAT"]);
 const ORDERED = new Set([...NUMERIC, "DATE", "TIME", "SECONDDATE", "TIMESTAMP", "VARCHAR", "NVARCHAR", "ALPHANUM", "SHORTTEXT", "CHAR", "NCHAR"]);
 /** Large objects and shapes: HANA can count them but not compare them. */
 const UNCOMPARABLE = new Set(["BLOB", "CLOB", "NCLOB", "TEXT", "BINTEXT", "ST_GEOMETRY", "ST_POINT"]);
 
+/** Below this many rows a sum could be one person's value, so it is hashed like min and max. */
+export const SMALL_OBJECT_ROWS = 10;
+
 /** The metrics for a column of `dataType` (HANA's DATA_TYPE_NAME). */
 export function columnMetrics(dataType: string): ColumnMetric[] {
   const type = dataType.toUpperCase();
   if (UNCOMPARABLE.has(type)) return ["nonNull"];
   const metrics: ColumnMetric[] = ["nonNull", "distinct"];
-  if (ORDERED.has(type)) metrics.push("min", "max");
-  if (NUMERIC.has(type)) metrics.push("sum");
+  if (ORDERED.has(type)) metrics.push("minHash", "maxHash");
+  if (NUMERIC.has(type)) metrics.push("sum", "sumHash");
   return metrics;
 }
 
-const AGGREGATE: Record<ColumnMetric, (column: string) => string> = {
-  nonNull: (c) => `count(${c})`,
-  distinct: (c) => `count(distinct ${c})`,
-  min: (c) => `min(${c})`,
-  max: (c) => `max(${c})`,
-  sum: (c) => `sum(${c})`,
-};
+/**
+ * SQL for one metric of column `c`. Hashes are made in the tenant's database,
+ * so a min, max or small sum never leaves it in clear: SHA-256 of the salt and
+ * the value as text (HASH_SHA256, HEXTOBIN, TO_BINARY and TO_NVARCHAR are
+ * SAP HANA functions). A sum is plain on objects with at least
+ * SMALL_OBJECT_ROWS rows and hashed below that, never both.
+ */
+function aggregate(metric: ColumnMetric, c: string, salt: string): string {
+  const hashed = (value: string) => `hash_sha256(hextobin('${salt}'), to_binary(to_nvarchar(${value})))`;
+  switch (metric) {
+    case "nonNull":
+      return `count(${c})`;
+    case "distinct":
+      return `count(distinct ${c})`;
+    case "minHash":
+      return hashed(`min(${c})`);
+    case "maxHash":
+      return hashed(`max(${c})`);
+    case "sum":
+      return `case when count(*) >= ${SMALL_OBJECT_ROWS} then sum(${c}) end`;
+    case "sumHash":
+      return `case when count(*) < ${SMALL_OBJECT_ROWS} then ${hashed(`sum(${c})`)} end`;
+  }
+}
 
 /**
  * One SELECT that measures a whole view or table in a single pass: its row
  * count, and per column the metrics of its type. Each result is named
- * c<column index>_<metric> (and "rows"), so any column name is safe.
+ * c<column index>_<metric> (and "rows"), so any column name is safe. `salt` is
+ * the tenant's snapshot salt in hex (32 bytes); it is the only text written
+ * into the statement, and only after this check.
  */
-export function metricsQuery(schema: string, object: string, columns: { name: string; dataType: string }[]) {
+export function metricsQuery(schema: string, object: string, columns: { name: string; dataType: string }[], salt: string) {
+  if (!/^[0-9a-f]{64}$/.test(salt)) throw new Error("The snapshot salt must be 32 bytes in lowercase hex");
   const measured = columns.map((c, i) => ({ ...c, index: i, metrics: columnMetrics(c.dataType) }));
   const parts = ['count(*) as "rows"'];
-  for (const c of measured) for (const m of c.metrics) parts.push(`${AGGREGATE[m](quoteIdentifier(c.name))} as "c${c.index}_${m}"`);
+  for (const c of measured) for (const m of c.metrics) parts.push(`${aggregate(m, quoteIdentifier(c.name), salt)} as "c${c.index}_${m}"`);
   return { sql: `select ${parts.join(", ")} from ${quoteIdentifier(schema)}.${quoteIdentifier(object)}`, columns: measured };
+}
+
+/** The measures in the row `metricsQuery` returned: counts as numbers, hashes in hex, sums as text. */
+export function readMeasures(row: Row, query: ReturnType<typeof metricsQuery>): ObjectMeasures {
+  const columns = query.columns.map((c) => {
+    const measures: ColumnMeasures = { name: c.name, dataType: c.dataType, nonNull: 0 };
+    for (const m of c.metrics) {
+      const value = row[`c${c.index}_${m}`];
+      if (m === "nonNull" || m === "distinct") measures[m] = Number(value);
+      else if (m === "sum") measures.sum = value === null || value === undefined ? null : String(value);
+      else measures[m] = value === null || value === undefined ? null : Buffer.isBuffer(value) ? value.toString("hex") : String(value).toLowerCase();
+    }
+    return measures;
+  });
+  return { rows: Number(row.rows), columns };
+}
+
+export interface ObjectMeasures {
+  rows: number;
+  columns: ColumnMeasures[];
+}
+
+/**
+ * Measures one view or table of `space` that the database user sees (its
+ * columns, then all metrics in one pass): SELECTs only, and nothing of the
+ * data comes back but counts, plain sums of objects with enough rows, and hashes.
+ */
+export async function measureObject(sql: SqlReader, space: string, object: { name: string; type: "VIEW" | "TABLE" }, salt: string): Promise<ObjectMeasures> {
+  const [columnsView, nameColumn] = object.type === "VIEW" ? ["sys.view_columns", "view_name"] : ["sys.table_columns", "table_name"];
+  const columns = await sql.select<{ name: string; dataType: string }>(
+    `select column_name as "name", data_type_name as "dataType" from ${columnsView} where schema_name = ? and ${nameColumn} = ? order by position`,
+    [space, object.name],
+  );
+  if (!columns.length) throw new Error(`The database user sees no columns of ${object.name}`);
+  const query = metricsQuery(space, object.name, columns, salt);
+  const [row] = await sql.select(query.sql);
+  return readMeasures(row, query);
 }

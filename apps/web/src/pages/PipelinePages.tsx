@@ -2,11 +2,12 @@ import { useState } from "react";
 import { Button, Dialog, Input, Label, Token, Tokenizer } from "@ui5/webcomponents-react";
 import type { PipelineResult } from "@ystara/shared";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { pipelineQuery, useCan, useDeletePipeline, usePipelineOnScan, useSavedPipeline, useSavePipeline, useScan, useTenant } from "../api";
+import { pipelineQuery, useCan, useDeletePipeline, usePipelineOnScan, useSavedPipeline, useSavePipeline, useScan, useTakeSnapshot, useTenant } from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
 import { PipelineView } from "../lineage/PipelineView";
+import { SnapshotsSection } from "./Snapshots";
 
 /**
  * Trying a pipeline on one scan: /scans/:scanId/pipeline?output=SPACE.NAME&excludeWriter=PATTERN...
@@ -74,19 +75,21 @@ export function PipelineOnScanPage() {
   );
 }
 
-/** A saved pipeline, computed on the tenant's latest successful scan. */
+/** A saved pipeline, computed on the tenant's latest successful scan, and its snapshots. */
 export function SavedPipelinePage() {
   const { pipelineId = "" } = useParams();
   const navigate = useNavigate();
   const can = useCan();
   const result = useSavedPipeline(pipelineId);
   const remove = useDeletePipeline();
+  const takeSnapshot = useTakeSnapshot(pipelineId);
   const definition = result.data?.definition;
   const tenant = useTenant(definition?.tenantId ?? "");
 
   if (result.isPending) return <Loading />;
   if (!result.data || !definition) return <ErrorStrip error={result.error} />;
   const output = `${definition.output.space}.${definition.output.technicalName}`;
+  const measurable = Object.values(result.data.measurement).some((m) => m.measurable);
 
   return (
     <div className="page page-wide">
@@ -105,6 +108,17 @@ export function SavedPipelinePage() {
         }
         actions={
           <>
+            {can("runs.execute") && (
+              <Button
+                design="Emphasized"
+                icon="camera"
+                disabled={!measurable || takeSnapshot.isPending}
+                tooltip={measurable ? "Measure the steps the database users can see" : "No step can be measured with SQL yet: select a step to see why"}
+                onClick={() => takeSnapshot.mutate()}
+              >
+                Take snapshot
+              </Button>
+            )}
             <Button
               icon="chain-link"
               onClick={() => navigate(`/scans/${result.data.scanId}/pipeline?${pipelineQuery(output, definition.excludeWriters)}`)}
@@ -129,8 +143,9 @@ export function SavedPipelinePage() {
         }
       />
       <Exclusions patterns={definition.excludeWriters} />
-      <ErrorStrip error={remove.error} />
+      <ErrorStrip error={remove.error ?? takeSnapshot.error} />
       <PipelineView result={result.data} />
+      <SnapshotsSection pipelineId={definition.id} />
     </div>
   );
 }

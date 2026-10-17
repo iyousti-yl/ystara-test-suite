@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assertSelectOnly, NotSelectError } from "./readonly.js";
-import { checkDatabaseUser, columnMetrics, metricsQuery, quoteIdentifier, SqlReader } from "./sql.js";
+import { checkDatabaseUser, columnMetrics, measureObject, metricsQuery, quoteIdentifier, SqlReader } from "./sql.js";
 
 // A stand-in for hdb that records what reaches the database. `rowsFor` answers each statement; `failWith` fails every call.
 const sent: { sql: string; params?: unknown[] }[] = [];
@@ -86,28 +86,78 @@ describe("quoteIdentifier", () => {
 
 describe("columnMetrics", () => {
   it("measures numbers fully, dates and texts without a sum, and large objects only for nulls", () => {
-    expect(columnMetrics("DECIMAL")).toEqual(["nonNull", "distinct", "min", "max", "sum"]);
-    expect(columnMetrics("date")).toEqual(["nonNull", "distinct", "min", "max"]);
-    expect(columnMetrics("NVARCHAR")).toEqual(["nonNull", "distinct", "min", "max"]);
+    expect(columnMetrics("DECIMAL")).toEqual(["nonNull", "distinct", "minHash", "maxHash", "sum", "sumHash"]);
+    expect(columnMetrics("date")).toEqual(["nonNull", "distinct", "minHash", "maxHash"]);
+    expect(columnMetrics("NVARCHAR")).toEqual(["nonNull", "distinct", "minHash", "maxHash"]);
     expect(columnMetrics("BOOLEAN")).toEqual(["nonNull", "distinct"]);
     expect(columnMetrics("NCLOB")).toEqual(["nonNull"]);
   });
 });
 
+const salt = "ab".repeat(32);
+
 describe("metricsQuery", () => {
-  it("measures a view in one SELECT that passes the read-only guard", () => {
-    const { sql, columns } = metricsQuery("SALES", "ORDERS_SYNTH_V", [
-      { name: "ORDER_ID", dataType: "NVARCHAR" },
-      { name: "AMOUNT", dataType: "DECIMAL" },
-      { name: 'ODD"NAME;--', dataType: "NCLOB" },
-    ]);
+  it("measures a view in one SELECT that passes the read-only guard, with min and max only as salted hashes", () => {
+    const { sql, columns } = metricsQuery(
+      "SALES",
+      "ORDERS_SYNTH_V",
+      [
+        { name: "ORDER_ID", dataType: "NVARCHAR" },
+        { name: "AMOUNT", dataType: "DECIMAL" },
+        { name: 'ODD"NAME;--', dataType: "NCLOB" },
+      ],
+      salt,
+    );
+    const hashed = (value: string) => `hash_sha256(hextobin('${salt}'), to_binary(to_nvarchar(${value})))`;
     expect(sql).toBe(
-      'select count(*) as "rows", count("ORDER_ID") as "c0_nonNull", count(distinct "ORDER_ID") as "c0_distinct", min("ORDER_ID") as "c0_min", max("ORDER_ID") as "c0_max", ' +
-        'count("AMOUNT") as "c1_nonNull", count(distinct "AMOUNT") as "c1_distinct", min("AMOUNT") as "c1_min", max("AMOUNT") as "c1_max", sum("AMOUNT") as "c1_sum", ' +
+      'select count(*) as "rows", ' +
+        `count("ORDER_ID") as "c0_nonNull", count(distinct "ORDER_ID") as "c0_distinct", ${hashed('min("ORDER_ID")')} as "c0_minHash", ${hashed('max("ORDER_ID")')} as "c0_maxHash", ` +
+        `count("AMOUNT") as "c1_nonNull", count(distinct "AMOUNT") as "c1_distinct", ${hashed('min("AMOUNT")')} as "c1_minHash", ${hashed('max("AMOUNT")')} as "c1_maxHash", ` +
+        `case when count(*) >= 10 then sum("AMOUNT") end as "c1_sum", case when count(*) < 10 then ${hashed('sum("AMOUNT")')} end as "c1_sumHash", ` +
         'count("ODD""NAME;--") as "c2_nonNull" from "SALES"."ORDERS_SYNTH_V"',
     );
+    expect(sql).not.toMatch(/\b(min|max)\("[^"]*"\) as/);
     expect(() => assertSelectOnly(sql)).not.toThrow();
-    expect(columns.map((c) => c.metrics.length)).toEqual([4, 5, 1]);
+    expect(columns.map((c) => c.metrics.length)).toEqual([4, 6, 1]);
+  });
+
+  it("writes nothing but a hex salt into the statement", () => {
+    for (const bad of ["", "AB".repeat(32), "ab".repeat(31), `${"ab".repeat(31)}')`]) {
+      expect(() => metricsQuery("SALES", "ORDERS_SYNTH_V", [{ name: "A", dataType: "DATE" }], bad), bad).toThrow("salt");
+    }
+  });
+});
+
+describe("measureObject", () => {
+  const hash = (byte: string) => Buffer.from(byte.repeat(32), "hex");
+
+  it("reads the columns, then every measure in one pass: counts, hashes in hex and sums as text", async () => {
+    rowsFor = (sql) =>
+      sql.includes("view_columns")
+        ? [
+            { name: "ORDER_ID", dataType: "NVARCHAR" },
+            { name: "AMOUNT", dataType: "DECIMAL" },
+          ]
+        : [{ rows: 24, c0_nonNull: 24, c0_distinct: 24, c0_minHash: hash("01"), c0_maxHash: hash("02"), c1_nonNull: 20, c1_distinct: 7, c1_minHash: hash("03"), c1_maxHash: hash("04"), c1_sum: "1234.50", c1_sumHash: null }];
+    const sql = await SqlReader.connect(user);
+    expect(await measureObject(sql, "SALES", { name: "ORDERS_SYNTH_V", type: "VIEW" }, salt)).toEqual({
+      rows: 24,
+      columns: [
+        { name: "ORDER_ID", dataType: "NVARCHAR", nonNull: 24, distinct: 24, minHash: "01".repeat(32), maxHash: "02".repeat(32) },
+        { name: "AMOUNT", dataType: "DECIMAL", nonNull: 20, distinct: 7, minHash: "03".repeat(32), maxHash: "04".repeat(32), sum: "1234.50", sumHash: null },
+      ],
+    });
+    expect(sent.filter((s) => s.sql !== "(dropped)").map((s) => s.params)).toEqual([["SALES", "ORDERS_SYNTH_V"], undefined]);
+  });
+
+  it("reads a table's columns from table_columns, and keeps an empty object's hashes empty", async () => {
+    rowsFor = (sql) =>
+      sql.includes("table_columns") ? [{ name: "DAY", dataType: "DATE" }] : [{ rows: 0, c0_nonNull: 0, c0_distinct: 0, c0_minHash: null, c0_maxHash: null }];
+    const sql = await SqlReader.connect(user);
+    expect(await measureObject(sql, "SALES", { name: "CALENDAR_SYNTH", type: "TABLE" }, salt)).toEqual({
+      rows: 0,
+      columns: [{ name: "DAY", dataType: "DATE", nonNull: 0, distinct: 0, minHash: null, maxHash: null }],
+    });
   });
 });
 

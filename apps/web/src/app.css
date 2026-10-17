@@ -46,6 +46,9 @@ body {
   gap: 1rem;
   margin-top: 0.25rem;
 }
+.page-header-actions {
+  justify-content: flex-end;
+}
 .page-header-subtitle {
   margin-top: 0.25rem;
   color: var(--sapContent_LabelColor);
@@ -89,6 +92,9 @@ section.block > ui5-title {
 }
 .muted {
   color: var(--sapContent_LabelColor);
+}
+.text-negative {
+  color: var(--sapNegativeTextColor);
 }
 .mono {
   font-family: var(--sapFontFamily_Mono, "72Mono", ui-monospace, monospace);
@@ -149,7 +155,9 @@ section.block > ui5-title {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  flex: 1;
+  /* The height left over, but never less than the picture's own minimum: on a short window the page scrolls
+     instead, so the picture never runs over what comes after it (a saved pipeline's snapshots). */
+  flex: 1 0 27rem;
   min-height: 0;
 }
 .pipeline > ui5-segmented-button {

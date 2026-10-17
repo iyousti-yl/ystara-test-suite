@@ -4,7 +4,7 @@
  *   discovery-scan    (phase 1) read spaces of a tenant into a stored lineage graph
  *   connection-check  (phase 1) log in with a tenant's technical client and check it can read its spaces
  *   database-check    (phase 2) sign in with a space's database user and list what it can read there
- *   snapshot.capture  (phase 2) metrics of pipeline objects
+ *   snapshot-capture  (phase 2) measure a pipeline's steps with SQL (counts, hashes, sums; never rows)
  *   snapshot.compare  (phase 2)
  *   scenario.run      (phase 3) read-only simulation of a pipeline on fixtures
  *
@@ -19,12 +19,13 @@ import { fileURLToPath } from "node:url";
 import PgBoss from "pg-boss";
 import { checkDatabaseUser } from "@ystara/connector";
 import { assertYstaraDatabase, connect, databaseUrl } from "@ystara/db";
-import { JOBS, type ConnectionCheckJobData, type DatabaseCheckJobData, type ScanJobData } from "@ystara/shared";
+import { JOBS, type ConnectionCheckJobData, type DatabaseCheckJobData, type ScanJobData, type SnapshotJobData } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 import { masterKeyFromEnv, secretBox } from "@ystara/shared/secrets";
 import { runConnectionCheck } from "./jobs/connection-check.js";
 import { runDatabaseCheck } from "./jobs/database-check.js";
 import { runScan } from "./jobs/scan.js";
+import { runSnapshot } from "./jobs/snapshot.js";
 import { checkSpacesWith, removeStaleFolders, tenantAccess, type LoginOptions } from "./tenant-login.js";
 
 loadLocalEnv(fileURLToPath(new URL("../../../", import.meta.url)));
@@ -54,6 +55,10 @@ await boss.work<ConnectionCheckJobData>(JOBS.connectionCheck, async ([job]) => {
 await boss.work<DatabaseCheckJobData>(JOBS.databaseCheck, async ([job]) => {
   const user = await runDatabaseCheck(db, job.data, secrets, checkDatabaseUser);
   console.log(`[worker] database check of space ${job.data.space} in tenant ${job.data.tenantId}: ${user?.status ?? "gone"}`);
+});
+await boss.work<SnapshotJobData>(JOBS.snapshot, async ([job]) => {
+  const snapshot = await runSnapshot(db, job.data.snapshotId, secrets);
+  console.log(`[worker] snapshot ${job.data.snapshotId}: ${snapshot?.status ?? "gone"}${snapshot?.error ? ` (${snapshot.error})` : ""}`);
 });
 console.log("[worker] started");
 

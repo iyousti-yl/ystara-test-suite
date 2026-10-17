@@ -208,7 +208,7 @@ function toOutput(output: string, spaces: string[]): { space: string; technicalN
  * The pipeline behind `output` in one scan, or undefined when the scan doesn't contain `output`.
  * With, for each step, whether a snapshot can measure it: from what the tenant's database users saw at their last check.
  */
-async function computePipeline(
+export async function computePipeline(
   db: Db,
   scan: { id: string; tenantId: string },
   output: { space: string; technicalName: string },

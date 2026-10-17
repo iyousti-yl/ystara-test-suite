@@ -1,5 +1,5 @@
 import PgBoss from "pg-boss";
-import { CONNECTION_CHECK_QUEUE_OPTIONS, DATABASE_CHECK_QUEUE_OPTIONS, JOBS, SCAN_QUEUE_OPTIONS } from "@ystara/shared";
+import { CONNECTION_CHECK_QUEUE_OPTIONS, DATABASE_CHECK_QUEUE_OPTIONS, JOBS, SCAN_QUEUE_OPTIONS, SNAPSHOT_QUEUE_OPTIONS } from "@ystara/shared";
 
 /**
  * Creates pg-boss's own tables and our job queues. Runs with the migrations,
@@ -12,5 +12,6 @@ export async function prepareQueues(connectionString: string): Promise<void> {
   await boss.createQueue(JOBS.scan, { name: JOBS.scan, ...SCAN_QUEUE_OPTIONS });
   await boss.createQueue(JOBS.connectionCheck, { name: JOBS.connectionCheck, ...CONNECTION_CHECK_QUEUE_OPTIONS });
   await boss.createQueue(JOBS.databaseCheck, { name: JOBS.databaseCheck, ...DATABASE_CHECK_QUEUE_OPTIONS });
+  await boss.createQueue(JOBS.snapshot, { name: JOBS.snapshot, ...SNAPSHOT_QUEUE_OPTIONS });
   await boss.stop({ graceful: false, wait: true });
 }

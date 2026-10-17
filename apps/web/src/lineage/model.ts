@@ -99,3 +99,14 @@ export function whyNotMeasurable(reason: Exclude<Measurability, { measurable: tr
         : `Snapshots can't measure it: the database user of ${space} doesn't see it. Database users only see what is exposed for consumption.`;
   }
 }
+
+/** The same, in a few words for a table of steps. */
+export function notMeasurableLabel(reason: Exclude<Measurability, { measurable: true }>["reason"]): string {
+  return {
+    process: "A flow or task chain: no data of its own",
+    "no-database-user": "No database user for its space",
+    "not-checked": "Its database user isn't checked yet",
+    "check-failed": "Its database user failed its check",
+    "not-visible": "Not exposed for consumption",
+  }[reason];
+}

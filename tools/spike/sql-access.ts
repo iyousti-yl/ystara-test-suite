@@ -34,8 +34,9 @@
  *     sample of each can be read (SELECT TOP 1 1, no data);
  *   - how long one object takes to measure: the row count alone, then all
  *     snapshot metrics in one pass (per column: non-null and distinct counts,
- *     min and max, and a sum for numbers).
+ *     min and max hashed in the database with a salt, and a sum for numbers).
  */
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -195,7 +196,8 @@ try {
         (rows) => `${rows} rows`,
       );
       if (columns?.length) {
-        const query = metricsQuery(space, chosen.name, columns);
+        // A throwaway salt: the spike times the query and prints none of its results.
+        const query = metricsQuery(space, chosen.name, columns, randomBytes(32).toString("hex"));
         const measures = query.columns.reduce((n, c) => n + c.metrics.length, 1);
         await step(`all snapshot metrics of ${chosen.name}`, () => sql.select(query.sql), () => `${measures} measures over ${columns.length} columns in one pass`);
       }

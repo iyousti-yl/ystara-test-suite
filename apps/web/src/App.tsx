@@ -10,6 +10,7 @@ import { PipelineOnScanPage, SavedPipelinePage } from "./pages/PipelinePages";
 import { ResetPage } from "./pages/ResetPage";
 import { ScanPage } from "./pages/ScanPage";
 import { SignInPage } from "./pages/SignInPage";
+import { SnapshotPage } from "./pages/Snapshots";
 import { TenantPage } from "./pages/TenantPage";
 import { TenantsPage } from "./pages/TenantsPage";
 import { UsersPage } from "./pages/UsersPage";
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
       { path: "scans/:scanId", element: <ScanPage /> },
       { path: "scans/:scanId/pipeline", element: <PipelineOnScanPage /> },
       { path: "pipelines/:pipelineId", element: <SavedPipelinePage /> },
+      { path: "snapshots/:snapshotId", element: <SnapshotPage /> },
       { path: "users", element: <UsersPage /> },
       { path: "operator", element: <OperatorPage /> },
       { path: "*", element: <NotFound /> },

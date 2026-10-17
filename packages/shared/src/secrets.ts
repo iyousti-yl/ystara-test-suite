@@ -28,6 +28,9 @@ export const connectionSecretContext = (tenantId: string) => `tenant-connection:
 /** The context the password of a space's database user is sealed and opened with: it opens for that tenant and space only. */
 export const databaseUserSecretContext = (tenantId: string, space: string) => `database-user:${tenantId}:${space}`;
 
+/** The context a tenant's snapshot salt (the secret mixed into every hashed min, max and small sum) is sealed and opened with. */
+export const snapshotSaltContext = (tenantId: string) => `snapshot-salt:${tenantId}`;
+
 const TAG_LENGTH = 16; // bytes; set on both sides, so a shortened tag is refused instead of checked with fewer bits
 
 export function secretBox(key: Buffer): SecretBox {
