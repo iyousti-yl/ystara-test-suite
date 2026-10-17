@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { addedLines, buildMatcher, findIn, longEnough, placeholderHost, refusedFile, type Term } from "./tenant-rules.js";
+import { addedLines, buildMatcher, findIn, longEnough, notTenantNames, placeholderHost, plainWord, refusedFile, type Term } from "./tenant-rules.js";
 
 // Hosts and addresses that the check must find are built from parts, so this
 // file doesn't trip the check itself when it is pushed.
@@ -73,6 +73,33 @@ describe("longEnough", () => {
   });
 });
 
+describe("plainWord", () => {
+  it("is one word of letters, in one case or capitalised", () => {
+    for (const word of ["User", "POSITION", "employee"]) expect(plainWord(word), word).toBe(true);
+  });
+
+  it("is not a name with a digit, an underscore or a capital inside", () => {
+    for (const name of ["USER_V", "Emp2", "SalesOrder", "eMPLOYEE", "SALES-ORDERS", "Employé"]) expect(plainWord(name), name).toBe(false);
+  });
+});
+
+describe("notTenantNames", () => {
+  it("reads a heading's list items up to the next heading", () => {
+    const note = ["# Notes", "Prefixes: `ZX_`", "", "## Not tenant names", "These are generic:", "- `User`", "- Position, Employee", "* `Base`: in every tenant", "", "## Other", "- `ZX_ORDERS`"].join("\n");
+    expect(notTenantNames(note)).toEqual(["User", "Position", "Employee", "Base"]);
+  });
+
+  it("reads one line and the list items right below it", () => {
+    expect(notTenantNames("Not tenant names: `Position`, Employee\n- Unit\n\nPrefixes are `ZX_`.\n- `ZX_ORDERS`")).toEqual(["Position", "Employee", "Unit"]);
+    expect(notTenantNames("not tenant names:\n\n1. `User*`")).toEqual(["User"]);
+  });
+
+  it("takes no words from sentences", () => {
+    expect(notTenantNames("## Not tenant names\nAnything like `ZX_ORDERS` stays a tenant name.\n- user names, as in sign-in")).toEqual([]);
+    expect(notTenantNames("Not tenant names are below.\nSee `ZX_ORDERS`.")).toEqual([]);
+  });
+});
+
 describe("addedLines", () => {
   it("reads +++ as a file header only outside a hunk", () => {
     const diff = [
@@ -111,6 +138,16 @@ describe("findIn", () => {
   it("finds prefixes at the start of a name, ignoring case", () => {
     expect(matches("ZX_ORDERS_V, zx_items")).toEqual(["ZX_ORDERS_V [notes.local.md]", "zx_items [notes.local.md]"]);
     expect(matches("AZX_ORDERS")).toEqual([]);
+  });
+
+  it("marks plain object names, unless a note or scan.local.json also has them in any case", () => {
+    const list: Term[] = [
+      { text: "User", source: "saved scans", kind: "word", plain: true },
+      { text: "Position", source: "saved scans", kind: "word", plain: true },
+      { text: "POSITION", source: "tenant-conventions.local.md", kind: "word" },
+    ];
+    const found = findIn({ where: "x:1", text: "interface User { position: string }" }, buildMatcher(list));
+    expect(found.map((h) => `${h.match} [${h.source}] ${h.plain ? "plain" : "blocks"}`)).toEqual(["User [saved scans] plain", "position [tenant-conventions.local.md] blocks"]);
   });
 
   it("finds real hosts and addresses, not examples", () => {

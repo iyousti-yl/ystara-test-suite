@@ -19,6 +19,10 @@
  * Names are found as whole words and ignoring case (SALES_ORDERS_SYNTH also finds
  * sales_orders_synth). Names of 3 characters are looked for only with a digit or
  * an underscore (A1B, ZX_); plain words of 1 to 3 letters (HR, API) are too generic.
+ * An object name from a scan that is one plain word (User, POSITION) is listed
+ * apart and doesn't block: code uses the same words. In a note or
+ * scan.local.json, the same word blocks. Names in a "Not tenant names" list of
+ * a local note are not looked for at all (see notTenantNames in tenant-rules.ts).
  *
  * Where it looks: lines added on this branch since --base, uncommitted and
  * untracked files, file names, commit messages with their authors and
@@ -41,9 +45,18 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { connect, databaseUrl } from "@ystara/db";
 import { loadLocalEnv } from "@ystara/shared/env";
-import { addedLines, buildMatcher, DRAFTS_FOLDER, EXAMPLE_DOMAIN, findIn, longEnough, mustNeverCommit, refusedFile, type Hit, type Line, type Term } from "./tenant-rules.js";
+import { addedLines, buildMatcher, DRAFTS_FOLDER, EXAMPLE_DOMAIN, findIn, longEnough, mustNeverCommit, notTenantNames, plainWord, refusedFile, type Hit, type Line, type Term } from "./tenant-rules.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+// Output cut off by a closed pipe (`git push 2>&1 | head -30`) is not an error:
+// the exit code, settled before anything is printed, says what was found.
+// Unhandled, the EPIPE would end the check with code 1 whatever it found.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on("error", (e: NodeJS.ErrnoException) => {
+    if (e.code !== "EPIPE") throw e;
+  });
+}
 
 const { values } = parseArgs({ options: { base: { type: "string" }, head: { type: "string" }, file: { type: "string", multiple: true } } });
 
@@ -74,13 +87,16 @@ const pushOnly = values.head !== undefined;
 if (!tryGit("rev-parse", "--verify", "-q", `${head}^{commit}`)) stop(`There is no commit ${head}.`);
 
 const dbNotes: string[] = [];
-const terms = await localTerms();
+const { terms, leftOut } = await localTerms();
 const matcher = buildMatcher(terms);
 const { lines, paths, images, counts } = outgoing();
 
 const hits: Hit[] = [];
 for (const line of lines) hits.push(...findIn(line, matcher));
 const neverCommit = paths.filter(mustNeverCommit);
+// Plain words that are also object names are listed apart and don't block.
+const plain = hits.filter((h) => h.plain);
+const named = hits.filter((h) => !h.plain);
 
 // Split hits into new ones and ones already in the base branch: the exact same
 // text (same case, as a whole word) in one of its files, or, for an author or
@@ -93,23 +109,32 @@ const inBase = (h: Hit) => {
   if (!known.has(h.match)) known.set(h.match, tryGit("grep", "-q", "-w", "-F", "-e", h.match, base, "--", ":(exclude)package-lock.json"));
   return known.get(h.match)!;
 };
-const fresh = hits.filter((h) => !inBase(h));
-const old = hits.filter((h) => inBase(h));
+const fresh = named.filter((h) => !inBase(h));
+const old = named.filter((h) => inBase(h));
+
+// The verdict and the exit code are settled before anything is printed, so
+// output cut off by a closed pipe can't change them.
+const blocked = fresh.length > 0 || neverCommit.length > 0;
+if (blocked) process.exitCode = 1;
 
 const bySource = new Map<string, number>();
 for (const t of terms) bySource.set(t.source, (bySource.get(t.source) ?? 0) + 1);
-console.log(`Looked for ${terms.length} tenant names (${[...bySource].map(([s, n]) => `${n} from ${s}`).join(", ") || "no local tenant content found"}), plus Datasphere hosts and email addresses.`);
+const plainTerms = new Set(terms.filter((t) => matcher.infoOf(t.text).plain).map((t) => t.text.toLowerCase())).size;
+const extras = [plainTerms && `${plainTerms} of them plain words from scans that don't block`, leftOut && `${leftOut} left out by "Not tenant names" in the notes`].filter(Boolean);
+console.log(
+  `Looked for ${terms.length} tenant names (${[...bySource].map(([s, n]) => `${n} from ${s}`).join(", ") || "no local tenant content found"})` +
+    `${extras.length ? `, ${extras.join(", ")}` : ""}, plus Datasphere hosts and email addresses.`,
+);
 for (const note of dbNotes) console.log(note);
 const workingTree = pushOnly ? ` up to ${head}` : `, ${counts.uncommitted} uncommitted, ${counts.untracked} in untracked files`;
 console.log(`Checked: ${counts.branch} lines added since ${base}${workingTree}, ${counts.messages} lines of commit messages, authors and committers, ${counts.extra} in extra files, ${paths.length} file names.\n`);
 
 print(`New hits (block the push): ${fresh.length}`, fresh);
+printPlain(plain);
 print(`Already in ${base} (not new; a generic word, or a leak from before): ${old.length}`, old);
 if (images.length) console.log(`Images added, check them by eye: ${images.join(", ")}\n`);
 if (neverCommit.length) console.log(`Files that must never be committed: ${neverCommit.join(", ")}\n`);
-const blocked = fresh.length > 0 || neverCommit.length > 0;
 console.log(blocked ? "Verdict: BLOCKED" : "Verdict: CLEAN");
-if (blocked) process.exitCode = 1;
 
 // ---
 
@@ -120,10 +145,26 @@ function print(title: string, list: Hit[]) {
   console.log("");
 }
 
-/** Every name this machine knows from a tenant. */
-async function localTerms(): Promise<Term[]> {
+/** One line per plain word, with how often it was found and where first. */
+function printPlain(list: Hit[]) {
+  const words = new Map<string, Hit[]>();
+  for (const h of list) words.set(h.match.toLowerCase(), [...(words.get(h.match.toLowerCase()) ?? []), h]);
+  if (!list.length) return;
+  const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+  console.log(`Plain words that are also object names (don't block; each should be an ordinary word here): ${count(words.size, "word")}, ${count(list.length, "line")}`);
+  for (const found of [...words.values()].slice(0, 20)) {
+    const first = found[0];
+    console.log(`  "${first.match}" [${first.source}] ${count(found.length, "line")}, first at ${first.where}  ${clip(first.text.trim())}`);
+  }
+  if (words.size > 20) console.log(`  ... ${words.size - 20} more words`);
+  console.log("");
+}
+
+/** Every name this machine knows from a tenant, less the "Not tenant names" of the notes. */
+async function localTerms(): Promise<{ terms: Term[]; leftOut: number }> {
   const found: Term[] = [];
-  const add = (text: unknown, source: string, kind?: Term["kind"]) => {
+  // objectName: a scanned object's technical name, which is plain when it is one plain word.
+  const add = (text: unknown, source: string, kind?: Term["kind"], objectName = false) => {
     if (typeof text !== "string") return;
     let t = text.trim();
     let k = kind ?? "word";
@@ -132,7 +173,7 @@ async function localTerms(): Promise<Term[]> {
       k = "prefix";
     }
     if (!longEnough(t, k)) return;
-    found.push({ text: t, source, kind: k });
+    found.push({ text: t, source, kind: k, ...(objectName && k === "word" && plainWord(t) ? { plain: true } : {}) });
   };
 
   // Saved scans.
@@ -143,7 +184,7 @@ async function localTerms(): Promise<Term[]> {
     const graph = JSON.parse(readFileSync(graphFile, "utf8")) as { nodes?: { space?: string; technicalName?: string; businessName?: string }[] };
     for (const n of graph.nodes ?? []) {
       add(n.space, "saved scans");
-      add(n.technicalName?.replace(/[_*]+$/, ""), "saved scans");
+      add(n.technicalName?.replace(/[_*]+$/, ""), "saved scans", undefined, true);
       if (n.businessName && /[\s_\d]/.test(n.businessName)) add(n.businessName, "saved scans", "word");
     }
   }
@@ -155,9 +196,11 @@ async function localTerms(): Promise<Term[]> {
     for (const s of strings(JSON.parse(readFileSync(settings, "utf8")))) for (const part of s.split(".")) add(part.replace(/\?/g, ""), "scan.local.json");
   }
 
-  // Local notes: `names` and NAMES_LIKE_THIS.
+  // Local notes: `names` and NAMES_LIKE_THIS, and their "Not tenant names".
+  const allowed = new Set<string>();
   for (const file of localNotes(root)) {
     const text = readFileSync(file, "utf8");
+    for (const name of notTenantNames(text)) allowed.add(name.toLowerCase());
     // Lower-case words in backticks are commands and file names; tenant names have capitals, digits or underscores.
     for (const [, name] of text.matchAll(/`([A-Za-z0-9][A-Za-z0-9_.*-]*)`/g)) {
       if (!/[A-Z0-9_]/.test(name) || (name.includes(".") && !/^[A-Z0-9_]+\.[A-Z0-9_*]+$/.test(name))) continue;
@@ -169,12 +212,15 @@ async function localTerms(): Promise<Term[]> {
   // The local database, when it runs.
   for (const t of await databaseTerms()) found.push(t);
 
-  // One entry per text and kind.
-  const seen = new Set<string>();
-  return found.filter((t) => {
+  // One entry per text and kind; a name that isn't plain somewhere (a note, scan.local.json) isn't plain.
+  const merged = new Map<string, Term>();
+  for (const t of found) {
     const key = `${t.kind}:${t.text}`;
-    return !seen.has(key) && seen.add(key);
-  });
+    const known = merged.get(key);
+    if (!known || (known.plain && !t.plain)) merged.set(key, t);
+  }
+  const terms = [...merged.values()].filter((t) => !allowed.has(t.text.toLowerCase()));
+  return { terms, leftOut: merged.size - terms.length };
 }
 
 async function databaseTerms(): Promise<Term[]> {
@@ -204,7 +250,8 @@ async function databaseTerms(): Promise<Term[]> {
       return [];
     }
     const terms: Term[] = [];
-    for (const v of [...got.spaces, ...got.names, ...got.businessNames]) if (v && longEnough(v, "word")) terms.push({ text: v, source: "local database", kind: "word" });
+    for (const v of [...got.spaces, ...got.businessNames]) if (v && longEnough(v, "word")) terms.push({ text: v, source: "local database", kind: "word" });
+    for (const v of got.names) if (v && longEnough(v, "word")) terms.push({ text: v, source: "local database", kind: "word", ...(plainWord(v) ? { plain: true } : {}) });
     for (const v of [...got.tenants, ...got.accounts]) if (v && longEnough(v, "word") && !/synthetic/i.test(v)) terms.push({ text: v, source: "local database", kind: "word" });
     for (const v of got.hosts) if (v) terms.push({ text: new URL(v.includes("://") ? v : `https://${v}`).hostname, source: "local database", kind: "text" });
     for (const v of got.emails) if (v && !EXAMPLE_DOMAIN.test(v.split("@")[1] ?? "")) terms.push({ text: v, source: "local database", kind: "text" });
