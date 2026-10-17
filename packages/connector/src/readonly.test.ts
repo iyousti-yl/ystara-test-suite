@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertReadOnly, WriteAttemptError } from "./readonly.js";
+import { assertReadOnly, assertSelectOnly, NotSelectError, WriteAttemptError } from "./readonly.js";
 
 describe("read-only guard", () => {
   it("allows listing and reading objects", () => {
@@ -28,5 +28,38 @@ describe("read-only guard", () => {
     [[]],
   ])("blocks %j", (path) => {
     expect(() => assertReadOnly(path)).toThrow(WriteAttemptError);
+  });
+});
+
+describe("SQL read-only guard", () => {
+  it.each([
+    'select count(*) as "rows" from "SALES"."ORDERS_SYNTH_V"',
+    "  SELECT top 1 1 from DUMMY",
+    'select object_name from sys.objects where schema_name = ? and object_type in (\'TABLE\', \'VIEW\')',
+    'select count(*) from "SALES"."A;B -- C /* D"',
+    "select 'it''s; -- fine' from dummy",
+    'select "INTO", "FOR UPDATE" from "S"."T"',
+  ])("allows %s", (sql) => {
+    expect(() => assertSelectOnly(sql)).not.toThrow();
+  });
+
+  it.each([
+    ["insert into \"S\".\"T\" values (1)", "it doesn't start with SELECT"],
+    ["delete from T", "it doesn't start with SELECT"],
+    ["upsert T values (1) with primary key", "it doesn't start with SELECT"],
+    ["call SYS.SOMETHING()", "it doesn't start with SELECT"],
+    ["with x as (select 1 from dummy) select * from x", "it doesn't start with SELECT"],
+    ["", "it doesn't start with SELECT"],
+    ["select 1 from dummy; delete from T", "a semicolon"],
+    ["select 1 from dummy -- comment", "a comment"],
+    ["select /* comment */ 1 from dummy", "a comment"],
+    ["select a into b from c", "INTO"],
+    ["select * from T for update", "a row lock"],
+    ["select * from T for  share lock", "a row lock"],
+    ['select "unclosed from T; drop table T', "an unclosed quote"],
+    ["select 'unclosed from T", "an unclosed quote"],
+  ])("blocks %s", (sql, reason) => {
+    expect(() => assertSelectOnly(sql)).toThrow(NotSelectError);
+    expect(() => assertSelectOnly(sql)).toThrow(reason);
   });
 });

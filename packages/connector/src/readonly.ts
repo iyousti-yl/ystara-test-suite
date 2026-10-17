@@ -11,6 +11,9 @@
  * which downloads the tenant's list of CLI commands into the CLI's local
  * cache (the object commands only exist after it). It changes nothing in the
  * tenant.
+ *
+ * SQL through a database user of a space goes through `assertSelectOnly`:
+ * one SELECT statement and nothing else.
  */
 
 export const CLI_OBJECT_KINDS = [
@@ -62,4 +65,39 @@ export function assertReadOnly(path: readonly string[]): void {
     (path.length === 2 && path[0] === "spaces" && READ_VERBS.has(path[1])) ||
     (path.length === 3 && path[0] === "config" && path[1] === "cache" && path[2] === "init");
   if (!ok) throw new WriteAttemptError([...path]);
+}
+
+export class NotSelectError extends Error {
+  constructor(reason: string) {
+    super(`Blocked SQL that isn't a single SELECT (${reason}). Ystara is read-only.`);
+    this.name = "NotSelectError";
+  }
+}
+
+/**
+ * Throws unless `sql` is one SELECT statement. Ystara builds every statement
+ * itself, with quoted identifiers and `?` parameters for values, so the rules
+ * can be strict: it starts with SELECT, and has no semicolon (a second
+ * statement), no comment (which could hide one), no INTO (SQLScript writes a
+ * result into a variable or table) and no FOR UPDATE or FOR SHARE (row locks).
+ * The checks run with quoted identifiers and string literals blanked out, so a
+ * name like "A;B" is fine but an unclosed quote is refused.
+ */
+export function assertSelectOnly(sql: string): void {
+  const blanked = sql.replace(/"(?:[^"]|"")*"/g, '""').replace(/'(?:[^']|'')*'/g, "''");
+  const reason =
+    /["']/.test(blanked.replace(/""|''/g, ""))
+      ? "an unclosed quote"
+      : !/^\s*select\b/i.test(blanked)
+        ? "it doesn't start with SELECT"
+        : blanked.includes(";")
+          ? "a semicolon"
+          : /--|\/\*/.test(blanked)
+            ? "a comment"
+            : /\binto\b/i.test(blanked)
+              ? "INTO"
+              : /\bfor\s+(update|share)\b/i.test(blanked)
+                ? "a row lock"
+                : undefined;
+  if (reason) throw new NotSelectError(reason);
 }

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@ystara/shared": "*",
-    "execa": "^9.5.2"
+    "execa": "^9.5.2",
+    "hdb": "^2.30.1"
   }
 }
