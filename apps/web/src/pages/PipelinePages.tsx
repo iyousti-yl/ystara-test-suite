@@ -8,6 +8,7 @@ import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTime } from "../format";
 import { PipelineView } from "../lineage/PipelineView";
 import { useInTenant } from "../tenantScope";
+import { ScheduleSection } from "./Schedule";
 import { SnapshotsSection } from "./Snapshots";
 
 /**
@@ -108,7 +109,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
         title={definition.name}
         subtitle={
           <span className="facts">
-            <span className="mono">{output}</span>
+            <span className="mono wrap-anywhere">{output}</span>
             <span>Computed on the latest successful scan</span>
             <Summary result={result.data} />
           </span>
@@ -173,6 +174,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
               No snapshot can be taken yet. {whyNot}
             </MessageStrip>
           )}
+          <ScheduleSection pipelineId={definition.id} whyNot={measurable ? undefined : (whyNot ?? "No step can be measured with SQL yet")} />
           <SnapshotsSection pipelineId={definition.id} canTake={measurable} />
         </>
       )}

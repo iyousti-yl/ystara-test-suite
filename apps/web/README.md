@@ -28,7 +28,7 @@ The app only ever calls `/api` on its own origin and loads nothing from other se
 | `/scans/:id` | A scan's status and warnings, and its objects; likely outputs first | `src/pages/ScanPage.tsx` |
 | `/scans/:id/pipeline?output=SPACE.NAME&excludeWriter=...` | The pipeline behind one object on that scan; exclude writers, save it | `src/pages/PipelinePages.tsx` |
 | `/pipelines/:id` | A saved pipeline, on the tenant's latest successful scan: the Lineage tab (the picture or the steps in order), Take snapshot | `src/pages/PipelinePages.tsx` |
-| `/pipelines/:id/snapshots` | Its Snapshots tab: the snapshots, and Compare | `src/pages/PipelinePages.tsx`, `src/pages/Snapshots.tsx` |
+| `/pipelines/:id/snapshots` | Its Snapshots tab: the schedule, the snapshots, and Compare | `src/pages/PipelinePages.tsx`, `src/pages/Schedule.tsx`, `src/pages/Snapshots.tsx` |
 | `/pipelines/:id/compare?from=&to=` | Two snapshots compared, the latest two by default | `src/pages/ComparePage.tsx` |
 | `/snapshots/:id` | One snapshot: the measures of each step | `src/pages/Snapshots.tsx` |
 

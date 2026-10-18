@@ -11,6 +11,8 @@ export const JOBS = {
   databaseCheck: "database-check",
   /** Measure the steps of a pipeline with SQL (SELECT only) and store the measures, never rows. */
   snapshot: "snapshot-capture",
+  /** Queue the snapshots whose pipeline schedule has come (every minute). */
+  scheduleTick: "snapshot-schedule-tick",
 } as const;
 
 export interface ScanJobData {
@@ -44,3 +46,11 @@ export interface SnapshotJobData {
 
 /** A snapshot reads every measurable step of a pipeline once; large views take a while. No retries: a person starts it again. */
 export const SNAPSHOT_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 60 * 60 };
+
+/**
+ * Once a minute (pg-boss's own cron): take a snapshot of every pipeline whose
+ * schedule has come. No data. A tick that fails is not retried, and one left
+ * waiting more than 5 minutes is dropped: the next tick finds the same
+ * schedules still due.
+ */
+export const SCHEDULE_TICK_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 5 * 60, retentionMinutes: 5 };

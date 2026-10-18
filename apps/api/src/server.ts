@@ -166,7 +166,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const url = databaseUrl();
   const db = connect(url);
   await assertYstaraDatabase(db); // before pg-boss creates its own tables in someone else's database
-  const boss = new PgBoss(url);
+  // The API only sends jobs: the once-a-minute schedule tick is sent by the workers, so none piles up while no worker runs.
+  const boss = new PgBoss({ connectionString: url, schedule: false });
   boss.on("error", (err) => console.error("[api] queue error", err));
   await boss.start(); // queues are created by `npm run db:migrate`
 

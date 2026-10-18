@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createAccount, getSnapshotDetails, listPipelines, listTenants, type Db } from "@ystara/db";
+import { createAccount, getSchedule, getSnapshotDetails, listPipelines, listTenants, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import { compareSnapshots } from "@ystara/shared";
 import { DEMO_COLUMNS, DEMO_NAMES, DEMO_SPACE, DEMO_TENANT, loadDemo } from "./demo.js";
@@ -29,7 +29,11 @@ describe("the demo tenant", () => {
     const { tenant, pipeline, snapshots } = await loadDemo(db, accountId);
     expect(tenant).toMatchObject({ name: DEMO_TENANT, host: null });
     expect(pipeline.output).toEqual({ space: DEMO_SPACE, technicalName: DEMO_NAMES.output });
-    expect(snapshots.map((s) => s.status)).toEqual(["succeeded", "succeeded"]);
+    expect(snapshots.map((s) => [s.status, s.scheduled])).toEqual([
+      ["succeeded", false],
+      ["succeeded", true],
+    ]);
+    expect(await getSchedule(db, pipeline.id)).toMatchObject({ cron: "30 7 * * 1-5", timeZone: "Europe/Brussels" });
 
     const [before, after] = await Promise.all(snapshots.map((s) => getSnapshotDetails(db, s.id)));
     expect(before!.objects.map((o) => o.technicalName)).toEqual(

@@ -1,7 +1,27 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { createSnapshot, getPipeline, getSnapshotDetails, getTenant, latestSucceededScan, listSnapshots, type Db } from "@ystara/db";
-import { compareSnapshots, JOBS, whyNothingMeasurable, type SnapshotComparison, type SnapshotJobData } from "@ystara/shared";
+import {
+  createSnapshot,
+  deleteSchedule,
+  getPipeline,
+  getSchedule,
+  getSnapshotDetails,
+  getTenant,
+  latestSucceededScan,
+  listSnapshots,
+  setSchedule,
+  type Db,
+} from "@ystara/db";
+import {
+  checkSchedule,
+  compareSnapshots,
+  JOBS,
+  whyNothingMeasurable,
+  type PipelineDefinition,
+  type SnapshotComparison,
+  type SnapshotJobData,
+  type Tenant,
+} from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
 import type { JobQueue } from "../server.js";
 import { computePipeline } from "./discovery.js";
@@ -12,8 +32,13 @@ import { computePipeline } from "./discovery.js";
  * database users can see. Reading them, and comparing two of them, needs
  * "runs.read" (every role). As everywhere, another account's pipeline or
  * snapshot answers 404.
+ *
+ * A pipeline can also have a schedule (a cron line in a time zone, checked by
+ * checkSchedule in @ystara/shared): the worker then takes its snapshots on its
+ * own. Setting or removing one needs "runs.execute", like taking a snapshot.
  */
 const id = z.object({ id: z.string().uuid() });
+const ScheduleBody = z.object({ cron: z.string().max(200), timeZone: z.string().max(100) });
 const ComparePair = z
   .object({ from: z.string().uuid().optional(), to: z.string().uuid().optional() })
   .refine((q) => (q.from === undefined) === (q.to === undefined), "Give both from and to, or neither for the latest two snapshots");
@@ -28,6 +53,16 @@ export function snapshotRoutes(db: Db, queue: JobQueue) {
   }
   const ownPipeline = async (req: FastifyRequest, pipelineId: string) => (await ownPipelineAndTenant(req, pipelineId))?.pipeline;
 
+  /** Why no snapshot of the pipeline could measure anything today, or undefined when at least one step can be measured. */
+  async function whyNoSnapshot({ pipeline, tenant }: { pipeline: PipelineDefinition; tenant: Tenant }): Promise<string | undefined> {
+    const scan = await latestSucceededScan(db, pipeline.tenantId);
+    if (!scan) return "This tenant has no successful scan yet";
+    const computed = await computePipeline(db, scan, pipeline.output, pipeline.excludeWriters);
+    if (!computed) return `${pipeline.output.space}.${pipeline.output.technicalName} is not in the latest scan`;
+    if (!Object.values(computed.measurement).some((m) => m.measurable)) return whyNothingMeasurable(computed.pipeline.steps, computed.measurement, tenant.host !== null);
+    return undefined;
+  }
+
   return async (app: FastifyInstance) => {
     app.get("/pipelines/:id/snapshots", { config: { access: "runs.read" } }, async (req, reply) => {
       const pipeline = await ownPipeline(req, id.parse(req.params).id);
@@ -39,17 +74,40 @@ export function snapshotRoutes(db: Db, queue: JobQueue) {
     app.post("/pipelines/:id/snapshots", { config: { access: "runs.execute" } }, async (req, reply) => {
       const own = await ownPipelineAndTenant(req, id.parse(req.params).id);
       if (!own) return reply.code(404).send({ error: "Pipeline not found" });
-      const { pipeline, tenant } = own;
-      const scan = await latestSucceededScan(db, pipeline.tenantId);
-      if (!scan) return reply.code(409).send({ error: "This tenant has no successful scan yet" });
-      const computed = await computePipeline(db, scan, pipeline.output, pipeline.excludeWriters);
-      if (!computed) return reply.code(409).send({ error: `${pipeline.output.space}.${pipeline.output.technicalName} is not in the latest scan` });
-      if (!Object.values(computed.measurement).some((m) => m.measurable)) {
-        return reply.code(409).send({ error: whyNothingMeasurable(computed.pipeline.steps, computed.measurement, tenant.host !== null) });
-      }
+      const { pipeline } = own;
+      const why = await whyNoSnapshot(own);
+      if (why) return reply.code(409).send({ error: why });
       const snapshot = await createSnapshot(db, { tenantId: pipeline.tenantId, pipelineId: pipeline.id, requestedBy: signedIn(req).userId });
       await queue.send(JOBS.snapshot, { snapshotId: snapshot.id } satisfies SnapshotJobData);
       return reply.code(202).send(snapshot);
+    });
+
+    // The pipeline's schedule, or null when its snapshots are only taken by hand.
+    app.get("/pipelines/:id/schedule", { config: { access: "runs.read" } }, async (req, reply) => {
+      const pipeline = await ownPipeline(req, id.parse(req.params).id);
+      if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
+      return { schedule: (await getSchedule(db, pipeline.id)) ?? null };
+    });
+
+    // Set or replace the schedule. Refused when the cron line doesn't make a schedule (400, saying why),
+    // and, like taking a snapshot, when no step can be measured (409).
+    app.put("/pipelines/:id/schedule", { config: { access: "runs.execute" } }, async (req, reply) => {
+      const own = await ownPipelineAndTenant(req, id.parse(req.params).id);
+      if (!own) return reply.code(404).send({ error: "Pipeline not found" });
+      const body = ScheduleBody.parse(req.body);
+      const check = checkSchedule(body.cron, body.timeZone);
+      if (!check.ok) return reply.code(400).send({ error: check.error });
+      const why = await whyNoSnapshot(own);
+      if (why) return reply.code(409).send({ error: why });
+      const schedule = await setSchedule(db, { pipelineId: own.pipeline.id, cron: check.cron, timeZone: body.timeZone, nextRunAt: check.next[0], updatedBy: signedIn(req).userId });
+      return { schedule };
+    });
+
+    app.delete("/pipelines/:id/schedule", { config: { access: "runs.execute" } }, async (req, reply) => {
+      const pipeline = await ownPipeline(req, id.parse(req.params).id);
+      if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
+      await deleteSchedule(db, pipeline.id);
+      return reply.code(204).send();
     });
 
     // Two stored snapshots of the pipeline compared (compareSnapshots in @ystara/shared): read-only, no tenant call.

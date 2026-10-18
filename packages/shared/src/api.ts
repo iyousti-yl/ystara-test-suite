@@ -229,6 +229,8 @@ export interface Snapshot {
   /** The scan whose steps were measured: the tenant's latest successful one when the snapshot ran. */
   scanId: string | null;
   status: SnapshotStatus;
+  /** Taken by the pipeline's schedule rather than by a person. */
+  scheduled: boolean;
   requestedAt: Date;
   startedAt: Date | null;
   finishedAt: Date | null;

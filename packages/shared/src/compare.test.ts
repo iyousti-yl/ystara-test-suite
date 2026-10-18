@@ -10,6 +10,7 @@ const snapshot = (id: string, objects: SnapshotObject[]): SnapshotDetails => ({
   pipelineName: "Synthetic",
   scanId: null,
   status: "succeeded",
+  scheduled: false,
   requestedAt: new Date(0),
   startedAt: null,
   finishedAt: null,

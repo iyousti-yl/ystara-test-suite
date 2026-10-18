@@ -6,8 +6,10 @@ import {
   createScan,
   createSnapshot,
   createTenant,
+  deletePipeline,
   finishSnapshot,
   getDatabaseUserLogin,
+  getSchedule,
   recordDatabaseCheck,
   saveScanResult,
   saveSnapshotObject,
@@ -48,7 +50,8 @@ afterAll(async () => {
   await db.close();
 });
 
-const call = (method: "GET" | "POST", url: string, as: TestUser) => app.inject({ method, url: `/api${url}`, headers: { cookie: as.cookie } });
+const call = (method: "GET" | "POST" | "PUT" | "DELETE", url: string, as: TestUser, payload?: object) =>
+  app.inject({ method, url: `/api${url}`, headers: { cookie: as.cookie }, payload });
 
 /** A scanned tenant with a saved pipeline for V_OUT; with `visible`, a checked database user of S that sees those objects. */
 async function pipelineOf(name: string, visible?: string[]) {
@@ -185,5 +188,62 @@ describe("comparing two snapshots", () => {
     expect((await compare(`?from=${done.id}&to=not-an-id`)).statusCode).toBe(400);
     expect((await compare(`?from=${done.id}&to=${elsewhere.id}`)).statusCode).toBe(404);
     expect((await compare(`?from=${done.id}&to=${done.id}`, stranger)).statusCode).toBe(404);
+  });
+});
+
+describe("schedules", () => {
+  const weekdays = { cron: "30  7 * * 1-5", timeZone: "Europe/Brussels" };
+
+  it("are set and removed by those who run tests, read by everyone, with the next run worked out", async () => {
+    const pipeline = await pipelineOf("Scheduled", ["V_OUT"]);
+    const url = `/pipelines/${pipeline.id}/schedule`;
+    expect((await call("GET", url, viewer)).json()).toEqual({ schedule: null });
+    expect((await call("PUT", url, viewer, weekdays)).statusCode).toBe(403);
+
+    const res = await call("PUT", url, coordinator, weekdays);
+    expect(res.statusCode).toBe(200);
+    const { schedule } = res.json();
+    expect(schedule).toMatchObject({ pipelineId: pipeline.id, cron: "30 7 * * 1-5", timeZone: "Europe/Brussels", updatedBy: coordinator.userId });
+    const next = new Date(schedule.nextRunAt);
+    expect(next.getTime()).toBeGreaterThan(Date.now());
+    expect(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Brussels", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(next)).toBe("07:30");
+    expect((await call("GET", url, viewer)).json().schedule).toMatchObject({ cron: "30 7 * * 1-5" });
+
+    // Replaced, then removed.
+    expect((await call("PUT", url, admin, { cron: "0 6 * * *", timeZone: "UTC" })).json().schedule).toMatchObject({ cron: "0 6 * * *", timeZone: "UTC", updatedBy: admin.userId });
+    expect((await call("DELETE", url, viewer)).statusCode).toBe(403);
+    expect((await call("DELETE", url, coordinator)).statusCode).toBe(204);
+    expect((await call("GET", url, viewer)).json()).toEqual({ schedule: null });
+  });
+
+  it("refuse a cron line that isn't a schedule, runs too close together, and a pipeline nothing can be measured in", async () => {
+    const pipeline = await pipelineOf("Badly scheduled", ["V_OUT"]);
+    const put = (body: object) => call("PUT", `/pipelines/${pipeline.id}/schedule`, admin, body);
+    expect((await put({ cron: "30 7 * *", timeZone: "Europe/Brussels" })).json().error).toMatch(/^A schedule has five fields/);
+    expect((await put({ cron: "*/5 * * * *", timeZone: "Europe/Brussels" })).json().error).toMatch(/^Runs must be at least 15 minutes apart/);
+    expect((await put({ cron: "30 7 * * *", timeZone: "Europe/Nowhere" })).json().error).toMatch(/is not a time zone/);
+    expect((await put({ cron: "30 7 * * *" })).statusCode).toBe(400);
+
+    const unmeasurable = await pipelineOf("Nothing to measure");
+    const res = await call("PUT", `/pipelines/${unmeasurable.id}/schedule`, admin, weekdays);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/^There is no database user for space S yet/);
+  });
+
+  it("are another account's business: 404", async () => {
+    const pipeline = await pipelineOf("Privately scheduled", ["V_OUT"]);
+    const url = `/pipelines/${pipeline.id}/schedule`;
+    await call("PUT", url, admin, weekdays);
+    expect((await call("GET", url, stranger)).statusCode).toBe(404);
+    expect((await call("PUT", url, stranger, weekdays)).statusCode).toBe(404);
+    expect((await call("DELETE", url, stranger)).statusCode).toBe(404);
+    expect((await call("GET", url, admin)).json().schedule).toMatchObject({ cron: "30 7 * * 1-5" });
+  });
+
+  it("go with their pipeline", async () => {
+    const pipeline = await pipelineOf("Deleted with its schedule", ["V_OUT"]);
+    await call("PUT", `/pipelines/${pipeline.id}/schedule`, admin, weekdays);
+    await deletePipeline(db, pipeline.id);
+    expect(await getSchedule(db, pipeline.id)).toBeUndefined();
   });
 });

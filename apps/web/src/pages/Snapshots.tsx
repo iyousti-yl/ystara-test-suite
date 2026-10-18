@@ -1,7 +1,7 @@
 import { Button, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Title } from "@ui5/webcomponents-react";
 import type { ColumnMeasures, SnapshotObject } from "@ystara/shared";
 import { useNavigate, useParams } from "react-router";
-import { useSnapshot, useSnapshots, type SnapshotJson } from "../api";
+import { useSchedule, useSnapshot, useSnapshots, type SnapshotJson } from "../api";
 import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
@@ -11,12 +11,13 @@ import { typeLabel } from "../objectTypes";
 import { useInTenant } from "../tenantScope";
 
 /**
- * A saved pipeline's snapshots, newest first; refreshed while one is taken. `canTake`: a step is measurable.
+ * A saved pipeline's snapshots, newest first; refreshed while one is taken, and every minute while
+ * the pipeline has a schedule. `canTake`: a step is measurable.
  * Compare opens the latest two successful ones side by side; other pairs are picked there.
  */
 export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; canTake: boolean }) {
   const navigate = useNavigate();
-  const snapshots = useSnapshots(pipelineId);
+  const snapshots = useSnapshots(pipelineId, !!useSchedule(pipelineId).data);
   const succeeded = (snapshots.data ?? []).filter((s) => s.status === "succeeded").length;
   const time = formatDateTimesApart((snapshots.data ?? []).map((s) => s.finishedAt ?? s.requestedAt));
   return (
@@ -40,12 +41,13 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
         onRowClick={(e) => navigate(`/snapshots/${e.detail.row.rowKey}`)}
         headerRow={
           <TableHeaderRow>
-            <TableHeaderCell minWidth="11rem" importance={1}>
+            <TableHeaderCell minWidth="13rem" importance={1}>
               Taken
             </TableHeaderCell>
             <TableHeaderCell minWidth="8rem" importance={1}>
               Status
             </TableHeaderCell>
+            <TableHeaderCell minWidth="7rem">How</TableHeaderCell>
             <TableHeaderCell minWidth="6rem" horizontalAlign="End">
               Measured
             </TableHeaderCell>
@@ -64,6 +66,7 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
             <TableCell>
               <ScanStatusTag status={s.status} />
             </TableCell>
+            <TableCell>{s.scheduled ? "Scheduled" : "By hand"}</TableCell>
             <TableCell horizontalAlign="End">{s.counts.measured}</TableCell>
             <TableCell horizontalAlign="End">{s.counts.notMeasurable}</TableCell>
             <TableCell horizontalAlign="End">{s.counts.failed || "–"}</TableCell>
@@ -102,6 +105,7 @@ export function SnapshotPage() {
           <span className="facts">
             <ScanStatusTag status={s.status} />
             <Counts snapshot={s} />
+            <span>{s.scheduled ? "Taken by the schedule" : "Taken by hand"}</span>
           </span>
         }
       />

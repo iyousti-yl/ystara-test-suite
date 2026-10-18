@@ -11,10 +11,11 @@ import {
   getSnapshot,
   saveScanResult,
   saveSnapshotObject,
+  setSchedule,
   startSnapshot,
   type Db,
 } from "@ystara/db";
-import { refKey, type ColumnMeasures, type PipelineDefinition, type Scan, type Snapshot, type Tenant } from "@ystara/shared";
+import { nextRun, refKey, type ColumnMeasures, type PipelineDefinition, type Scan, type Snapshot, type Tenant } from "@ystara/shared";
 
 /**
  * A synthetic tenant for looking at the web app without a real one: a scan
@@ -32,7 +33,9 @@ import { refKey, type ColumnMeasures, type PipelineDefinition, type Scan, type S
  *         --> V_DEMO_DELIVERED_SHIPMENTS_BY_ROUTE_SEGMENT_OUTPUT
  *
  * The second snapshot has more rows, a changed sum and an added column, so the
- * comparison has something in each of its sections.
+ * comparison has something in each of its sections. It is marked as taken by
+ * the pipeline's schedule (weekdays at 07:30, Brussels time), which the worker
+ * never runs: the tenant has no database (see schedule-tick.ts).
  */
 /** "Synthetic" in the name keeps the tenant-content check from taking it for a real tenant's, as it does with the demo's object names. */
 export const DEMO_TENANT = "Synthetic demo";
@@ -220,7 +223,7 @@ export async function loadDemo(db: Db, accountId: string): Promise<{ tenant: Ten
 
     const snapshots: Snapshot[] = [];
     for (const version of [1, 2] as const) {
-      const snapshot = await createSnapshot(db, { tenantId: tenant.id, pipelineId: pipeline.id, requestedBy: null });
+      const snapshot = await createSnapshot(db, { tenantId: tenant.id, pipelineId: pipeline.id, requestedBy: null, scheduled: version === 2 });
       await startSnapshot(db, snapshot.id, scan.id);
       for (const [position, step] of steps.entries()) {
         const measured = measures(step.technicalName, version);
@@ -239,6 +242,8 @@ export async function loadDemo(db: Db, accountId: string): Promise<{ tenant: Ten
       await finishSnapshot(db, snapshot.id, { status: "succeeded" });
       snapshots.push((await getSnapshot(db, snapshot.id))!);
     }
+    const [cron, timeZone] = ["30 7 * * 1-5", "Europe/Brussels"];
+    await setSchedule(db, { pipelineId: pipeline.id, cron, timeZone, nextRunAt: nextRun(cron, timeZone, new Date()), updatedBy: null });
     return { tenant, scan, pipeline, snapshots };
   } catch (e) {
     await deleteTenant(db, tenant.id);

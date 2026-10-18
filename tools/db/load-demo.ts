@@ -42,7 +42,7 @@ try {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(1);
   });
-  console.log(`Added the demo tenant "${tenant.name}" to account "${account.name}", with a scan, a pipeline and two snapshots.`);
+  console.log(`Added the demo tenant "${tenant.name}" to account "${account.name}", with a scan, a scheduled pipeline and two snapshots.`);
   console.log(`Open it in the web app: http://127.0.0.1:${process.env.YSTARA_API_PORT ?? 4000}/pipelines/${pipeline.id}/snapshots`);
 } finally {
   await db.close();

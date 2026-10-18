@@ -5,6 +5,7 @@
  *   connection-check  (phase 1) log in with a tenant's technical client and check it can read its spaces
  *   database-check    (phase 2) sign in with a space's database user and list what it can read there
  *   snapshot-capture  (phase 2) measure a pipeline's steps with SQL (counts, hashes, sums; never rows)
+ *   snapshot-schedule-tick (phase 2) every minute: queue the snapshots whose pipeline schedule has come
  *   snapshot.compare  (phase 2)
  *   scenario.run      (phase 3) read-only simulation of a pipeline on fixtures
  *
@@ -25,6 +26,7 @@ import { masterKeyFromEnv, secretBox } from "@ystara/shared/secrets";
 import { runConnectionCheck } from "./jobs/connection-check.js";
 import { runDatabaseCheck } from "./jobs/database-check.js";
 import { runScan } from "./jobs/scan.js";
+import { runScheduleTick } from "./jobs/schedule-tick.js";
 import { runSnapshot } from "./jobs/snapshot.js";
 import { checkSpacesWith, removeStaleFolders, tenantAccess, type LoginOptions } from "./tenant-login.js";
 
@@ -59,6 +61,15 @@ await boss.work<DatabaseCheckJobData>(JOBS.databaseCheck, async ([job]) => {
 await boss.work<SnapshotJobData>(JOBS.snapshot, async ([job]) => {
   const snapshot = await runSnapshot(db, job.data.snapshotId, secrets);
   console.log(`[worker] snapshot ${job.data.snapshotId}: ${snapshot?.status ?? "gone"}${snapshot?.error ? ` (${snapshot.error})` : ""}`);
+});
+// pg-boss's own cron sends one tick a minute, whichever worker sends it; the tick reads our schedules (pipeline_schedules).
+await boss.schedule(JOBS.scheduleTick, "* * * * *");
+await boss.work(JOBS.scheduleTick, async () => {
+  const { queued, skipped } = await runScheduleTick(db, new Date(), async (snapshotId, tx) => {
+    // On the tick's transaction: the job exists only if the snapshot and the schedule's next run are saved too.
+    await boss.send(JOBS.snapshot, { snapshotId } satisfies SnapshotJobData, { db: { executeSql: (text, values) => tx.query(text, values) } });
+  });
+  if (queued || skipped) console.log(`[worker] schedules: ${queued} snapshot(s) queued, ${skipped} skipped (the previous one unfinished, or a tenant without a database)`);
 });
 console.log("[worker] started");
 

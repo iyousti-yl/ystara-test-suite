@@ -14,6 +14,7 @@ interface Row {
   pipeline_id: string;
   scan_id: string | null;
   status: SnapshotStatus;
+  scheduled: boolean;
   requested_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
@@ -38,6 +39,7 @@ const toSnapshot = (r: Row): Snapshot => ({
   pipelineName: r.pipeline_name,
   scanId: r.scan_id,
   status: r.status,
+  scheduled: r.scheduled,
   requestedAt: r.requested_at,
   startedAt: r.started_at,
   finishedAt: r.finished_at,
@@ -45,12 +47,16 @@ const toSnapshot = (r: Row): Snapshot => ({
   counts: { measured: r.measured, notMeasurable: r.not_measurable, failed: r.failed },
 });
 
-export async function createSnapshot(db: Queryable, input: { tenantId: string; pipelineId: string; requestedBy: string | null }): Promise<Snapshot> {
-  const { rows } = await db.query<{ id: string }>("insert into snapshots (tenant_id, pipeline_id, requested_by) values ($1, $2, $3) returning id", [
-    input.tenantId,
-    input.pipelineId,
-    input.requestedBy,
-  ]);
+/** A queued snapshot, asked for by a person (`requestedBy`) or by the pipeline's schedule (`scheduled`). */
+/** `requestedAt`: the schedule tick's own clock, so a tick and the snapshots it queued agree on the time. Otherwise the database's. */
+export async function createSnapshot(
+  db: Queryable,
+  input: { tenantId: string; pipelineId: string; requestedBy: string | null; scheduled?: boolean; requestedAt?: Date },
+): Promise<Snapshot> {
+  const { rows } = await db.query<{ id: string }>(
+    "insert into snapshots (tenant_id, pipeline_id, requested_by, scheduled, requested_at) values ($1, $2, $3, $4, coalesce($5, now())) returning id",
+    [input.tenantId, input.pipelineId, input.requestedBy, input.scheduled ?? false, input.requestedAt ?? null],
+  );
   return (await getSnapshot(db, rows[0].id))!;
 }
 
@@ -96,6 +102,12 @@ export async function getSnapshotDetails(db: Queryable, id: string): Promise<Sna
     }),
   );
   return { ...snapshot, objects };
+}
+
+/** Whether a snapshot of the pipeline asked for since `since` is still queued or running. Older ones are taken as stuck. */
+export async function hasUnfinishedSnapshot(db: Queryable, pipelineId: string, since: Date): Promise<boolean> {
+  const { rows } = await db.query("select 1 from snapshots where pipeline_id = $1 and status in ('queued', 'running') and requested_at > $2 limit 1", [pipelineId, since]);
+  return rows.length > 0;
 }
 
 /** The worker takes a queued snapshot: running, with the scan whose steps it measures. False when it is gone or already taken. */

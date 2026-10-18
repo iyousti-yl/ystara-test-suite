@@ -260,6 +260,23 @@ ui5-table-cell.mono,
   font-size: var(--sapFontSmallSize);
 }
 
+/* --- Snapshot schedules */
+
+.schedule-summary {
+  margin: 0.25rem 0;
+  overflow-wrap: anywhere;
+}
+.schedule-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin-bottom: 0.25rem;
+}
+.schedule-runs {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}
+
 /* --- Comparing two snapshots */
 
 .section-toolbar {

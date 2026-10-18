@@ -110,6 +110,8 @@ function ObjectList({ scanId, graph }: { scanId: string; graph: ScanGraph }) {
       (!term || r.technicalName.toLowerCase().includes(term) || r.businessName?.toLowerCase().includes(term)),
   );
   const presentTypes = OBJECT_TYPES.filter((t) => rows.some((r) => r.type === t));
+  // A scan whose objects have no business name (a tenant that doesn't use them) gets no empty column.
+  const businessNames = rows.some((r) => r.businessName);
 
   return (
     <section className="block">
@@ -150,7 +152,7 @@ function ObjectList({ scanId, graph }: { scanId: string; graph: ScanGraph }) {
             <TableHeaderCell minWidth={monoColumnWidth(rows.map((r) => r.technicalName), 14)} importance={2}>
               Technical name
             </TableHeaderCell>
-            <TableHeaderCell minWidth="12rem">Business name</TableHeaderCell>
+            {businessNames && <TableHeaderCell minWidth="12rem">Business name</TableHeaderCell>}
             <TableHeaderCell minWidth="9rem" importance={1}>
               Type
             </TableHeaderCell>
@@ -167,7 +169,7 @@ function ObjectList({ scanId, graph }: { scanId: string; graph: ScanGraph }) {
         {shown.map((r) => (
           <TableRow key={r.key} rowKey={r.key} interactive>
             <TableCell className="mono">{r.technicalName}</TableCell>
-            <TableCell>{r.businessName ?? ""}</TableCell>
+            {businessNames && <TableCell>{r.businessName || "–"}</TableCell>}
             <TableCell>
               <span className="type-dot" style={{ background: typeColor(r.type) }} />
               {typeLabel(r.type)}

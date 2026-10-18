@@ -13,6 +13,7 @@ import type {
   Permission,
   PipelineDefinition,
   PipelineResult,
+  PipelineSchedule,
   ResetOffer,
   Role,
   SavedPipelineResult,
@@ -50,6 +51,7 @@ export type DatabaseUserJson = Json<SpaceDatabaseUser>;
 export type SnapshotJson = Json<Snapshot>;
 export type SnapshotDetailsJson = Json<SnapshotDetails>;
 export type SnapshotComparisonJson = Json<SnapshotComparison>;
+export type ScheduleJson = Json<PipelineSchedule>;
 
 export class ApiError extends Error {
   constructor(
@@ -373,12 +375,15 @@ export function useDeletePipeline() {
 
 // --- Snapshots
 
-/** Refetches every few seconds while one of them is queued or running. */
-export const useSnapshots = (pipelineId: string) =>
+/**
+ * Refetches every few seconds while one of them is queued or running, and
+ * every minute while the pipeline has a schedule, so a scheduled one shows up.
+ */
+export const useSnapshots = (pipelineId: string, scheduled = false) =>
   useQuery({
     queryKey: ["pipelines", pipelineId, "snapshots"],
     queryFn: () => request<SnapshotJson[]>("GET", `/pipelines/${pipelineId}/snapshots`),
-    refetchInterval: (q) => pollWhile(q.state.data?.some((s) => active(s.status)) ?? false),
+    refetchInterval: (q) => pollWhile(q.state.data?.some((s) => active(s.status)) ?? false) || (scheduled ? 60_000 : false),
   });
 
 export const useSnapshot = (id: string) =>
@@ -388,7 +393,6 @@ export const useSnapshot = (id: string) =>
     refetchInterval: (q) => pollWhile(q.state.data ? active(q.state.data.status) : false),
   });
 
-/** Two snapshots of the pipeline compared, the earlier one first; without a pair, the latest two that succeeded. */
 /** Two snapshots compared: the pair given, or else the latest two successful ones. `enabled`: false while it is known there aren't two. */
 export const useComparison = (pipelineId: string, pair: { from: string; to: string } | undefined, enabled: boolean) =>
   useQuery({
@@ -404,5 +408,34 @@ export function useTakeSnapshot(pipelineId: string) {
   return useMutation({
     mutationFn: () => request<SnapshotJson>("POST", `/pipelines/${pipelineId}/snapshots`),
     onSuccess: () => client.invalidateQueries({ queryKey: ["pipelines", pipelineId, "snapshots"] }),
+  });
+}
+
+// --- Schedules
+
+const scheduleKey = (pipelineId: string) => ["pipelines", pipelineId, "schedule"];
+
+/** The pipeline's schedule, or null. Refetched every minute while there is one, as its next run moves on. */
+export const useSchedule = (pipelineId: string) =>
+  useQuery({
+    queryKey: scheduleKey(pipelineId),
+    queryFn: async () => (await request<{ schedule: ScheduleJson | null }>("GET", `/pipelines/${pipelineId}/schedule`)).schedule,
+    refetchInterval: (q) => (q.state.data ? 60_000 : false),
+  });
+
+export function useSetSchedule(pipelineId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { cron: string; timeZone: string }) =>
+      (await request<{ schedule: ScheduleJson }>("PUT", `/pipelines/${pipelineId}/schedule`, input)).schedule,
+    onSuccess: (schedule) => client.setQueryData(scheduleKey(pipelineId), schedule),
+  });
+}
+
+export function useRemoveSchedule(pipelineId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => request<void>("DELETE", `/pipelines/${pipelineId}/schedule`),
+    onSuccess: () => client.setQueryData(scheduleKey(pipelineId), null),
   });
 }
