@@ -2,13 +2,14 @@ import { useMemo, useState } from "react";
 import { Label, MessageStrip, Option, Panel, Select, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Title } from "@ui5/webcomponents-react";
 import { refKey, type ColumnComparison, type StepNotCompared, type StepState, type Verdict } from "@ystara/shared";
 import { useParams, useSearchParams } from "react-router";
-import { useComparison, useSavedPipeline, useSnapshots, useTenant, type SnapshotComparisonJson, type SnapshotJson } from "../api";
+import { useComparison, useSavedPipeline, useSnapshots, type SnapshotComparisonJson, type SnapshotJson } from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTimesApart, formatDifference, formatExact, formatNumber } from "../format";
 import { LineageGraph } from "../lineage/LineageGraph";
 import { lineageModel, MARK_LABEL, notMeasurableLabel, stepMarks } from "../lineage/model";
 import { typeLabel } from "../objectTypes";
+import { useInTenant } from "../tenantScope";
 import { useDarkMode } from "../theme";
 
 /**
@@ -31,7 +32,7 @@ export function ComparePage() {
   const tooFew = !pair && snapshots.data !== undefined && succeeded < 2;
   const comparison = useComparison(pipelineId, pair, pair !== undefined || (snapshots.data !== undefined && !tooFew));
   const definition = saved.data?.definition;
-  const tenant = useTenant(definition?.tenantId ?? "");
+  useInTenant(definition?.tenantId);
 
   if (saved.isPending) return <Loading />;
   if (!saved.data || !definition) return <ErrorStrip error={saved.error} />;
@@ -44,9 +45,8 @@ export function ComparePage() {
     <div className="page">
       <PageHeader
         crumbs={[
-          { label: "Tenants", to: "/" },
-          { label: tenant.data?.name ?? "Tenant", to: `/tenants/${definition.tenantId}` },
-          { label: definition.name, to: `/pipelines/${pipelineId}` },
+          { label: "Pipelines", to: `/tenants/${definition.tenantId}/pipelines` },
+          { label: definition.name, to: `/pipelines/${pipelineId}/snapshots` },
         ]}
         title="Compare snapshots"
         subtitle={<span className="mono">{`${definition.output.space}.${definition.output.technicalName}`}</span>}

@@ -6,7 +6,7 @@ import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
 
-/** Home: every tenant, and adding one by its Datasphere URL (then its page opens the Connect wizard). */
+/** Tenants: every tenant of the account, and adding one by its Datasphere URL (then its Connect wizard opens). Opening one picks it. */
 export function TenantsPage() {
   const tenants = useTenants();
   const can = useCan();
@@ -32,25 +32,30 @@ export function TenantsPage() {
       ) : (
         <Table
           noDataText="No tenants yet. Add one, or load a saved scan with `npm run db:import`."
+          overflowMode="Popin"
           onRowClick={(e) => navigate(`/tenants/${e.detail.row.rowKey}`)}
           headerRow={
             <TableHeaderRow>
-              <TableHeaderCell>Name</TableHeaderCell>
-              <TableHeaderCell>Datasphere URL</TableHeaderCell>
-              <TableHeaderCell>Added</TableHeaderCell>
+              <TableHeaderCell minWidth="10rem" importance={1}>
+                Name
+              </TableHeaderCell>
+              <TableHeaderCell minWidth="14rem" importance={1}>
+                Datasphere URL
+              </TableHeaderCell>
+              <TableHeaderCell minWidth="10rem">Added</TableHeaderCell>
             </TableHeaderRow>
           }
         >
           {tenants.data?.map((t) => (
             <TableRow key={t.id} rowKey={t.id} interactive>
               <TableCell>{t.name}</TableCell>
-              <TableCell>{t.host ?? <span className="muted">None: imported scans only</span>}</TableCell>
+              <TableCell className="wrap-anywhere">{t.host ?? <span className="muted">None: imported scans only</span>}</TableCell>
               <TableCell>{formatDateTime(t.createdAt)}</TableCell>
             </TableRow>
           ))}
         </Table>
       )}
-      {adding && <AddTenantDialog onClose={() => setAdding(false)} onAdded={(id) => navigate(`/tenants/${id}?connect=1`)} />}
+      {adding && <AddTenantDialog onClose={() => setAdding(false)} onAdded={(id) => navigate(`/tenants/${id}/connection?connect=1`)} />}
     </div>
   );
 }

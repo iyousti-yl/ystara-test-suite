@@ -80,10 +80,10 @@ describe("why a pipeline can't be snapshotted", () => {
 
   it("says first what an admin can fix, naming the spaces", () => {
     expect(why(no("no-database-user"), no("no-database-user"))).toBe(
-      "There is no database user for spaces SALES and FINANCE yet. An admin adds one under Database users for snapshots on the tenant page.",
+      "There is no database user for spaces SALES and FINANCE yet. An admin adds one under Connection › Database users.",
     );
     expect(why(no("not-visible"), no("no-database-user"))).toMatch(/^There is no database user for space FINANCE yet/);
-    expect(why(no("check-failed"), no("not-visible"))).toBe("The database user of space SALES failed its last check. The tenant page says why.");
+    expect(why(no("check-failed"), no("not-visible"))).toBe("The database user of space SALES failed its last check. Connection › Database users says why.");
     expect(why(no("not-visible"), no("not-checked"))).toMatch(/^The database user of space FINANCE hasn't been checked yet/);
     expect(why(no("not-visible"), no("not-visible"))).toMatch(/none is exposed for consumption/);
   });

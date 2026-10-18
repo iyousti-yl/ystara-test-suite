@@ -40,7 +40,7 @@ describe("one port for the API and the web app", () => {
   });
 
   it("serves the web app, and its pages as index.html so links and reloads work", async () => {
-    for (const url of ["/", "/tenants/00000000-0000-4000-8000-000000000000", "/scans/x/pipeline?output=S.V"]) {
+    for (const url of ["/", "/tenants", "/tenants/00000000-0000-4000-8000-000000000000/discovery", "/scans/x/pipeline?output=S.V"]) {
       const res = await withWeb.inject({ url, headers: html });
       expect(res.statusCode, url).toBe(200);
       expect(res.body).toContain("<title>Ystara</title>");

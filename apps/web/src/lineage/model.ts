@@ -90,11 +90,11 @@ export function whyNotMeasurable(reason: Exclude<Measurability, { measurable: tr
     case "process":
       return "A flow or task chain holds no data of its own: snapshots measure the tables and views around it.";
     case "no-database-user":
-      return `Snapshots can't measure it yet: space ${space} has no database user. An admin adds one on the tenant page.`;
+      return `Snapshots can't measure it yet: space ${space} has no database user. An admin adds one under Connection › Database users.`;
     case "not-checked":
       return `Snapshots can measure it once the database user of ${space} has been checked.`;
     case "check-failed":
-      return `Snapshots can't measure it: the database user of ${space} failed its last check (see the tenant page).`;
+      return `Snapshots can't measure it: the database user of ${space} failed its last check (see Connection › Database users).`;
     case "not-visible":
       return ref.type === "sql_view" || ref.type === "graphical_view"
         ? `Snapshots can't measure it: it isn't exposed for consumption, so the database user of ${space} doesn't see it. A Datasphere modeler can switch on Expose for Consumption in its properties. Ystara never changes the tenant.`

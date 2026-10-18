@@ -7,7 +7,7 @@ import { openSecret } from "../tenant-login.js";
  * The connection check job, after an admin enters or changes a tenant's
  * technical client or its spaces, or someone asks to check again: log in with
  * the client and try to list the objects of each space the admin named (read
- * only). The tenant page shows each space's result, and scans may use only
+ * only). The Technical client page shows each space's result, and scans may use only
  * the readable ones.
  *
  * Connected when at least one space can be read. If the client or its spaces

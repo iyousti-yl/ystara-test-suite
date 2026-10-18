@@ -1,6 +1,6 @@
 /**
  * The only addresses Ystara sends anything to: a Datasphere tenant (the worker
- * sends it a bearer token, and the tenant page shows what came back) and SAP's
+ * sends it a bearer token, and the Technical client page shows what came back) and SAP's
  * sign-in service for the tenant's technical client (the worker sends it the
  * client's secret). A typo or a hostile URL must point neither at another
  * server: an IP address, a host inside the company network, or an app on SAP's

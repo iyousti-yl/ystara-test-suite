@@ -1,22 +1,29 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label, MessageStrip, Panel, Title } from "@ui5/webcomponents-react";
+import { Button, Dialog, Input, Label, MessageStrip, Panel } from "@ui5/webcomponents-react";
 import { DATABASE_HOST_HINT, databaseUserProblem, databaseUserSpace, isDatabaseHost } from "@ystara/shared";
-import { useCan, useCheckDatabaseUser, useDatabaseUsers, useRemoveDatabaseUser, useSetDatabaseUser, type DatabaseUserJson, type TenantJson } from "../api";
+import { useCan, useCheckDatabaseUser, useDatabaseUsers, useRemoveDatabaseUser, useSetDatabaseUser, type DatabaseUserJson } from "../api";
 import { ConnectionStatusTag, ErrorStrip, Loading } from "../components/Feedback";
+import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
+import { useAddressTenant } from "../tenantScope";
 
 /**
- * The database users snapshots read each space with: one per space, with read
- * access only. Admins add, change and remove them; anyone who can scan may
- * check one again. The worker checks each one at once, and this section
- * refreshes until the verdict is in (SpaceDatabaseUser in packages/shared/src/api.ts).
+ * Connection › Database users: the users snapshots read each space with, one
+ * per space, with read access only. Admins add, change and remove them; anyone
+ * who can scan may check one again. The worker checks each one at once, and
+ * this page refreshes until the verdict is in (SpaceDatabaseUser in packages/shared/src/api.ts).
  */
-export function DatabaseUsersSection({ tenant }: { tenant: TenantJson }) {
+export function DatabaseUsersPage() {
+  const { tenantId, tenant } = useAddressTenant();
   const can = useCan();
-  const users = useDatabaseUsers(tenant.id);
-  const check = useCheckDatabaseUser(tenant.id);
-  const remove = useRemoveDatabaseUser(tenant.id);
+  const users = useDatabaseUsers(tenantId);
+  const check = useCheckDatabaseUser(tenantId);
+  const remove = useRemoveDatabaseUser(tenantId);
   const [editing, setEditing] = useState<DatabaseUserJson | "new">();
+
+  if (tenant.isPending) return <Loading />;
+  if (!tenant.data) return <ErrorStrip error={tenant.error} />;
+  const host = tenant.data.host;
 
   const confirmRemove = (u: DatabaseUserJson) => {
     if (window.confirm(`Remove the database user ${u.user}? Snapshots of ${u.space} stop until an admin adds one again. The user in Datasphere stays as it is.`)) {
@@ -25,14 +32,28 @@ export function DatabaseUsersSection({ tenant }: { tenant: TenantJson }) {
   };
 
   return (
-    <section className="block">
-      <Title level="H4">Database users for snapshots</Title>
-      <p className="muted">
-        Snapshots measure the data of a space with SQL, through a database user of that space with read access only. Such a user sees only the views
-        exposed for consumption, so those are the steps a snapshot can measure.
-      </p>
+    <div className="page">
+      <PageHeader
+        title="Database users"
+        subtitle="Snapshots measure the data of a space with SQL, through a database user of that space with read access only."
+        actions={
+          host &&
+          can("tenant.connect") && (
+            <Button design={users.data?.length === 0 ? "Emphasized" : "Default"} icon="add" disabled={users.isPending} onClick={() => setEditing("new")}>
+              Add database user
+            </Button>
+          )
+        }
+      />
+      {host ? (
+        <p className="muted page-intro">Such a user sees only the views exposed for consumption, so those are the steps a snapshot can measure.</p>
+      ) : (
+        <MessageStrip design="Information" hideCloseButton>
+          This tenant has no Datasphere URL: it only has imported scans, so there is no database to read.
+        </MessageStrip>
+      )}
       <ErrorStrip error={users.error ?? check.error ?? remove.error} />
-      {users.isPending ? (
+      {!host ? null : users.isPending ? (
         <Loading />
       ) : users.data?.length === 0 ? (
         <MessageStrip design="Information" hideCloseButton className="block">
@@ -41,7 +62,7 @@ export function DatabaseUsersSection({ tenant }: { tenant: TenantJson }) {
             : "No database user yet. An admin adds one for each space whose views snapshots should measure."}
         </MessageStrip>
       ) : (
-        <ul className="space-results">
+        <ul className="item-list">
           {users.data?.map((u) => (
             <li key={u.space}>
               <div className="facts connection-row">
@@ -84,23 +105,16 @@ export function DatabaseUsersSection({ tenant }: { tenant: TenantJson }) {
           ))}
         </ul>
       )}
-      {can("tenant.connect") && !users.isPending && (
-        <div className="page-header-actions connection-row">
-          <Button icon="add" onClick={() => setEditing("new")}>
-            Add database user
-          </Button>
-        </div>
-      )}
       {editing && (
         <DatabaseUserDialog
-          tenantId={tenant.id}
+          tenantId={tenantId}
           current={editing === "new" ? null : editing}
           // The tenant has one database host: start from the one its other users have.
           suggestedHost={users.data?.[0]?.host ?? ""}
           onClose={() => setEditing(undefined)}
         />
       )}
-    </section>
+    </div>
   );
 }
 

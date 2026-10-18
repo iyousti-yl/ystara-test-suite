@@ -1,27 +1,32 @@
-import { useState } from "react";
-import { Avatar, ShellBar, ShellBarBranding, ShellBarItem, Text, UserMenu, UserMenuAccount, UserMenuItem } from "@ui5/webcomponents-react";
-import type { Me } from "@ystara/shared";
+import { useEffect } from "react";
 import { createBrowserRouter, isRouteErrorResponse, Navigate, Outlet, useLocation, useNavigate, useRouteError } from "react-router";
-import { isUnauthorized, useMe, useSignOut, useSwitchAccount } from "./api";
+import { isUnauthorized, useMe, useTenants } from "./api";
+import { AppFrame } from "./components/AppFrame";
 import { ErrorStrip, Loading } from "./components/Feedback";
 import { ComparePage } from "./pages/ComparePage";
+import { DiscoveryPage } from "./pages/DiscoveryPage";
 import { InvitePage } from "./pages/InvitePage";
 import { OperatorPage } from "./pages/OperatorPage";
 import { PipelineOnScanPage, SavedPipelinePage } from "./pages/PipelinePages";
+import { PipelinesPage } from "./pages/PipelinesPage";
 import { ResetPage } from "./pages/ResetPage";
 import { ScanPage } from "./pages/ScanPage";
 import { SignInPage } from "./pages/SignInPage";
 import { SnapshotPage } from "./pages/Snapshots";
-import { TenantPage } from "./pages/TenantPage";
+import { DatabaseUsersPage } from "./pages/DatabaseUsers";
+import { TechnicalClientPage } from "./pages/TenantConnection";
+import { TenantHomePage } from "./pages/TenantHomePage";
 import { TenantsPage } from "./pages/TenantsPage";
 import { UsersPage } from "./pages/UsersPage";
-import { ROLE_LABEL } from "./roles";
+import { TenantScopeProvider, useTenantScope } from "./tenantScope";
 
 /**
  * The pages and their URLs. Every page can be opened by its link: the API
  * answers these paths with index.html and the router picks the page.
  * Everything under Layout needs a signed-in user; sign-in, invitation and
- * reset links work without one.
+ * reset links work without one. The tenant apps live under /tenants/:tenantId,
+ * so a link opens on its tenant; scans, pipelines and snapshots keep their own
+ * addresses and pick their tenant themselves.
  */
 export const router = createBrowserRouter([
   { path: "/sign-in", element: <SignInPage /> },
@@ -32,11 +37,17 @@ export const router = createBrowserRouter([
     element: <Layout />,
     errorElement: <Layout error />,
     children: [
-      { index: true, element: <TenantsPage /> },
-      { path: "tenants/:tenantId", element: <TenantPage /> },
+      { index: true, element: <StartPage /> },
+      { path: "tenants", element: <TenantsPage /> },
+      { path: "tenants/:tenantId", element: <TenantHomePage /> },
+      { path: "tenants/:tenantId/discovery", element: <DiscoveryPage /> },
+      { path: "tenants/:tenantId/pipelines", element: <PipelinesPage /> },
+      { path: "tenants/:tenantId/connection", element: <TechnicalClientPage /> },
+      { path: "tenants/:tenantId/database-users", element: <DatabaseUsersPage /> },
       { path: "scans/:scanId", element: <ScanPage /> },
       { path: "scans/:scanId/pipeline", element: <PipelineOnScanPage /> },
-      { path: "pipelines/:pipelineId", element: <SavedPipelinePage /> },
+      { path: "pipelines/:pipelineId", element: <SavedPipelinePage tab="lineage" /> },
+      { path: "pipelines/:pipelineId/snapshots", element: <SavedPipelinePage tab="snapshots" /> },
       { path: "pipelines/:pipelineId/compare", element: <ComparePage /> },
       { path: "snapshots/:snapshotId", element: <SnapshotPage /> },
       { path: "users", element: <UsersPage /> },
@@ -55,85 +66,27 @@ function Layout({ error }: { error?: boolean }) {
   if (!me.data) return <ErrorStrip error={me.error} />;
 
   return (
-    <div className="app">
-      <Shell me={me.data} />
-      <main className="app-main">{error ? <RouteError /> : <Outlet />}</main>
-    </div>
+    // Keyed by account: switching accounts starts again from that account's remembered tenant.
+    <TenantScopeProvider key={me.data.account.id} accountId={me.data.account.id}>
+      <AppFrame me={me.data}>{error ? <RouteError /> : <Outlet />}</AppFrame>
+    </TenantScopeProvider>
   );
 }
 
-/** The bar on top: the product, the account worked in, the admin and operator pages for those who may, and the user menu. */
-function Shell({ me }: { me: Me }) {
+/** "/": the tenant picked last in this browser, or the first one; Tenants when the account has none yet. */
+function StartPage() {
+  const tenants = useTenants();
+  const { tenantId } = useTenantScope();
   const navigate = useNavigate();
-  const signOut = useSignOut();
-  const switchAccount = useSwitchAccount();
-  // The avatar the user menu opens from, while it is open.
-  const [menuFor, setMenuFor] = useState<HTMLElement>();
-  const isAdmin = me.permissions.includes("users.manage");
 
-  return (
-    <>
-      <ShellBar
-        branding={
-          <ShellBarBranding
-            href="/"
-            onClick={(e) => {
-              e.preventDefault();
-              navigate("/");
-            }}
-          >
-            Ystara Test Suite
-          </ShellBarBranding>
-        }
-        content={<Text className="shell-account">{me.account.name}</Text>}
-        profile={<Avatar initials={initials(me.user.email)} accessibleName={`${me.user.email}, ${me.account.name}`} />}
-        onProfileClick={(e) => setMenuFor(e.detail.targetRef)}
-      >
-        {isAdmin && <ShellBarItem icon="group" text="Users and roles" onClick={() => navigate("/users")} />}
-        {me.operator && <ShellBarItem icon="action-settings" text="Operator" onClick={() => navigate("/operator")} />}
-      </ShellBar>
-      <UserMenu
-        open={menuFor !== undefined}
-        opener={menuFor}
-        showOtherAccounts={me.accounts.length > 1}
-        onClose={() => setMenuFor(undefined)}
-        onSignOutClick={() => signOut.mutate(undefined, { onSettled: () => navigate("/sign-in", { replace: true }) })}
-        onChangeAccount={(e) => {
-          const accountId = e.detail.selectedAccount.dataset.accountId;
-          if (accountId && accountId !== me.account.id) switchAccount.mutate(accountId, { onSuccess: () => navigate("/") });
-        }}
-        onItemClick={(e) => {
-          if (e.detail.item.dataset.to) navigate(e.detail.item.dataset.to);
-        }}
-        // The account worked in first; the others are listed under "Other accounts".
-        accounts={[...me.accounts].sort((a, b) => Number(b.id === me.account.id) - Number(a.id === me.account.id)).map((a) => (
-          <UserMenuAccount
-            key={a.id}
-            data-account-id={a.id}
-            titleText={a.name}
-            subtitleText={me.user.email}
-            description={ROLE_LABEL[a.role]}
-            avatarInitials={initials(me.user.email)}
-            selected={a.id === me.account.id}
-          />
-        ))}
-      >
-        {isAdmin && <UserMenuItem icon="group" text="Users and roles" data-to="/users" />}
-        {me.operator && <UserMenuItem icon="action-settings" text="Operator" data-to="/operator" />}
-      </UserMenu>
-    </>
-  );
+  useEffect(() => {
+    if (!tenants.data) return;
+    const start = tenants.data.find((t) => t.id === tenantId) ?? tenants.data[0];
+    navigate(start ? `/tenants/${start.id}` : "/tenants", { replace: true });
+  }, [tenants.data, tenantId, navigate]);
+
+  return tenants.error ? <ErrorStrip error={tenants.error} /> : <Loading />;
 }
-
-/** "AB" for ab.cd@..., "A" for a@... */
-const initials = (email: string) =>
-  email
-    .split("@")[0]
-    .split(/[._-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0].toUpperCase())
-    .join("");
 
 function RouteError() {
   const error = useRouteError();

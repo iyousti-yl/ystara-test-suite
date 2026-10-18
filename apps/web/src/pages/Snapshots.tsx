@@ -1,12 +1,13 @@
 import { Button, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Title } from "@ui5/webcomponents-react";
 import type { ColumnMeasures, SnapshotObject } from "@ystara/shared";
 import { useNavigate, useParams } from "react-router";
-import { useSnapshot, useSnapshots, useTenant, type SnapshotJson } from "../api";
+import { useSnapshot, useSnapshots, type SnapshotJson } from "../api";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
-import { formatDateTime, formatDateTimesApart, formatNumber } from "../format";
+import { counted, formatDateTime, formatDateTimesApart, formatNumber } from "../format";
 import { notMeasurableLabel } from "../lineage/model";
 import { typeLabel } from "../objectTypes";
+import { useInTenant } from "../tenantScope";
 
 /**
  * A saved pipeline's snapshots, newest first; refreshed while one is taken. `canTake`: a step is measurable.
@@ -20,7 +21,7 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
   return (
     <section className="block">
       <div className="list-toolbar section-toolbar">
-        <Title level="H4">Snapshots</Title>
+        <Title level="H4">{snapshots.data ? counted(snapshots.data.length, "snapshot") : "Snapshots"}</Title>
         <Button
           icon="compare"
           disabled={succeeded < 2}
@@ -81,7 +82,7 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
 export function SnapshotPage() {
   const { snapshotId = "" } = useParams();
   const snapshot = useSnapshot(snapshotId);
-  const tenant = useTenant(snapshot.data?.tenantId ?? "");
+  useInTenant(snapshot.data?.tenantId);
 
   if (snapshot.isPending) return <Loading />;
   if (!snapshot.data) return <ErrorStrip error={snapshot.error} />;
@@ -92,9 +93,8 @@ export function SnapshotPage() {
     <div className="page">
       <PageHeader
         crumbs={[
-          { label: "Tenants", to: "/" },
-          { label: tenant.data?.name ?? "Tenant", to: `/tenants/${s.tenantId}` },
-          { label: s.pipelineName, to: `/pipelines/${s.pipelineId}` },
+          { label: "Pipelines", to: `/tenants/${s.tenantId}/pipelines` },
+          { label: s.pipelineName, to: `/pipelines/${s.pipelineId}/snapshots` },
         ]}
         title={`Snapshot of ${formatDateTime(s.finishedAt ?? s.requestedAt)}`}
         subtitle={

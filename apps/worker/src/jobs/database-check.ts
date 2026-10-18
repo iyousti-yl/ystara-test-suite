@@ -41,6 +41,6 @@ export function openPassword(secrets: SecretBox, sealed: string, tenantId: strin
   try {
     return secrets.open(sealed, databaseUserSecretContext(tenantId, space));
   } catch {
-    throw new Error("The stored password can't be opened for this space with this worker's MASTER_KEY. An admin enters the database user again on the tenant page.");
+    throw new Error("The stored password can't be opened for this space with this worker's MASTER_KEY. An admin enters the database user again under Connection › Database users.");
   }
 }

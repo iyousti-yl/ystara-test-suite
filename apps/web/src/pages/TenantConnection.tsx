@@ -1,38 +1,83 @@
 import { useState } from "react";
 import { Button, Dialog, Input, Label, MessageStrip, Tag, Title } from "@ui5/webcomponents-react";
+import { useSearchParams } from "react-router";
 import { useCan, useCheckConnection, useConnect, useConnection, useDisconnect, useSetConnectionSpaces, type ConnectionJson, type TenantJson } from "../api";
 import { ConnectionStatusTag, ErrorStrip, Loading } from "../components/Feedback";
+import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
+import { useAddressTenant } from "../tenantScope";
 
 /** Space IDs, separated by commas or spaces, as the API expects them. */
 export const parseSpaces = (text: string) => [...new Set(text.split(/[\s,;]+/).filter(Boolean).map((s) => s.toUpperCase()))];
 
 /**
- * How the worker logs in to a tenant: its technical OAuth client, and the
- * spaces it is meant to scan. Admins connect, change and remove it and change
- * its spaces; anyone who can scan may check it again. The worker checks each
- * space at once, and this section refreshes until the verdict is in
- * (TenantConnection in packages/shared/src/api.ts).
+ * Connection › Technical client: how the worker logs in to a tenant, with its
+ * technical OAuth client, and the spaces it is meant to scan. Admins connect,
+ * change and remove it and change its spaces; anyone who can scan may check
+ * it again. The worker checks each space at once, and this page refreshes
+ * until the verdict is in (TenantConnection in packages/shared/src/api.ts).
+ * `?connect=1` (after adding a tenant, or Home's next step) opens the Connect wizard.
  */
-export function ConnectionSection({ tenant, connecting, onConnecting }: { tenant: TenantJson; connecting: boolean; onConnecting: (open: boolean) => void }) {
+export function TechnicalClientPage() {
+  const { tenantId, tenant } = useAddressTenant();
+  const [params, setParams] = useSearchParams();
   const can = useCan();
-  const connection = useConnection(tenant.id);
-  const check = useCheckConnection(tenant.id);
-  const disconnect = useDisconnect(tenant.id);
+  const connection = useConnection(tenantId);
+  const check = useCheckConnection(tenantId);
+  const disconnect = useDisconnect(tenantId);
   const [editingSpaces, setEditingSpaces] = useState(false);
+  const connecting = params.get("connect") === "1" && can("tenant.connect") && Boolean(tenant.data?.host);
+  const setConnecting = (open: boolean) => setParams(open ? { connect: "1" } : {}, { replace: true });
   const c = connection.data;
 
+  if (tenant.isPending) return <Loading />;
+  if (!tenant.data) return <ErrorStrip error={tenant.error} />;
+  const t = tenant.data;
+
   const remove = () => {
-    if (window.confirm(`Remove the technical client of ${tenant.name}? Scans stop until an admin connects the tenant again. Its OAuth client in Datasphere stays as it is.`)) {
+    if (window.confirm(`Remove the technical client of ${t.name}? Scans stop until an admin connects the tenant again. Its OAuth client in Datasphere stays as it is.`)) {
       disconnect.mutate();
     }
   };
 
   return (
-    <section className="block">
-      <Title level="H4">Connection</Title>
+    <div className="page">
+      <PageHeader
+        title="Technical client"
+        subtitle="How the worker logs in to scan this tenant with nobody signed in: a technical OAuth client, and the spaces it reads."
+        actions={
+          t.host && (
+            <>
+              {can("tenant.connect") && (
+                <Button design={c ? "Default" : "Emphasized"} icon="chain-link" disabled={connection.isPending} onClick={() => setConnecting(true)}>
+                  {c ? "Change client" : "Connect"}
+                </Button>
+              )}
+              {c && can("tenant.connect") && (
+                <Button icon="edit" onClick={() => setEditingSpaces(true)}>
+                  Change spaces
+                </Button>
+              )}
+              {c && can("discovery.run") && (
+                <Button icon="refresh" disabled={c.status === "checking" || check.isPending} onClick={() => check.mutate()}>
+                  Check again
+                </Button>
+              )}
+              {c && can("tenant.connect") && (
+                <Button design="Transparent" icon="delete" disabled={disconnect.isPending} onClick={remove}>
+                  Remove
+                </Button>
+              )}
+            </>
+          )
+        }
+      />
       <ErrorStrip error={connection.error ?? check.error ?? disconnect.error} />
-      {connection.isPending ? (
+      {!t.host ? (
+        <MessageStrip design="Information" hideCloseButton>
+          This tenant has no Datasphere URL: it only has imported scans, so there is nothing to connect.
+        </MessageStrip>
+      ) : connection.isPending ? (
         <Loading />
       ) : !c ? (
         <MessageStrip design="Information" hideCloseButton className="block">
@@ -41,7 +86,7 @@ export function ConnectionSection({ tenant, connecting, onConnecting }: { tenant
             : "Not connected yet. An admin connects this tenant with a technical OAuth client."}
         </MessageStrip>
       ) : (
-        <>
+        <section className="block">
           <div className="facts connection-row">
             <ConnectionStatusTag status={c.status} />
             <span>
@@ -50,41 +95,20 @@ export function ConnectionSection({ tenant, connecting, onConnecting }: { tenant
             {c.checkedAt && <span>Checked {formatDateTime(c.checkedAt)}</span>}
           </div>
           <Verdict connection={c} />
+          <Title level="H4">Spaces</Title>
           <SpaceResults connection={c} />
-        </>
+        </section>
       )}
-      <div className="page-header-actions connection-row">
-        {can("tenant.connect") && (
-          <Button design={c ? "Default" : "Emphasized"} icon="chain-link" onClick={() => onConnecting(true)}>
-            {c ? "Change client" : "Connect"}
-          </Button>
-        )}
-        {c && can("tenant.connect") && (
-          <Button icon="edit" onClick={() => setEditingSpaces(true)}>
-            Change spaces
-          </Button>
-        )}
-        {c && can("discovery.run") && (
-          <Button icon="refresh" disabled={c.status === "checking" || check.isPending} onClick={() => check.mutate()}>
-            Check again
-          </Button>
-        )}
-        {c && can("tenant.connect") && (
-          <Button design="Transparent" icon="delete" disabled={disconnect.isPending} onClick={remove}>
-            Remove
-          </Button>
-        )}
-      </div>
       {/* Once loaded, so "Change client" starts from the current client's ID, token URL and spaces. */}
-      {connecting && !connection.isPending && <ConnectDialog tenant={tenant} current={c ?? null} onClose={() => onConnecting(false)} />}
-      {editingSpaces && c && <SpacesDialog tenantId={tenant.id} current={c} onClose={() => setEditingSpaces(false)} />}
-    </section>
+      {connecting && !connection.isPending && <ConnectDialog tenant={t} current={c ?? null} onClose={() => setConnecting(false)} />}
+      {editingSpaces && c && <SpacesDialog tenantId={t.id} current={c} onClose={() => setEditingSpaces(false)} />}
+    </div>
   );
 }
 
 function Verdict({ connection: c }: { connection: ConnectionJson }) {
   if (c.status === "checking") {
-    return <p className="muted">The worker is logging in with this client and checking each space. This section refreshes on its own.</p>;
+    return <p className="muted">The worker is logging in with this client and checking each space. This page refreshes on its own.</p>;
   }
   if (c.status === "failed" && c.error) {
     return (

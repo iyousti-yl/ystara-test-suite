@@ -76,7 +76,7 @@ export async function tenantAccess(db: Db, secrets: SecretBox, tenant: Tenant, o
   if (!tenant.host) throw new Error(`Tenant "${tenant.name}" has no Datasphere URL; it only has imported scans.`);
   const login = await getConnectionLogin(db, tenant.id);
   if (!login) {
-    if (!opts.machineLogin) throw new Error("This tenant is not connected: an admin connects it on the tenant page.");
+    if (!opts.machineLogin) throw new Error("This tenant is not connected: an admin connects it under Connection › Technical client.");
     checkUrls(tenant.host);
     return { source: new DatasphereCli({ host: tenant.host, bin: opts.bin }), login: "machine" };
   }
@@ -91,7 +91,7 @@ export function openSecret(secrets: SecretBox, sealed: string, tenantId: string)
   try {
     return secrets.open(sealed, connectionSecretContext(tenantId));
   } catch {
-    throw new Error("The stored client secret can't be opened for this tenant with this worker's MASTER_KEY. An admin enters the client again on the tenant page.");
+    throw new Error("The stored client secret can't be opened for this tenant with this worker's MASTER_KEY. An admin enters the client again under Connection › Technical client.");
   }
 }
 
@@ -102,7 +102,7 @@ export function openSecret(secrets: SecretBox, sealed: string, tenantId: string)
 function checkUrls(host: string, tokenUrl?: string): void {
   if (!isDatasphereUrl(host)) throw new Error(`Ystara only connects to SAP Datasphere tenants. This tenant's URL is not one: add the tenant again. ${DATASPHERE_URL_HINT}.`);
   if (tokenUrl !== undefined && !isTokenUrl(tokenUrl)) {
-    throw new Error(`The client's token URL is not on SAP's sign-in service, so its secret is not sent there. An admin enters the client again on the tenant page. ${TOKEN_URL_HINT}.`);
+    throw new Error(`The client's token URL is not on SAP's sign-in service, so its secret is not sent there. An admin enters the client again under Connection › Technical client. ${TOKEN_URL_HINT}.`);
   }
 }
 

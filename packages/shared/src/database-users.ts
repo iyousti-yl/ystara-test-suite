@@ -88,11 +88,11 @@ export function whyNothingMeasurable(steps: DspObjectRef[], measurement: Record<
     return names.length === 0 ? undefined : names.length === 1 ? `space ${names[0]}` : `spaces ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
   };
   const missing = spacesWith("no-database-user");
-  if (missing) return `There is no database user for ${missing} yet. An admin adds one under Database users for snapshots on the tenant page.`;
+  if (missing) return `There is no database user for ${missing} yet. An admin adds one under Connection › Database users.`;
   const failed = spacesWith("check-failed");
-  if (failed) return `The database user of ${failed} failed its last check. The tenant page says why.`;
+  if (failed) return `The database user of ${failed} failed its last check. Connection › Database users says why.`;
   const checking = spacesWith("not-checked");
-  if (checking) return `The database user of ${checking} hasn't been checked yet. Try again once the tenant page shows it as connected.`;
+  if (checking) return `The database user of ${checking} hasn't been checked yet. Try again once Connection › Database users shows it as connected.`;
   if (spacesWith("not-visible")) {
     return "The database users don't see any step of this pipeline, because none is exposed for consumption. A modeler can expose a view; select a step to see why it can't be measured.";
   }

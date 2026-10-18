@@ -82,7 +82,7 @@ console.log(JSON.stringify(args.includes("list") ? [started] : started));
   it("does not scan a tenant without a client, unless the worker was started for this machine's own login", async () => {
     const tenant = await createTenant(db, { accountId, name: "Not connected", host });
     await rm(path.join(dir, "called"), { force: true });
-    await expect(tenantAccess(db, secrets, tenant, { bin })).rejects.toThrow("This tenant is not connected: an admin connects it on the tenant page.");
+    await expect(tenantAccess(db, secrets, tenant, { bin })).rejects.toThrow("This tenant is not connected: an admin connects it under Connection › Technical client.");
     expect(called()).toBe(false);
 
     const access = await tenantAccess(db, secrets, tenant, { bin, machineLogin: true });

@@ -52,7 +52,7 @@ export function PipelineView(props: {
 
       <SegmentedButton onSelectionChange={(e) => setView(e.detail.selectedItems[0]?.dataset.view === "steps" ? "steps" : "lineage")}>
         <SegmentedButtonItem data-view="lineage" selected={view === "lineage"}>
-          Lineage
+          Picture
         </SegmentedButtonItem>
         <SegmentedButtonItem data-view="steps" selected={view === "steps"}>
           Steps in order ({pipeline.steps.length})

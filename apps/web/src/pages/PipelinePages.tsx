@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label, MessageStrip, Token, Tokenizer } from "@ui5/webcomponents-react";
+import { Button, Dialog, Input, Label, MessageStrip, Tab, TabContainer, Token, Tokenizer } from "@ui5/webcomponents-react";
 import { whyNothingMeasurable, type PipelineResult } from "@ystara/shared";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { pipelineQuery, useCan, useDeletePipeline, usePipelineOnScan, useSavedPipeline, useSavePipeline, useScan, useTakeSnapshot, useTenant } from "../api";
@@ -7,6 +7,7 @@ import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTime } from "../format";
 import { PipelineView } from "../lineage/PipelineView";
+import { useInTenant } from "../tenantScope";
 import { SnapshotsSection } from "./Snapshots";
 
 /**
@@ -21,7 +22,7 @@ export function PipelineOnScanPage() {
   const output = params.get("output") ?? "";
   const excludeWriters = params.getAll("excludeWriter");
   const scan = useScan(scanId);
-  const tenant = useTenant(scan.data?.tenantId ?? "");
+  useInTenant(scan.data?.tenantId);
   const result = usePipelineOnScan(scanId, output, excludeWriters);
   const [saving, setSaving] = useState(false);
 
@@ -29,11 +30,10 @@ export function PipelineOnScanPage() {
   const outputName = output.split(".").pop() ?? output;
 
   return (
-    <div className="page page-wide">
+    <div className="page page-wide page-fill">
       <PageHeader
         crumbs={[
-          { label: "Tenants", to: "/" },
-          { label: tenant.data?.name ?? "Tenant", to: `/tenants/${scan.data?.tenantId ?? ""}` },
+          { label: "Discovery", to: `/tenants/${scan.data?.tenantId ?? ""}/discovery` },
           { label: `Scan of ${scan.data?.spaces.join(", ") ?? "…"}`, to: `/scans/${scanId}` },
         ]}
         title={outputName}
@@ -75,8 +75,14 @@ export function PipelineOnScanPage() {
   );
 }
 
-/** A saved pipeline, computed on the tenant's latest successful scan, and its snapshots. */
-export function SavedPipelinePage() {
+type PipelineTab = "lineage" | "snapshots";
+
+/**
+ * A saved pipeline, computed on the tenant's latest successful scan, in two
+ * tabs with their own addresses: its lineage (/pipelines/:id) and its
+ * snapshots (/pipelines/:id/snapshots). Taking a snapshot opens the second.
+ */
+export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
   const { pipelineId = "" } = useParams();
   const navigate = useNavigate();
   const can = useCan();
@@ -85,6 +91,8 @@ export function SavedPipelinePage() {
   const takeSnapshot = useTakeSnapshot(pipelineId);
   const definition = result.data?.definition;
   const tenant = useTenant(definition?.tenantId ?? "");
+  useInTenant(definition?.tenantId);
+  const tabPath = (t: PipelineTab) => (t === "lineage" ? `/pipelines/${pipelineId}` : `/pipelines/${pipelineId}/snapshots`);
 
   if (result.isPending) return <Loading />;
   if (!result.data || !definition) return <ErrorStrip error={result.error} />;
@@ -94,12 +102,9 @@ export function SavedPipelinePage() {
   const whyNot = !measurable && tenant.data ? whyNothingMeasurable(result.data.pipeline.steps, result.data.measurement, tenant.data.host !== null) : undefined;
 
   return (
-    <div className="page page-wide">
+    <div className={tab === "lineage" ? "page page-wide page-fill" : "page page-wide"}>
       <PageHeader
-        crumbs={[
-          { label: "Tenants", to: "/" },
-          { label: tenant.data?.name ?? "Tenant", to: `/tenants/${definition.tenantId}` },
-        ]}
+        crumbs={[{ label: "Pipelines", to: `/tenants/${definition.tenantId}/pipelines` }]}
         title={definition.name}
         subtitle={
           <span className="facts">
@@ -116,7 +121,7 @@ export function SavedPipelinePage() {
                 icon="camera"
                 disabled={!measurable || takeSnapshot.isPending}
                 tooltip={measurable ? "Measure the steps the database users can see" : (whyNot ?? "No step can be measured with SQL yet")}
-                onClick={() => takeSnapshot.mutate()}
+                onClick={() => takeSnapshot.mutate(undefined, { onSuccess: () => navigate(tabPath("snapshots")) })}
               >
                 Take snapshot
               </Button>
@@ -134,7 +139,7 @@ export function SavedPipelinePage() {
                 disabled={remove.isPending}
                 onClick={() => {
                   if (window.confirm(`Delete the saved pipeline "${definition.name}"? Nothing changes in Datasphere.`)) {
-                    remove.mutate(definition, { onSuccess: () => navigate(`/tenants/${definition.tenantId}`) });
+                    remove.mutate(definition, { onSuccess: () => navigate(`/tenants/${definition.tenantId}/pipelines`) });
                   }
                 }}
               >
@@ -144,15 +149,33 @@ export function SavedPipelinePage() {
           </>
         }
       />
-      <Exclusions patterns={definition.excludeWriters} />
-      {whyNot && can("runs.execute") && (
-        <MessageStrip design="Information" hideCloseButton>
-          No snapshot can be taken yet. {whyNot}
-        </MessageStrip>
-      )}
+      <TabContainer
+        collapsed
+        className="page-tabs"
+        onTabSelect={(e) => {
+          const to = e.detail.tab.dataset.tab as PipelineTab | undefined;
+          if (to && to !== tab) navigate(tabPath(to));
+        }}
+      >
+        <Tab text="Lineage" data-tab="lineage" selected={tab === "lineage"} />
+        <Tab text="Snapshots" data-tab="snapshots" selected={tab === "snapshots"} />
+      </TabContainer>
       <ErrorStrip error={remove.error ?? takeSnapshot.error} />
-      <PipelineView result={result.data} />
-      <SnapshotsSection pipelineId={definition.id} canTake={measurable} />
+      {tab === "lineage" ? (
+        <>
+          <Exclusions patterns={definition.excludeWriters} />
+          <PipelineView result={result.data} />
+        </>
+      ) : (
+        <>
+          {whyNot && can("runs.execute") && (
+            <MessageStrip design="Information" hideCloseButton>
+              No snapshot can be taken yet. {whyNot}
+            </MessageStrip>
+          )}
+          <SnapshotsSection pipelineId={definition.id} canTake={measurable} />
+        </>
+      )}
     </div>
   );
 }

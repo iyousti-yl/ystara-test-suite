@@ -20,7 +20,7 @@ export interface TenantAccess {
 }
 
 const HINTS: Record<TenantAccess["login"], string> = {
-  client: "Is the tenant's technical client a member of these spaces, with a role that may see their objects? Check again on the tenant page to test its login.",
+  client: "Is the tenant's technical client a member of these spaces, with a role that may see their objects? Check again under Connection › Technical client to test its login.",
   machine: "Is the Datasphere CLI logged in on the machine the worker runs on, with read rights on these spaces? Or connect the tenant with a technical client.",
 };
 

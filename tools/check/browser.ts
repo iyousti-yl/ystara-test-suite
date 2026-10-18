@@ -13,9 +13,10 @@
  *   npm run check:browser -- --url http://127.0.0.1:5173    # the Vite dev server instead of the API's port
  *
  * Without --page it opens every kind of page that has data: sign-in (signed
- * out), tenants, the first tenant, its newest successful scan, its first saved
- * pipeline with its newest snapshot and the comparison of its latest two,
- * Users and roles for admins and Operator for operators. --page
+ * out), Tenants, the first tenant's apps (Home, Discovery, Pipelines,
+ * Technical client, Database users), its newest successful scan, its first
+ * saved pipeline in both tabs with its newest snapshot and the comparison of
+ * its latest two, Users and roles for admins and Operator for operators. --page
  * takes a path on this app that starts with one "/", so it never opens
  * another site.
  *
@@ -268,16 +269,22 @@ async function discoverPages(cookie: string, who: { role: string; operator: bool
   };
   const pages: PageToOpen[] = [
     { label: "sign-in", path: "/sign-in", signedIn: false },
-    { label: "tenants", path: "/", signedIn: true },
+    { label: "tenants", path: "/tenants", signedIn: true },
   ];
   const [tenant] = await get<Tenant[]>("/tenants");
   if (tenant) {
-    pages.push({ label: "tenant", path: `/tenants/${tenant.id}`, signedIn: true });
+    const app = (label: string, sub: string) => pages.push({ label, path: `/tenants/${tenant.id}${sub}`, signedIn: true });
+    app("home", "");
+    app("discovery", "/discovery");
+    app("pipelines", "/pipelines");
+    app("technical-client", "/connection");
+    app("database-users", "/database-users");
     const scan = (await get<Scan[]>(`/tenants/${tenant.id}/scans`)).find((s) => s.status === "succeeded");
     if (scan) pages.push({ label: "scan", path: `/scans/${scan.id}`, signedIn: true });
     const [pipeline] = await get<PipelineDefinition[]>(`/tenants/${tenant.id}/pipelines`);
     if (pipeline) {
       pages.push({ label: "pipeline", path: `/pipelines/${pipeline.id}`, signedIn: true });
+      pages.push({ label: "pipeline-snapshots", path: `/pipelines/${pipeline.id}/snapshots`, signedIn: true });
       const snapshots = await get<Snapshot[]>(`/pipelines/${pipeline.id}/snapshots`);
       if (snapshots[0]) pages.push({ label: "snapshot", path: `/snapshots/${snapshots[0].id}`, signedIn: true });
       if (snapshots.filter((s) => s.status === "succeeded").length >= 2) pages.push({ label: "compare", path: `/pipelines/${pipeline.id}/compare`, signedIn: true });

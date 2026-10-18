@@ -15,11 +15,12 @@ import {
 } from "@ui5/webcomponents-react";
 import { isDataEdge, OBJECT_TYPES, refKey, type ScanGraph } from "@ystara/shared";
 import { useNavigate, useParams } from "react-router";
-import { pipelineQuery, useScan, useScanGraph, useTenant } from "../api";
+import { pipelineQuery, useScan, useScanGraph } from "../api";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
 import { typeColor, typeLabel } from "../objectTypes";
+import { useInTenant } from "../tenantScope";
 
 /**
  * One scan: its status and warnings, and every object it found. Picking an
@@ -28,7 +29,7 @@ import { typeColor, typeLabel } from "../objectTypes";
 export function ScanPage() {
   const { scanId = "" } = useParams();
   const scan = useScan(scanId);
-  const tenant = useTenant(scan.data?.tenantId ?? "");
+  useInTenant(scan.data?.tenantId);
   const graph = useScanGraph(scanId, scan.data?.status === "succeeded");
 
   if (scan.isPending) return <Loading />;
@@ -38,10 +39,7 @@ export function ScanPage() {
   return (
     <div className="page">
       <PageHeader
-        crumbs={[
-          { label: "Tenants", to: "/" },
-          { label: tenant.data?.name ?? "Tenant", to: `/tenants/${s.tenantId}` },
-        ]}
+        crumbs={[{ label: "Discovery", to: `/tenants/${s.tenantId}/discovery` }]}
         title={`Scan of ${s.spaces.join(", ")}`}
         subtitle={
           <span className="facts">
@@ -143,15 +141,24 @@ function ObjectList({ scanId, graph }: { scanId: string; graph: ScanGraph }) {
       </p>
       <Table
         noDataText="No objects match."
+        overflowMode="Popin"
         onRowClick={(e) => navigate(`/scans/${scanId}/pipeline?${pipelineQuery(String(e.detail.row.rowKey), [])}`)}
         headerRow={
           <TableHeaderRow sticky>
-            <TableHeaderCell>Technical name</TableHeaderCell>
-            <TableHeaderCell>Business name</TableHeaderCell>
-            <TableHeaderCell>Type</TableHeaderCell>
-            {multiSpace && <TableHeaderCell>Space</TableHeaderCell>}
-            <TableHeaderCell horizontalAlign="End">Inputs</TableHeaderCell>
-            <TableHeaderCell horizontalAlign="End">Used by</TableHeaderCell>
+            <TableHeaderCell minWidth="14rem" importance={2}>
+              Technical name
+            </TableHeaderCell>
+            <TableHeaderCell minWidth="12rem">Business name</TableHeaderCell>
+            <TableHeaderCell minWidth="9rem" importance={1}>
+              Type
+            </TableHeaderCell>
+            {multiSpace && <TableHeaderCell minWidth="7rem">Space</TableHeaderCell>}
+            <TableHeaderCell minWidth="5rem" horizontalAlign="End">
+              Inputs
+            </TableHeaderCell>
+            <TableHeaderCell minWidth="5rem" horizontalAlign="End">
+              Used by
+            </TableHeaderCell>
           </TableHeaderRow>
         }
       >
