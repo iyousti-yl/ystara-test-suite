@@ -12,7 +12,7 @@ import { DATABASE_HOST_HINT, databaseUserProblem, isDatabaseHost } from "@ystara
 import { assertSelectOnly } from "./readonly.js";
 
 export interface DatabaseUser {
-  /** The host shown with the database user, e.g. your-tenant.hana.prod-eu10.hanacloud.ondemand.com (isDatabaseHost). */
+  /** The host shown with the database user, e.g. your-tenant.hana.prod-eu10.hanacloud.ondemand.com, or hna1 in place of hana (isDatabaseHost). */
   host: string;
   port?: number;
   /** SPACE#SUFFIX */

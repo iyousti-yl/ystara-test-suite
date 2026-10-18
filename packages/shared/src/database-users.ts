@@ -12,12 +12,16 @@ import { FLOW_TYPES, type DspObjectRef } from "./objects.js";
  * typed; the API checks it when it is entered and the worker before it signs in.
  */
 
-/** SAP HANA Cloud, where a Datasphere tenant's database runs. The worker sends this host the user's password, so nothing else is accepted. */
-const DATABASE_HOST = /^[a-z0-9-]+\.hana\.[a-z0-9-]+\.hanacloud\.ondemand\.com$/;
+/**
+ * SAP HANA Cloud, where a Datasphere tenant's database runs: `hana` in the host, or `hna1`, `hna2`… on newer
+ * tenants. The worker sends this host the user's password, so nothing else is accepted.
+ */
+const DATABASE_HOST = /^[a-z0-9-]+\.(?:hana|hna[0-9]+)\.[a-z0-9-]+\.hanacloud\.ondemand\.com$/;
 
-export const DATABASE_HOST_HINT = "Use the host name shown in the database user's details: <id>.hana.<region>.hanacloud.ondemand.com";
+export const DATABASE_HOST_HINT =
+  "Use the host name shown in the database user's details: <id>.hana.<region>.hanacloud.ondemand.com, or with hna1, hna2… in place of hana";
 
-/** <id>.hana.<region>.hanacloud.ondemand.com, as the database user's details show it: no https://, port or path. */
+/** <id>.hana.<region>.hanacloud.ondemand.com (or hnaN), as the database user's details show it: no https://, port or path. */
 export function isDatabaseHost(value: string): boolean {
   return DATABASE_HOST.test(value);
 }

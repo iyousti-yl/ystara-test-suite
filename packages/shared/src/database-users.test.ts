@@ -14,8 +14,13 @@ describe("a database user's name", () => {
 
 describe("a database host", () => {
   it("is SAP HANA Cloud, as the user's details show it", () => {
-    expect(isDatabaseHost("synthetic.hana.prod-eu10.hanacloud.ondemand.com")).toBe(true);
+    for (const host of ["synthetic.hana.prod-eu10.hanacloud.ondemand.com", "synthetic.hna1.prod-eu10.hanacloud.ondemand.com", "synthetic.hna12.prod-eu10.hanacloud.ondemand.com"]) {
+      expect(isDatabaseHost(host), host).toBe(true);
+    }
     for (const host of [
+      "synthetic.hna.prod-eu10.hanacloud.ondemand.com",
+      "synthetic.hnax.prod-eu10.hanacloud.ondemand.com",
+      "synthetic.hna1.hana.prod-eu10.hanacloud.ondemand.com",
       "https://synthetic.hana.prod-eu10.hanacloud.ondemand.com",
       "synthetic.hana.prod-eu10.hanacloud.ondemand.com:443",
       "synthetic.hana.prod-eu10.hanacloud.ondemand.com.example.com",

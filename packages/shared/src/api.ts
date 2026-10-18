@@ -74,7 +74,7 @@ export interface SpaceDatabaseUser {
   tenantId: string;
   /** The part of the user name before #. */
   space: string;
-  /** The tenant's database host, <id>.hana.<region>.hanacloud.ondemand.com. */
+  /** The tenant's database host, <id>.hana.<region>.hanacloud.ondemand.com (or hnaN in place of hana). */
   host: string;
   /** SPACE#SUFFIX */
   user: string;

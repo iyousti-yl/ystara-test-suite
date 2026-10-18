@@ -93,6 +93,14 @@ describe("a space's database user", () => {
     expect(testSecrets.open(login.sealedPassword, databaseUserSecretContext(tenant.id, "SALES"))).toBe(salesUser.password);
   });
 
+  it("accepts the hna1, hna2… hosts of newer tenants", async () => {
+    const tenant = await newTenant("Newer tenant");
+    const newer = "synthetic.hna1.prod-eu10.hanacloud.ondemand.com";
+    const res = await call("PUT", `/tenants/${tenant.id}/database-users`, admin, { ...salesUser, host: newer });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ host: newer, status: "checking" });
+  });
+
   it("needs a Datasphere database host and a SPACE#SUFFIX name, and a tenant with a Datasphere URL", async () => {
     const tenant = await newTenant("Checked input");
     const users = `/tenants/${tenant.id}/database-users`;

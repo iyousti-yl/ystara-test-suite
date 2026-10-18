@@ -184,7 +184,7 @@ function DatabaseUserDialog(props: { tenantId: string; current: DatabaseUserJson
           className="full-width"
           value={host}
           onInput={(e) => setHost(e.target.value)}
-          placeholder="<id>.hana.<region>.hanacloud.ondemand.com"
+          placeholder="<id>.hana.<region>.hanacloud.ondemand.com or <id>.hna1.…"
           valueState={host.trim() && !hostOk ? "Negative" : "None"}
           valueStateMessage={<div>{DATABASE_HOST_HINT}</div>}
         />
