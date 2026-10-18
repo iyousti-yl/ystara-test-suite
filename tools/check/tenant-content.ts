@@ -15,6 +15,7 @@
  *   - *.local.md notes (e.g. .claude/tenant-conventions.local.md): names in `backticks` and NAMES_LIKE_THIS;
  *     a name ending in _ or * is a prefix (a naming convention)
  *   - the local database, when it runs: scanned objects, tenant names and hosts, account names, user emails
+ *     (less the synthetic demo of `npm run db:demo`, whose names are made up and committed in tools/db/demo.ts)
  * plus, always, Datasphere/HANA Cloud host names and email addresses outside the example domains.
  * Names are found as whole words and ignoring case (SALES_ORDERS_SYNTH also finds
  * sales_orders_synth). Names of 3 characters are looked for only with a digit or
@@ -44,6 +45,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { connect, databaseUrl } from "@ystara/db";
+import { DEMO_RAW, DEMO_SPACE } from "../db/demo.js";
 import { loadLocalEnv } from "@ystara/shared/env";
 import { addedLines, buildMatcher, DRAFTS_FOLDER, EXAMPLE_DOMAIN, findIn, longEnough, mustNeverCommit, notTenantNames, plainWord, refusedFile, type Hit, type Line, type Term } from "./tenant-rules.js";
 
@@ -224,6 +226,8 @@ async function localTerms(): Promise<{ terms: Term[]; leftOut: number }> {
 }
 
 async function databaseTerms(): Promise<Term[]> {
+  // The demo tenant's space and objects (`npm run db:demo`): made up, and in the repository already. Its name has "synthetic" in it.
+  const demo = new Set([DEMO_SPACE, ...DEMO_RAW.map((o) => o.technicalName)]);
   const host = new URL(databaseUrl()).hostname;
   if (!["127.0.0.1", "localhost", "::1", "[::1]"].includes(host)) {
     dbNotes.push("Database: not on this machine, skipped.");
@@ -250,8 +254,8 @@ async function databaseTerms(): Promise<Term[]> {
       return [];
     }
     const terms: Term[] = [];
-    for (const v of [...got.spaces, ...got.businessNames]) if (v && longEnough(v, "word")) terms.push({ text: v, source: "local database", kind: "word" });
-    for (const v of got.names) if (v && longEnough(v, "word")) terms.push({ text: v, source: "local database", kind: "word", ...(plainWord(v) ? { plain: true } : {}) });
+    for (const v of [...got.spaces, ...got.businessNames]) if (v && longEnough(v, "word") && !demo.has(v)) terms.push({ text: v, source: "local database", kind: "word" });
+    for (const v of got.names) if (v && longEnough(v, "word") && !demo.has(v)) terms.push({ text: v, source: "local database", kind: "word", ...(plainWord(v) ? { plain: true } : {}) });
     for (const v of [...got.tenants, ...got.accounts]) if (v && longEnough(v, "word") && !/synthetic/i.test(v)) terms.push({ text: v, source: "local database", kind: "word" });
     for (const v of got.hosts) if (v) terms.push({ text: new URL(v.includes("://") ? v : `https://${v}`).hostname, source: "local database", kind: "text" });
     for (const v of got.emails) if (v && !EXAMPLE_DOMAIN.test(v.split("@")[1] ?? "")) terms.push({ text: v, source: "local database", kind: "text" });

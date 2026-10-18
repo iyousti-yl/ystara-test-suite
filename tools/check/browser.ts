@@ -11,15 +11,18 @@
  *   npm run check:browser                                   # as the operator, or else the first admin
  *   npm run check:browser -- --as you@example.com --account "My company"
  *   npm run check:browser -- --page /users --page /operator --widths 390,1440 --dark
+ *   npm run check:browser -- --tenant "Synthetic demo"      # only that tenant's pages
  *   npm run check:browser -- --url http://127.0.0.1:5173    # the Vite dev server instead of the API's port
  *
  * Without --page it opens every kind of page that has data: sign-in (signed
- * out), Tenants, the first tenant's apps (Home, Discovery, Pipelines,
- * Technical client, Database users), its newest successful scan, its first
- * saved pipeline in both tabs with its newest snapshot and the comparison of
- * its latest two, Users and roles for admins and Operator for operators. --page
- * takes a path on this app that starts with one "/", so it never opens
- * another site.
+ * out), Tenants, each tenant's apps (Home, Discovery, Pipelines, Technical
+ * client, Database users), its newest successful scan, its first saved
+ * pipeline in both tabs with its newest snapshot and the comparison of its
+ * latest two, Users and roles for admins and Operator for operators. --tenant
+ * (once or more) keeps to those tenants. --page takes a path on this app that
+ * starts with one "/", so it never opens another site. Without a tenant of your
+ * own, `npm run db:demo` adds a synthetic one whose names are as long as
+ * Datasphere allows.
  *
  * Signing in: the check writes a 15-minute session for the user straight into
  * the database and deletes it at the end, so it needs no password or
@@ -52,6 +55,7 @@ const { values } = parseArgs({
     url: { type: "string" },
     page: { type: "string", multiple: true },
     widths: { type: "string", default: "390,1024,1440,1920" },
+    tenant: { type: "string", multiple: true },
     dark: { type: "boolean", default: false },
   },
 });
@@ -318,23 +322,27 @@ async function discoverPages(cookie: string, who: { role: string; operator: bool
     { label: "sign-in", path: "/sign-in", signedIn: false },
     { label: "tenants", path: "/tenants", signedIn: true },
   ];
-  const [tenant] = await get<Tenant[]>("/tenants");
-  if (tenant) {
-    const app = (label: string, sub: string) => pages.push({ label, path: `/tenants/${tenant.id}${sub}`, signedIn: true });
-    app("home", "");
-    app("discovery", "/discovery");
-    app("pipelines", "/pipelines");
-    app("technical-client", "/connection");
-    app("database-users", "/database-users");
+  const all = await get<Tenant[]>("/tenants");
+  const picked = values.tenant ? all.filter((t) => values.tenant!.some((name) => name.trim().toLowerCase() === t.name.toLowerCase())) : all;
+  if (values.tenant && picked.length < values.tenant.length) fail(`--tenant names a tenant the account doesn't have. Its tenants: ${all.map((t) => t.name).join(", ") || "none"}`);
+  for (const tenant of picked) {
+    // With several tenants, each page's label (and screenshot) starts with its tenant's name.
+    const label = (page: string) => (picked.length > 1 ? `${slug(tenant.name)}-${page}` : page);
+    const add = (page: string, p: string) => pages.push({ label: label(page), path: p, signedIn: true });
+    add("home", `/tenants/${tenant.id}`);
+    add("discovery", `/tenants/${tenant.id}/discovery`);
+    add("pipelines", `/tenants/${tenant.id}/pipelines`);
+    add("technical-client", `/tenants/${tenant.id}/connection`);
+    add("database-users", `/tenants/${tenant.id}/database-users`);
     const scan = (await get<Scan[]>(`/tenants/${tenant.id}/scans`)).find((s) => s.status === "succeeded");
-    if (scan) pages.push({ label: "scan", path: `/scans/${scan.id}`, signedIn: true });
+    if (scan) add("scan", `/scans/${scan.id}`);
     const [pipeline] = await get<PipelineDefinition[]>(`/tenants/${tenant.id}/pipelines`);
     if (pipeline) {
-      pages.push({ label: "pipeline", path: `/pipelines/${pipeline.id}`, signedIn: true });
-      pages.push({ label: "pipeline-snapshots", path: `/pipelines/${pipeline.id}/snapshots`, signedIn: true });
+      add("pipeline", `/pipelines/${pipeline.id}`);
+      add("pipeline-snapshots", `/pipelines/${pipeline.id}/snapshots`);
       const snapshots = await get<Snapshot[]>(`/pipelines/${pipeline.id}/snapshots`);
-      if (snapshots[0]) pages.push({ label: "snapshot", path: `/snapshots/${snapshots[0].id}`, signedIn: true });
-      if (snapshots.filter((s) => s.status === "succeeded").length >= 2) pages.push({ label: "compare", path: `/pipelines/${pipeline.id}/compare`, signedIn: true });
+      if (snapshots[0]) add("snapshot", `/snapshots/${snapshots[0].id}`);
+      if (snapshots.filter((s) => s.status === "succeeded").length >= 2) add("compare", `/pipelines/${pipeline.id}/compare`);
     }
   }
   if (who.role === "admin") pages.push({ label: "users", path: "/users", signedIn: true });

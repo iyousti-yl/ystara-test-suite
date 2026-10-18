@@ -23,6 +23,7 @@
     "scan": "tsc -b && tsx tools/scan/scan.ts",
     "db:migrate": "tsc -b && node packages/db/dist/run-migrations.js",
     "db:import": "tsc -b && tsx tools/db/import-scan.ts",
+    "db:demo": "tsc -b && tsx tools/db/load-demo.ts",
     "account:create": "tsc -b && tsx tools/db/create-account.ts",
     "operator:grant": "tsc -b && tsx tools/db/operator-grant.ts",
     "check:browser": "tsc -b && tsx tools/check/browser.ts",

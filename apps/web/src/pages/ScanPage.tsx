@@ -16,6 +16,7 @@ import {
 import { isDataEdge, OBJECT_TYPES, refKey, type ScanGraph } from "@ystara/shared";
 import { useNavigate, useParams } from "react-router";
 import { pipelineQuery, useScan, useScanGraph } from "../api";
+import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
@@ -145,7 +146,8 @@ function ObjectList({ scanId, graph }: { scanId: string; graph: ScanGraph }) {
         onRowClick={(e) => navigate(`/scans/${scanId}/pipeline?${pipelineQuery(String(e.detail.row.rowKey), [])}`)}
         headerRow={
           <TableHeaderRow sticky>
-            <TableHeaderCell minWidth="14rem" importance={2}>
+            {/* As wide as the scan's longest name, so the column doesn't move while searching. */}
+            <TableHeaderCell minWidth={monoColumnWidth(rows.map((r) => r.technicalName), 14)} importance={2}>
               Technical name
             </TableHeaderCell>
             <TableHeaderCell minWidth="12rem">Business name</TableHeaderCell>

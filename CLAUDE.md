@@ -27,8 +27,9 @@ docker compose up -d --build                         # Postgres, migrations, API
 npm run dev:web                                      # web app with instant reload on :5173, /api forwarded to the API
 npm run db:migrate                                   # apply packages/db/migrations and create job queues
 npm run db:import -- --from <scan folder> --tenant <NAME> [--account <NAME>]   # load a saved scan, no tenant calls
+npm run db:demo -- [--account <NAME>]                  # the tenant "Synthetic demo": 30-50 character names, no tenant calls
 npm run account:create -- --name <ACCOUNT> --admin <email>   # create an account, print its first admin's invitation link
 npm run operator:grant -- --email <email> [--revoke]         # make an existing user the operator (operator panel)
 npm run check:tenant-content -- [--base <branch>] [--head <commit>] [--file <path>]   # tenant names in what is about to be pushed
-npm run check:browser -- [--as <email>] [--page /path] [--dark]     # the local web app in Chromium at 4 widths, with screenshots
+npm run check:browser -- [--as <email>] [--tenant <NAME>] [--page /path] [--dark]   # the local web app in Chromium at 4 widths, every tenant, with screenshots
 ```

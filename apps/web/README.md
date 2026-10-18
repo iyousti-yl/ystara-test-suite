@@ -42,6 +42,7 @@ Every page works as a link: the API answers these paths with `index.html` and `s
 - Sign-in fields are plain `<input>` elements styled like UI5's (`src/components/AuthFrame.tsx`), so password managers and the browser's one-time-code fill find them. `src/components/SetUpSignIn.tsx` is the password-then-authenticator setup that invitation and reset links share, and `src/components/LinkToSend.tsx` shows a new link once, with a Copy button.
 - `src/lineage/`: the picture. `model.ts` turns a pipeline into nodes and edges with what to mark on them (output, entry table, excluded writer, several writers, loop); `layout.ts` sizes each node to its names and places them left to right; `viewport.ts` picks the first view and places the hover card; `LineageGraph.tsx` and `ObjectNode.tsx` draw them; `ObjectPanel.tsx` shows the selected object; `PipelineView.tsx` puts it together. The first three are plain functions with tests.
 - `src/objectTypes.ts`: names and colours per object type (theme colours, so dark mode works).
+- `src/columns.ts`: how wide a table column of technical names must be (`monoColumnWidth`, given to a `TableHeaderCell`'s `minWidth`): as wide as its longest name, up to the table's width. The other columns shrink, then move under the row (`overflowMode="Popin"`, by `importance`), before a name breaks; only a name wider than a phone's screen wraps. Every table with technical names uses it; `npm run db:demo` adds names of up to 50 characters to look at.
 - `src/theme.ts`, `src/fonts.ts`, `src/locale.ts`, `src/icons.ts`: UI5 setup (light or dark theme, the bundled 72 font and English locale data instead of UI5's CDN downloads). UI5 draws only icons that are imported in `icons.ts`.
 
 ## Dependencies
@@ -50,4 +51,4 @@ All packages are `devDependencies`: Vite bundles them into `dist/` at build time
 
 ## Tests
 
-`npm test -w @ystara/web`: the lineage model and layout, and the font check. Pages are checked by clicking through them; there are no browser tests in CI yet.
+`npm test -w @ystara/web`: the lineage model and layout, the column widths, and the font check. Pages are checked by clicking through them; there are no browser tests in CI yet.

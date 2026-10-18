@@ -3,6 +3,7 @@ import { Label, MessageStrip, Option, Panel, Select, Table, TableCell, TableHead
 import { refKey, type ColumnComparison, type StepNotCompared, type StepState, type Verdict } from "@ystara/shared";
 import { useParams, useSearchParams } from "react-router";
 import { useComparison, useSavedPipeline, useSnapshots, type SnapshotComparisonJson, type SnapshotJson } from "../api";
+import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTimesApart, formatDifference, formatExact, formatNumber } from "../format";
@@ -291,7 +292,7 @@ function ColumnChanges({ columns }: { columns: ColumnComparison[] }) {
       overflowMode="Popin"
       headerRow={
         <TableHeaderRow>
-          <TableHeaderCell minWidth="12rem" importance={2}>
+          <TableHeaderCell minWidth={monoColumnWidth(columns.map((col) => col.name))} importance={2}>
             Column
           </TableHeaderCell>
           <TableHeaderCell minWidth="10rem" importance={1}>
@@ -373,7 +374,7 @@ function NotComparedTable({ steps }: { steps: StepNotCompared[] }) {
       overflowMode="Popin"
       headerRow={
         <TableHeaderRow>
-          <TableHeaderCell minWidth="14rem" importance={2}>
+          <TableHeaderCell minWidth={monoColumnWidth(steps.map((s) => s.technicalName))} importance={2}>
             Step
           </TableHeaderCell>
           <TableHeaderCell minWidth="10rem">Before</TableHeaderCell>
@@ -411,7 +412,7 @@ function DefinitionsTable({ steps }: { steps: StepNotCompared[] }) {
       overflowMode="Popin"
       headerRow={
         <TableHeaderRow>
-          <TableHeaderCell minWidth="14rem" importance={2}>
+          <TableHeaderCell minWidth={monoColumnWidth(steps.map((s) => s.technicalName))} importance={2}>
             Step
           </TableHeaderCell>
           <TableHeaderCell minWidth="14rem">Not measured because</TableHeaderCell>

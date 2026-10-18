@@ -2,6 +2,7 @@ import { Button, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow
 import type { ColumnMeasures, SnapshotObject } from "@ystara/shared";
 import { useNavigate, useParams } from "react-router";
 import { useSnapshot, useSnapshots, type SnapshotJson } from "../api";
+import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTime, formatDateTimesApart, formatNumber } from "../format";
@@ -122,7 +123,7 @@ export function SnapshotPage() {
       {measured.map((o) => (
         <section className="block" key={`${o.space}.${o.technicalName}`}>
           <Title level="H4">
-            <span className="mono">{o.technicalName}</span>
+            <span className="mono wrap-anywhere">{o.technicalName}</span>
           </Title>
           <p className="muted">
             {typeLabel(o.type)}: {formatNumber(o.rows)} rows, {o.columns?.length ?? 0} columns, measured in {((o.tookMs ?? 0) / 1000).toFixed(1)} s
@@ -136,7 +137,7 @@ export function SnapshotPage() {
           overflowMode="Popin"
           headerRow={
             <TableHeaderRow>
-              <TableHeaderCell minWidth="14rem" importance={1}>
+              <TableHeaderCell minWidth={monoColumnWidth(s.objects.map((o) => o.technicalName))} importance={1}>
                 Step
               </TableHeaderCell>
               <TableHeaderCell minWidth="10rem">Result</TableHeaderCell>
@@ -182,14 +183,14 @@ function StepResult({ object: o }: { object: SnapshotObject }) {
 /** The start of a hash, enough to see whether two differ. */
 const fingerprint = (hash: string | null | undefined) => (hash ? `${hash.slice(0, 8)}…` : "–");
 
-/** On a narrow screen the type goes under the column name first, then the measures from the right. */
+/** On a narrow screen the type goes under the column name first, then the measures from the right. The name and the sum keep their width. */
 function ColumnsTable({ columns }: { columns: ColumnMeasures[] }) {
   return (
     <Table
       overflowMode="Popin"
       headerRow={
         <TableHeaderRow>
-          <TableHeaderCell minWidth="12rem" importance={2}>
+          <TableHeaderCell minWidth={monoColumnWidth(columns.map((c) => c.name))} importance={2}>
             Column
           </TableHeaderCell>
           <TableHeaderCell minWidth="7rem" importance={-1}>
@@ -207,7 +208,7 @@ function ColumnsTable({ columns }: { columns: ColumnMeasures[] }) {
           <TableHeaderCell minWidth="7rem" horizontalAlign="End">
             Max
           </TableHeaderCell>
-          <TableHeaderCell minWidth="7rem" horizontalAlign="End">
+          <TableHeaderCell minWidth={monoColumnWidth(columns.map((c) => c.sum))} horizontalAlign="End">
             Sum
           </TableHeaderCell>
         </TableHeaderRow>
