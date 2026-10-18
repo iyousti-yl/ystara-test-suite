@@ -37,3 +37,14 @@ export async function findTenantByName(db: Queryable, accountId: string, name: s
   const { rows } = await db.query<Row>("select * from tenants where account_id = $1 and name = $2", [accountId, name]);
   return rows[0] && toTenant(rows[0]);
 }
+
+/**
+ * Removes a tenant from Ystara with everything stored for it: scans and
+ * definitions, saved pipelines and their snapshots, the technical client,
+ * the database users and the snapshot salt (each table's foreign key cascades).
+ * Nothing in the Datasphere tenant itself. A job still queued for it finds
+ * nothing and stops. False when there was no such tenant.
+ */
+export async function deleteTenant(db: Queryable, id: string): Promise<boolean> {
+  return (await db.query("delete from tenants where id = $1 returning id", [id])).rows.length > 0;
+}

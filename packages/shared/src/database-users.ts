@@ -1,4 +1,4 @@
-import { FLOW_TYPES, type DspObjectRef } from "./objects.js";
+import { FLOW_TYPES, refKey, type DspObjectRef } from "./objects.js";
 
 /**
  * Database users of a space, which snapshots read its data with (Space
@@ -67,4 +67,34 @@ export function measurability(step: DspObjectRef, users: DatabaseUserReach[]): M
   if (user.status === "failed") return { measurable: false, reason: "check-failed" };
   if (!user.visible) return { measurable: false, reason: "not-checked" };
   return user.visible.some((o) => o.name === step.technicalName) ? { measurable: true } : { measurable: false, reason: "not-visible" };
+}
+
+/**
+ * Why no snapshot of a pipeline can be taken when none of its steps is
+ * measurable, as one sentence that says what would change it. The API refuses
+ * with it and the pipeline page shows it. `tenantHasUrl` is false for a tenant
+ * that only has imported scans: it can't have a database user at all.
+ */
+export function whyNothingMeasurable(steps: DspObjectRef[], measurement: Record<string, Measurability>, tenantHasUrl: boolean): string {
+  if (!tenantHasUrl) {
+    return "This tenant only has imported scans, so it has no Datasphere URL and no database user to measure with. Add the tenant with its Datasphere URL to take snapshots.";
+  }
+  const spacesWith = (reason: Exclude<Measurability, { measurable: true }>["reason"]) => {
+    const spaces = steps.filter((s) => {
+      const m = measurement[refKey(s)];
+      return m && !m.measurable && m.reason === reason;
+    });
+    const names = [...new Set(spaces.map((s) => s.space))];
+    return names.length === 0 ? undefined : names.length === 1 ? `space ${names[0]}` : `spaces ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  };
+  const missing = spacesWith("no-database-user");
+  if (missing) return `There is no database user for ${missing} yet. An admin adds one under Database users for snapshots on the tenant page.`;
+  const failed = spacesWith("check-failed");
+  if (failed) return `The database user of ${failed} failed its last check. The tenant page says why.`;
+  const checking = spacesWith("not-checked");
+  if (checking) return `The database user of ${checking} hasn't been checked yet. Try again once the tenant page shows it as connected.`;
+  if (spacesWith("not-visible")) {
+    return "The database users don't see any step of this pipeline, because none is exposed for consumption. A modeler can expose a view; select a step to see why it can't be measured.";
+  }
+  return "None of this pipeline's steps can be measured with SQL. Select a step to see why.";
 }

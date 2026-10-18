@@ -21,7 +21,7 @@ afterAll(async () => {
   await db.close();
 });
 
-const call = (method: "GET" | "POST", url: string, opts: { payload?: object; as?: TestUser; cookie?: string } = {}) =>
+const call = (method: "GET" | "POST" | "PATCH", url: string, opts: { payload?: object; as?: TestUser; cookie?: string } = {}) =>
   app.inject({ method, url: `/api${url}`, payload: opts.payload, headers: { cookie: opts.cookie ?? (opts.as ?? ops).cookie } });
 
 describe("the operator panel", () => {
@@ -46,6 +46,16 @@ describe("the operator panel", () => {
     const again = await call("POST", `/operator/accounts/${res.json().account.id}/invitations`, { payload: { email: "second.admin@new.example.com" } });
     expect(again.json().invitation).toMatchObject({ role: "admin" });
     expect((await call("POST", "/operator/accounts/00000000-0000-4000-8000-000000000000/invitations", { payload: { email: "x@example.com" } })).statusCode).toBe(404);
+  });
+
+  it("renames an account, which its members see at once", async () => {
+    const admin = await testUser(db, { account: "Old name", email: "admin@old-name.example.com", role: "admin" });
+    const accountId = (await call("GET", "/auth/me", { as: admin })).json().account.id;
+    expect((await call("PATCH", `/operator/accounts/${accountId}`, { as: admin, payload: { name: "Not by an admin" } })).statusCode).toBe(403);
+    expect((await call("PATCH", `/operator/accounts/${accountId}`, { payload: { name: "New name" } })).json()).toEqual({ id: accountId, name: "New name" });
+    expect((await call("GET", "/auth/me", { as: admin })).json().account.name).toBe("New name");
+    expect((await call("PATCH", `/operator/accounts/${accountId}`, { payload: { name: "Ystara" } })).statusCode).toBe(409);
+    expect((await call("PATCH", "/operator/accounts/00000000-0000-4000-8000-000000000000", { payload: { name: "Nobody" } })).statusCode).toBe(404);
   });
 
   it("can't make the operator admin of an account that still has one", async () => {

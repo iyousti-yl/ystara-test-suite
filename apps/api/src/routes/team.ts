@@ -1,18 +1,20 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { changeMember, createInvitation, deleteInvitation, listInvitations, listMembers, type Db } from "@ystara/db";
+import { changeMember, createInvitation, deleteInvitation, listInvitations, listMembers, renameAccount, type Db } from "@ystara/db";
 import { ROLES, type CreatedInvitation, type Team } from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
 
 /**
  * An account's users and roles, under /api/team: the admin page in the web
- * app. Every route needs "users.manage" (admins) and only touches the
- * signed-in account. An account always keeps at least one admin.
+ * app. Every route needs "users.manage" (admins), except renaming the account
+ * ("account.manage", admins too), and only touches the signed-in account. An
+ * account always keeps at least one admin.
  */
 const manage = { access: "users.manage" } as const;
 const role = z.enum(ROLES);
 const NewInvitation = z.object({ email: z.string().trim().toLowerCase().email().max(254), role });
 const RoleChange = z.object({ role });
+const AccountName = z.object({ name: z.string().trim().min(1).max(100) });
 const userId = z.object({ userId: z.string().uuid() });
 const id = z.object({ id: z.string().uuid() });
 
@@ -23,6 +25,14 @@ export function teamRoutes(db: Db) {
     app.get("/team", { config: manage }, async (req) => {
       const { accountId } = signedIn(req);
       return { members: await listMembers(db, accountId), invitations: await listInvitations(db, accountId) } satisfies Team;
+    });
+
+    // The account's name, as its members and Ystara's operator see it. Names are unique: a taken one answers 409.
+    app.patch("/team/account", { config: { access: "account.manage" } }, async (req) => {
+      const me = signedIn(req);
+      const account = (await renameAccount(db, me.accountId, AccountName.parse(req.body).name))!;
+      req.log.info({ userId: me.userId, accountId: me.accountId }, "account renamed by its admin");
+      return account;
     });
 
     app.post("/team/invitations", { config: manage }, async (req, reply) => {

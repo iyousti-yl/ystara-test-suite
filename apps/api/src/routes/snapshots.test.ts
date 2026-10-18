@@ -99,11 +99,19 @@ describe("snapshots", () => {
 
   it("are refused when no step can be measured, or the tenant has no scan", async () => {
     sent.length = 0;
-    for (const pipeline of [await pipelineOf("No database user"), await pipelineOf("Output not exposed", ["V_OTHER"])]) {
+    for (const [pipeline, why] of [
+      [await pipelineOf("No database user"), /^There is no database user for space S yet/],
+      [await pipelineOf("Output not exposed", ["V_OTHER"]), /none is exposed for consumption/],
+    ] as const) {
       const res = await call("POST", `/pipelines/${pipeline.id}/snapshots`, admin);
       expect(res.statusCode).toBe(409);
-      expect(res.json().error).toMatch(/None of this pipeline's steps can be measured/);
+      expect(res.json().error).toMatch(why);
     }
+    const imported = await createTenant(db, { accountId: admin.accountId, name: "Imported only", host: null });
+    const scan = await createScan(db, imported.id, ["S"], "import");
+    await saveScanResult(db, scan.id, RAW, graphFromRaw(RAW, ["S"]));
+    const fromImport = await createPipeline(db, { tenantId: imported.id, name: "From an import", output: { space: "S", technicalName: "V_OUT" }, excludeWriters: [] });
+    expect((await call("POST", `/pipelines/${fromImport.id}/snapshots`, admin)).json().error).toMatch(/^This tenant only has imported scans/);
     const tenant = await createTenant(db, { accountId: admin.accountId, name: "Never scanned", host: "https://synthetic.eu10.hcs.cloud.sap" });
     const early = await createPipeline(db, { tenantId: tenant.id, name: "Early", output: { space: "S", technicalName: "V_OUT" }, excludeWriters: [] });
     expect((await call("POST", `/pipelines/${early.id}/snapshots`, admin)).json().error).toMatch(/no successful scan/);

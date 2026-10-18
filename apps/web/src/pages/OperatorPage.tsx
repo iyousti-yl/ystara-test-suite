@@ -1,23 +1,31 @@
 import { useState } from "react";
 import { Button, Dialog, Input, Label, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Title } from "@ui5/webcomponents-react";
 import type { Json, UserOverview } from "@ystara/shared";
-import { useAccountOverviews, useCreateAccount, useCreateReset, useInviteAdmin, useMe, useUserOverviews } from "../api";
+import { useAccountOverviews, useCreateAccount, useCreateReset, useInviteAdmin, useMe, useRenameAccountAsOperator, useUserOverviews } from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { LinkToSend } from "../components/LinkToSend";
 import { PageHeader } from "../components/PageHeader";
+import { RenameAccountDialog } from "../components/RenameAccountDialog";
 import { formatDateTime } from "../format";
 import { ROLE_LABEL } from "../roles";
 
 /**
  * The operator panel (/operator), for whoever runs Ystara: every customer
- * account and user, creating accounts, a new admin for an account, and reset
- * links. It shows counts, never tenants, scans or pipelines.
+ * account and user, creating and renaming accounts, a new admin for an
+ * account, and reset links. It shows counts, never tenants, scans or pipelines.
  */
 export function OperatorPage() {
   const isOperator = useMe().data?.operator ?? false;
   const accounts = useAccountOverviews(isOperator);
   const users = useUserOverviews(isOperator);
-  const [dialog, setDialog] = useState<{ kind: "account" } | { kind: "admin"; accountId: string; name: string } | { kind: "reset"; user: Json<UserOverview> }>();
+  const [dialog, setDialog] = useState<
+    { kind: "account" } | { kind: "admin" | "rename"; accountId: string; name: string } | { kind: "reset"; user: Json<UserOverview> }
+  >();
+  const rename = useRenameAccountAsOperator();
+  const closeDialog = () => {
+    setDialog(undefined);
+    rename.reset();
+  };
 
   if (!isOperator) {
     return (
@@ -47,14 +55,23 @@ export function OperatorPage() {
         ) : (
           <Table
             noDataText="No accounts yet."
+            overflowMode="Popin"
             headerRow={
               <TableHeaderRow>
-                <TableHeaderCell>Name</TableHeaderCell>
-                <TableHeaderCell horizontalAlign="End">Members</TableHeaderCell>
-                <TableHeaderCell horizontalAlign="End">Tenants</TableHeaderCell>
-                <TableHeaderCell horizontalAlign="End">Open invitations</TableHeaderCell>
-                <TableHeaderCell>Created</TableHeaderCell>
-                <TableHeaderCell horizontalAlign="End">
+                <TableHeaderCell minWidth="10rem" importance={1}>
+                  Name
+                </TableHeaderCell>
+                <TableHeaderCell minWidth="6rem" width="7rem" horizontalAlign="End">
+                  Members
+                </TableHeaderCell>
+                <TableHeaderCell minWidth="6rem" width="7rem" horizontalAlign="End">
+                  Tenants
+                </TableHeaderCell>
+                <TableHeaderCell minWidth="8rem" width="9rem" horizontalAlign="End">
+                  Open invitations
+                </TableHeaderCell>
+                <TableHeaderCell minWidth="10rem">Created</TableHeaderCell>
+                <TableHeaderCell minWidth="7rem" importance={1} horizontalAlign="End">
                   <span className="sr-only">Actions</span>
                 </TableHeaderCell>
               </TableHeaderRow>
@@ -75,6 +92,9 @@ export function OperatorPage() {
                 <TableCell horizontalAlign="End">{a.openInvitations || "–"}</TableCell>
                 <TableCell>{formatDateTime(a.createdAt)}</TableCell>
                 <TableCell horizontalAlign="End">
+                  <Button design="Transparent" onClick={() => setDialog({ kind: "rename", accountId: a.id, name: a.name })}>
+                    Rename
+                  </Button>
                   {/* Where an admin is left, they invite people themselves; the API refuses it too. */}
                   {a.admins === 0 && (
                     <Button design="Transparent" onClick={() => setDialog({ kind: "admin", accountId: a.id, name: a.name })}>
@@ -95,12 +115,15 @@ export function OperatorPage() {
         ) : (
           <Table
             noDataText="No users yet."
+            overflowMode="Popin"
             headerRow={
               <TableHeaderRow>
-                <TableHeaderCell>Email</TableHeaderCell>
-                <TableHeaderCell>Accounts and roles</TableHeaderCell>
-                <TableHeaderCell>Since</TableHeaderCell>
-                <TableHeaderCell horizontalAlign="End">
+                <TableHeaderCell minWidth="12rem" importance={1}>
+                  Email
+                </TableHeaderCell>
+                <TableHeaderCell minWidth="12rem">Accounts and roles</TableHeaderCell>
+                <TableHeaderCell minWidth="10rem">Since</TableHeaderCell>
+                <TableHeaderCell minWidth="8rem" importance={1} horizontalAlign="End">
                   <span className="sr-only">Actions</span>
                 </TableHeaderCell>
               </TableHeaderRow>
@@ -135,6 +158,15 @@ export function OperatorPage() {
       {dialog?.kind === "account" && <CreateAccountDialog onClose={() => setDialog(undefined)} />}
       {dialog?.kind === "admin" && <InviteAdminDialog accountId={dialog.accountId} name={dialog.name} onClose={() => setDialog(undefined)} />}
       {dialog?.kind === "reset" && <ResetDialog user={dialog.user} onClose={() => setDialog(undefined)} />}
+      {dialog?.kind === "rename" && (
+        <RenameAccountDialog
+          current={dialog.name}
+          pending={rename.isPending}
+          error={rename.error}
+          onRename={(name) => rename.mutate({ accountId: dialog.accountId, name }, { onSuccess: closeDialog })}
+          onClose={closeDialog}
+        />
+      )}
     </div>
   );
 }

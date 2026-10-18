@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { createAccountWithAdmin, createSignInReset, inviteAdminWhereNoneLeft, listAccountOverviews, listUserOverviews, type Db } from "@ystara/db";
+import { createAccountWithAdmin, createSignInReset, inviteAdminWhereNoneLeft, listAccountOverviews, listUserOverviews, renameAccount, type Db } from "@ystara/db";
 import type { AccountOverview, CreatedInvitation, CreatedReset, UserOverview } from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
 
@@ -8,14 +8,16 @@ import { signedIn } from "../auth/access.js";
  * The operator panel, under /api/operator: every customer account and user,
  * for whoever runs Ystara (users.operator, set with `npm run operator:grant`).
  * It shows counts and memberships, never tenants, scans or pipelines, and it
- * can create an account with its first admin, invite an admin to an account
+ * can create or rename an account, invite an admin to an account
  * that has none left, and make a reset link for someone who lost their
  * password or phone. Each of these goes into the log with the operator's id,
  * and the account's admins see resets on their Users and roles page.
  */
 const operator = { access: "operator" } as const;
 const email = z.string().trim().toLowerCase().email().max(254);
-const NewAccount = z.object({ name: z.string().trim().min(1).max(100), adminEmail: email });
+const accountName = z.string().trim().min(1).max(100);
+const NewAccount = z.object({ name: accountName, adminEmail: email });
+const AccountRename = z.object({ name: accountName });
 const AdminInvitation = z.object({ email });
 const id = z.object({ id: z.string().uuid() });
 
@@ -29,6 +31,15 @@ export function operatorRoutes(db: Db) {
       const created = await createAccountWithAdmin(db, input.name, input.adminEmail);
       req.log.info({ operator: signedIn(req).userId, accountId: created.account.id }, "operator created an account and invited its first admin");
       return reply.code(201).send(created satisfies CreatedInvitation & { account: { id: string; name: string } });
+    });
+
+    // A customer's new name. Names are unique: a taken one answers 409.
+    app.patch("/operator/accounts/:id", { config: operator }, async (req, reply) => {
+      const accountId = id.parse(req.params).id;
+      const account = await renameAccount(db, accountId, AccountRename.parse(req.body).name);
+      if (!account) return reply.code(404).send({ error: "Account not found" });
+      req.log.info({ operator: signedIn(req).userId, accountId }, "operator renamed an account");
+      return account;
     });
 
     // An admin for an account that has none left, e.g. when its only admin left the company.

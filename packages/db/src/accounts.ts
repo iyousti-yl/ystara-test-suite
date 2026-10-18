@@ -25,6 +25,12 @@ export async function getAccount(db: Queryable, id: string): Promise<Account | u
   return rows[0];
 }
 
+/** A new name for an account; names are unique (the API answers 409). Undefined when there is no such account. */
+export async function renameAccount(db: Queryable, id: string, name: string): Promise<Account | undefined> {
+  const { rows } = await db.query<Account>("update accounts set name = $2 where id = $1 returning id, name", [id, name]);
+  return rows[0];
+}
+
 export async function findAccountByName(db: Queryable, name: string): Promise<Account | undefined> {
   const { rows } = await db.query<Account>("select id, name from accounts where name = $1", [name]);
   return rows[0];

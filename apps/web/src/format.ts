@@ -7,3 +7,6 @@ const number = new Intl.NumberFormat();
 
 /** "1,234" in the browser's locale, or a dash. */
 export const formatNumber = (n: number | null | undefined) => (n === null || n === undefined ? "–" : number.format(n));
+
+/** "1 scan", "3 scans": English plurals with an s. */
+export const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;

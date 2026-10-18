@@ -182,6 +182,15 @@ export const useInviteAdmin = () =>
   );
 export const useCreateReset = () => useOperatorChange((userId: string) => request<Json<CreatedReset>>("POST", `/operator/users/${userId}/reset`));
 
+/** The operator may belong to the account too, so the header's account name is asked for again. */
+export function useRenameAccountAsOperator() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { accountId: string; name: string }) => request<Account>("PATCH", `/operator/accounts/${input.accountId}`, { name: input.name }),
+    onSettled: () => Promise.all([client.invalidateQueries({ queryKey: OPERATOR }), client.invalidateQueries({ queryKey: ME })]),
+  });
+}
+
 // --- Users and roles (admins)
 
 const TEAM = ["team"];
@@ -197,6 +206,12 @@ export const useInvite = () => useTeamChange((input: { email: string; role: Role
 export const useWithdrawInvitation = () => useTeamChange((id: string) => request<void>("DELETE", `/team/invitations/${id}`));
 export const useChangeRole = () => useTeamChange((input: { userId: string; role: Role }) => request<void>("PATCH", `/team/members/${input.userId}`, { role: input.role }));
 export const useRemoveMember = () => useTeamChange((userId: string) => request<void>("DELETE", `/team/members/${userId}`));
+
+/** The signed-in account's new name, which the header and the account switcher show (/auth/me). */
+export function useRenameAccount() {
+  const client = useQueryClient();
+  return useMutation({ mutationFn: (name: string) => request<Account>("PATCH", "/team/account", { name }), onSuccess: () => client.invalidateQueries({ queryKey: ME }) });
+}
 
 const active = (status: Scan["status"]) => status === "queued" || status === "running";
 const pollWhile = (busy: boolean) => (busy ? 3000 : false);
@@ -214,6 +229,15 @@ export function useCreateTenant() {
   return useMutation({
     mutationFn: (input: { name: string; host: string }) => request<TenantJson>("POST", "/tenants", input),
     onSuccess: () => client.invalidateQueries({ queryKey: ["tenants"] }),
+  });
+}
+
+/** Only the list is asked for again: the deleted tenant's page is left before anything on it would be. */
+export function useDeleteTenant() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (tenantId: string) => request<void>("DELETE", `/tenants/${tenantId}`),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["tenants"], exact: true }),
   });
 }
 

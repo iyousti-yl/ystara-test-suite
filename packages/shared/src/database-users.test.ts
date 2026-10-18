@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { databaseUserProblem, databaseUserSpace, isDatabaseHost, measurability, type DatabaseUserReach } from "./database-users.js";
+import { databaseUserProblem, databaseUserSpace, isDatabaseHost, measurability, whyNothingMeasurable, type DatabaseUserReach, type Measurability } from "./database-users.js";
 import type { DspObjectRef } from "./objects.js";
 
 describe("a database user's name", () => {
@@ -64,5 +64,31 @@ describe("whether a snapshot can measure a step", () => {
     for (const type of ["data_flow", "transformation_flow", "replication_flow", "task_chain"] as const) {
       expect(measurability({ space: "SALES", technicalName: "ORDERS_SYNTH_V", type }, [sales("connected", ["ORDERS_SYNTH_V"])])).toEqual({ measurable: false, reason: "process" });
     }
+  });
+});
+
+describe("why a pipeline can't be snapshotted", () => {
+  // DF_LOAD (SALES) loads LT_SYNTH (SALES); V_SYNTH_OUT (FINANCE) reads it.
+  const steps: DspObjectRef[] = [
+    { space: "SALES", technicalName: "DF_LOAD", type: "data_flow" },
+    { space: "SALES", technicalName: "LT_SYNTH", type: "local_table" },
+    { space: "FINANCE", technicalName: "V_SYNTH_OUT", type: "graphical_view" },
+  ];
+  const no = (reason: Exclude<Measurability, { measurable: true }>["reason"]): Measurability => ({ measurable: false, reason });
+  const why = (sales: Measurability, finance: Measurability, tenantHasUrl = true) =>
+    whyNothingMeasurable(steps, { "SALES.DF_LOAD": no("process"), "SALES.LT_SYNTH": sales, "FINANCE.V_SYNTH_OUT": finance }, tenantHasUrl);
+
+  it("says first what an admin can fix, naming the spaces", () => {
+    expect(why(no("no-database-user"), no("no-database-user"))).toBe(
+      "There is no database user for spaces SALES and FINANCE yet. An admin adds one under Database users for snapshots on the tenant page.",
+    );
+    expect(why(no("not-visible"), no("no-database-user"))).toMatch(/^There is no database user for space FINANCE yet/);
+    expect(why(no("check-failed"), no("not-visible"))).toBe("The database user of space SALES failed its last check. The tenant page says why.");
+    expect(why(no("not-visible"), no("not-checked"))).toMatch(/^The database user of space FINANCE hasn't been checked yet/);
+    expect(why(no("not-visible"), no("not-visible"))).toMatch(/none is exposed for consumption/);
+  });
+
+  it("says plainly that a tenant with only imported scans can't have a database user", () => {
+    expect(why(no("no-database-user"), no("no-database-user"), false)).toMatch(/^This tenant only has imported scans, so it has no Datasphere URL and no database user/);
   });
 });

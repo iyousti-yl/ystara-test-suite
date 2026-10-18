@@ -6,6 +6,7 @@ import {
   createScan,
   createTenant,
   deletePipeline,
+  deleteTenant,
   getConnection,
   getPipeline,
   getScan,
@@ -97,6 +98,15 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
     app.get("/tenants/:id", { config: read }, async (req, reply) => {
       const tenant = await ownTenant(req, id.parse(req.params).id);
       return tenant ?? reply.code(404).send({ error: "Tenant not found" });
+    });
+
+    // Removes the tenant from Ystara with everything stored for it (deleteTenant). Nothing changes in Datasphere.
+    app.delete("/tenants/:id", { config: { access: "tenant.connect" } }, async (req, reply) => {
+      const tenant = await ownTenant(req, id.parse(req.params).id);
+      if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
+      await deleteTenant(db, tenant.id);
+      req.log.info({ userId: signedIn(req).userId, accountId: tenant.accountId, tenantId: tenant.id }, "tenant deleted with its scans, pipelines, snapshots and stored secrets");
+      return reply.code(204).send();
     });
 
     app.get("/tenants/:id/scans", { config: read }, async (req, reply) => {

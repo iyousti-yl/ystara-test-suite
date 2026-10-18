@@ -470,3 +470,10 @@ section.block > ui5-title {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* --- What goes with a deleted tenant */
+
+.deleted-with {
+  margin: 0;
+  padding-left: 1.25rem;
+}

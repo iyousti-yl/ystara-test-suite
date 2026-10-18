@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createSnapshot, getPipeline, getSnapshotDetails, getTenant, latestSucceededScan, listSnapshots, type Db } from "@ystara/db";
-import { JOBS, type SnapshotJobData } from "@ystara/shared";
+import { JOBS, whyNothingMeasurable, type SnapshotJobData } from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
 import type { JobQueue } from "../server.js";
 import { computePipeline } from "./discovery.js";
@@ -15,13 +15,14 @@ import { computePipeline } from "./discovery.js";
 const id = z.object({ id: z.string().uuid() });
 
 export function snapshotRoutes(db: Db, queue: JobQueue) {
-  /** The pipeline, when its tenant belongs to the signed-in account. */
-  async function ownPipeline(req: FastifyRequest, pipelineId: string) {
+  /** The pipeline and its tenant, when the tenant belongs to the signed-in account. */
+  async function ownPipelineAndTenant(req: FastifyRequest, pipelineId: string) {
     const pipeline = await getPipeline(db, pipelineId);
     if (!pipeline) return undefined;
     const tenant = await getTenant(db, pipeline.tenantId);
-    return tenant?.accountId === signedIn(req).accountId ? pipeline : undefined;
+    return tenant?.accountId === signedIn(req).accountId ? { pipeline, tenant } : undefined;
   }
+  const ownPipeline = async (req: FastifyRequest, pipelineId: string) => (await ownPipelineAndTenant(req, pipelineId))?.pipeline;
 
   return async (app: FastifyInstance) => {
     app.get("/pipelines/:id/snapshots", { config: { access: "runs.read" } }, async (req, reply) => {
@@ -30,16 +31,17 @@ export function snapshotRoutes(db: Db, queue: JobQueue) {
       return listSnapshots(db, pipeline.id);
     });
 
-    // Take a snapshot now. Refused when none of the steps can be measured: the pipeline page says why for each one.
+    // Take a snapshot now. Refused when none of the steps can be measured, saying what would change that.
     app.post("/pipelines/:id/snapshots", { config: { access: "runs.execute" } }, async (req, reply) => {
-      const pipeline = await ownPipeline(req, id.parse(req.params).id);
-      if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
+      const own = await ownPipelineAndTenant(req, id.parse(req.params).id);
+      if (!own) return reply.code(404).send({ error: "Pipeline not found" });
+      const { pipeline, tenant } = own;
       const scan = await latestSucceededScan(db, pipeline.tenantId);
       if (!scan) return reply.code(409).send({ error: "This tenant has no successful scan yet" });
       const computed = await computePipeline(db, scan, pipeline.output, pipeline.excludeWriters);
       if (!computed) return reply.code(409).send({ error: `${pipeline.output.space}.${pipeline.output.technicalName} is not in the latest scan` });
       if (!Object.values(computed.measurement).some((m) => m.measurable)) {
-        return reply.code(409).send({ error: "None of this pipeline's steps can be measured with SQL yet. Its page says why for each step." });
+        return reply.code(409).send({ error: whyNothingMeasurable(computed.pipeline.steps, computed.measurement, tenant.host !== null) });
       }
       const snapshot = await createSnapshot(db, { tenantId: pipeline.tenantId, pipelineId: pipeline.id, requestedBy: signedIn(req).userId });
       await queue.send(JOBS.snapshot, { snapshotId: snapshot.id } satisfies SnapshotJobData);

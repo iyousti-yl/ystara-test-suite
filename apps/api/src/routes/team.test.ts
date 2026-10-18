@@ -55,6 +55,20 @@ describe("the account admin page", () => {
     expect((await call("DELETE", `/team/members/${dev.userId}`)).statusCode).toBe(404);
   });
 
+  it("renames the account, which its members see at once; names stay unique", async () => {
+    const dev = await testUser(db, { account: "Team", email: "dev-rename@team.example.com", role: "developer" });
+    await testUser(db, { account: "Taken name", email: "admin@taken.example.com", role: "admin" });
+    expect((await call("PATCH", "/team/account", { name: "Renamed by dev" }, dev)).statusCode).toBe(403);
+    expect((await call("PATCH", "/team/account", { name: "  " })).statusCode).toBe(400);
+    expect((await call("PATCH", "/team/account", { name: "Taken name" })).statusCode).toBe(409);
+
+    const res = await call("PATCH", "/team/account", { name: "  Team renamed " });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ name: "Team renamed" });
+    expect((await call("GET", "/auth/me", undefined, dev)).json().account.name).toBe("Team renamed");
+    await call("PATCH", "/team/account", { name: "Team" });
+  });
+
   it("is for admins only", async () => {
     const dev = await testUser(db, { account: "Team", email: "dev3@team.example.com", role: "developer" });
     expect((await call("GET", "/team", undefined, dev)).statusCode).toBe(403);

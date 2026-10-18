@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label, Token, Tokenizer } from "@ui5/webcomponents-react";
-import type { PipelineResult } from "@ystara/shared";
+import { Button, Dialog, Input, Label, MessageStrip, Token, Tokenizer } from "@ui5/webcomponents-react";
+import { whyNothingMeasurable, type PipelineResult } from "@ystara/shared";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { pipelineQuery, useCan, useDeletePipeline, usePipelineOnScan, useSavedPipeline, useSavePipeline, useScan, useTakeSnapshot, useTenant } from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
-import { formatDateTime } from "../format";
+import { counted, formatDateTime } from "../format";
 import { PipelineView } from "../lineage/PipelineView";
 import { SnapshotsSection } from "./Snapshots";
 
@@ -90,6 +90,8 @@ export function SavedPipelinePage() {
   if (!result.data || !definition) return <ErrorStrip error={result.error} />;
   const output = `${definition.output.space}.${definition.output.technicalName}`;
   const measurable = Object.values(result.data.measurement).some((m) => m.measurable);
+  // Shown to those who could take a snapshot, once the tenant is known (an imported-only tenant has another reason).
+  const whyNot = !measurable && tenant.data ? whyNothingMeasurable(result.data.pipeline.steps, result.data.measurement, tenant.data.host !== null) : undefined;
 
   return (
     <div className="page page-wide">
@@ -113,7 +115,7 @@ export function SavedPipelinePage() {
                 design="Emphasized"
                 icon="camera"
                 disabled={!measurable || takeSnapshot.isPending}
-                tooltip={measurable ? "Measure the steps the database users can see" : "No step can be measured with SQL yet: select a step to see why"}
+                tooltip={measurable ? "Measure the steps the database users can see" : (whyNot ?? "No step can be measured with SQL yet")}
                 onClick={() => takeSnapshot.mutate()}
               >
                 Take snapshot
@@ -143,9 +145,14 @@ export function SavedPipelinePage() {
         }
       />
       <Exclusions patterns={definition.excludeWriters} />
+      {whyNot && can("runs.execute") && (
+        <MessageStrip design="Information" hideCloseButton>
+          No snapshot can be taken yet. {whyNot}
+        </MessageStrip>
+      )}
       <ErrorStrip error={remove.error ?? takeSnapshot.error} />
       <PipelineView result={result.data} />
-      <SnapshotsSection pipelineId={definition.id} />
+      <SnapshotsSection pipelineId={definition.id} canTake={measurable} />
     </div>
   );
 }
@@ -156,8 +163,7 @@ function Summary({ result }: { result: PipelineResult | undefined }) {
   const measurable = Object.values(result.measurement).filter((m) => m.measurable).length;
   return (
     <span>
-      {pipeline.steps.length} steps, {pipeline.entryPoints.length} entry {pipeline.entryPoints.length === 1 ? "table" : "tables"}, {measurable} measurable by
-      snapshots
+      {counted(pipeline.steps.length, "step")}, {counted(pipeline.entryPoints.length, "entry table")}, {measurable} measurable by snapshots
     </span>
   );
 }

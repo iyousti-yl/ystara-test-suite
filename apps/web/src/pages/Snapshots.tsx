@@ -8,8 +8,8 @@ import { formatDateTime, formatNumber } from "../format";
 import { notMeasurableLabel } from "../lineage/model";
 import { typeLabel } from "../objectTypes";
 
-/** A saved pipeline's snapshots, newest first; refreshed while one is taken. */
-export function SnapshotsSection({ pipelineId }: { pipelineId: string }) {
+/** A saved pipeline's snapshots, newest first; refreshed while one is taken. `canTake`: a step is measurable. */
+export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; canTake: boolean }) {
   const navigate = useNavigate();
   const snapshots = useSnapshots(pipelineId);
   return (
@@ -18,7 +18,7 @@ export function SnapshotsSection({ pipelineId }: { pipelineId: string }) {
       <ErrorStrip error={snapshots.error} />
       <Table
         loading={snapshots.isPending}
-        noDataText="No snapshots yet. Take one to measure the steps the database users can see."
+        noDataText={canTake ? "No snapshots yet. Take one to measure the steps the database users can see." : "No snapshots yet."}
         overflowMode="Popin"
         onRowClick={(e) => navigate(`/snapshots/${e.detail.row.rowKey}`)}
         headerRow={

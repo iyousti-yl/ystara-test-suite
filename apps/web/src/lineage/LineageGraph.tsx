@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   Controls,
@@ -41,6 +41,9 @@ export function LineageGraph(props: {
   const multiSpace = new Set(nodes.map((n) => n.ref.space)).size > 1;
   const [hovered, setHovered] = useState<{ key: string; cutOff: boolean }>();
   const hoveredNode = hovered && nodes.find((n) => n.key === hovered.key);
+  // The view is the person's once they press or scroll anywhere on the picture, or an object is selected.
+  const touched = useRef(false);
+  const openingFollows = useCallback(() => !touched.current && selected === undefined, [selected]);
 
   const widths = useMemo(
     () =>
@@ -98,6 +101,8 @@ export function LineageGraph(props: {
       onPaneClick={() => onSelect(undefined)}
       onNodeMouseEnter={(event, node) => setHovered({ key: node.id, cutOff: hasCutOffText(event.currentTarget as HTMLElement) })}
       onNodeMouseLeave={() => setHovered(undefined)}
+      onPointerDownCapture={() => (touched.current = true)}
+      onWheelCapture={() => (touched.current = true)}
       nodesDraggable={false}
       nodesConnectable={false}
       minZoom={0.1}
@@ -105,20 +110,32 @@ export function LineageGraph(props: {
     >
       <Background gap={20} />
       <Controls showInteractive={false} />
-      <MiniMap pannable zoomable nodeClassName={(n) => `minimap-${OBJECT_TYPE[(n as ObjectNodeType).data.node.ref.type].category}`} />
+      <RoomyMiniMap />
       {!selected && <Panel position="top-left" className="lineage-hint">Click an object for its details.</Panel>}
-      <OpeningView outputKey={nodes.find((n) => n.output)?.key} />
-      <KeepInView selected={selected} />
+      <OpeningView outputKey={nodes.find((n) => n.output)?.key} follows={openingFollows} />
+      <KeepInView selected={selected} openingFollows={openingFollows} />
       {hovered && hoveredNode && <HoverCard node={hoveredNode} cutOff={hovered.cutOff} multiSpace={multiSpace} />}
     </ReactFlow>
   );
 }
 
+/** Below this canvas width (a phone) the minimap would cover much of the picture, so it isn't shown. */
+const MINIMAP_FROM_WIDTH = 600;
+
+function RoomyMiniMap() {
+  const width = useStore((s) => s.width);
+  if (width < MINIMAP_FROM_WIDTH) return null;
+  return <MiniMap pannable zoomable nodeClassName={(n) => `minimap-${OBJECT_TYPE[(n as ObjectNodeType).data.node.ref.type].category}`} />;
+}
+
 /**
  * The first view: the whole pipeline when it fits at a readable size,
  * otherwise whole columns from its output end (openingViewport in viewport.ts).
+ * Until the person touches the picture it follows the canvas size, because
+ * the page around it settles after the picture is drawn: the snapshots below
+ * load later and make the canvas shorter.
  */
-function OpeningView({ outputKey }: { outputKey?: string }) {
+function OpeningView({ outputKey, follows }: { outputKey?: string; follows: () => boolean }) {
   const flow = useReactFlow();
   const measured = useNodesInitialized();
   const width = useStore((s) => s.width);
@@ -126,11 +143,11 @@ function OpeningView({ outputKey }: { outputKey?: string }) {
   const done = useRef(false);
 
   useEffect(() => {
-    if (!measured || done.current || width === 0 || height === 0) return;
+    if (!measured || (done.current && !follows()) || width === 0 || height === 0) return;
     done.current = true;
     const output = outputKey ? flow.getNode(outputKey) : undefined;
     void flow.setViewport(openingViewport(flow.getNodes().map(box), output && box(output), { width, height }));
-  }, [measured, flow, outputKey, width, height]);
+  }, [measured, flow, outputKey, width, height, follows]);
   return null;
 }
 
@@ -140,9 +157,10 @@ const box = (n: Node): Box => ({ ...n.position, width: n.measured?.width ?? 0, h
  * Opening or closing the details panel makes the picture narrower or wider.
  * The panel pushes the picture to the left: its right edge, where the output
  * is, stays where it was. If that hides the selected object on the left, the
- * picture moves just enough to show it. Resizing the window works the same way.
+ * picture moves just enough to show it. Resizing the window works the same way,
+ * once the opening view no longer follows the canvas.
  */
-function KeepInView({ selected }: { selected?: string }) {
+function KeepInView({ selected, openingFollows }: { selected?: string; openingFollows: () => boolean }) {
   const flow = useReactFlow();
   const width = useStore((s) => s.width);
   const previousWidth = useRef(width);
@@ -150,7 +168,7 @@ function KeepInView({ selected }: { selected?: string }) {
   useEffect(() => {
     const before = previousWidth.current;
     previousWidth.current = width;
-    if (before === 0 || width === 0 || before === width) return;
+    if (before === 0 || width === 0 || before === width || openingFollows()) return;
 
     const { y, zoom } = flow.getViewport();
     let x = flow.getViewport().x + (width - before);
@@ -162,7 +180,7 @@ function KeepInView({ selected }: { selected?: string }) {
       else if (left < MARGIN) x += MARGIN - left;
     }
     void flow.setViewport({ x, y, zoom });
-  }, [width, selected, flow]);
+  }, [width, selected, flow, openingFollows]);
   return null;
 }
 

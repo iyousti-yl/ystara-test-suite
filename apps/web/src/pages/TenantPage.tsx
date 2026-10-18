@@ -16,10 +16,21 @@ import {
 } from "@ui5/webcomponents-react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { readableSpaces } from "@ystara/shared";
-import { useCan, useConnection, usePipelines, useScans, useStartScan, useTenant, type ConnectionJson } from "../api";
+import {
+  useCan,
+  useConnection,
+  useDatabaseUsers,
+  useDeleteTenant,
+  usePipelines,
+  useScans,
+  useStartScan,
+  useTenant,
+  type ConnectionJson,
+  type TenantJson,
+} from "../api";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
-import { formatDateTime } from "../format";
+import { counted, formatDateTime } from "../format";
 import { DatabaseUsersSection } from "./DatabaseUsers";
 import { ConnectionSection, parseSpaces } from "./TenantConnection";
 
@@ -27,7 +38,7 @@ import { ConnectionSection, parseSpaces } from "./TenantConnection";
  * One tenant: how the worker logs in to it (its technical client, and the
  * database users snapshots read each space with), its scans (newest first, refreshed
  * while one runs) and its saved pipelines. `?connect=1` (after adding a
- * tenant) opens the Connect wizard.
+ * tenant) opens the Connect wizard. Admins can delete it from Ystara.
  */
 export function TenantPage() {
   const { tenantId = "" } = useParams();
@@ -38,6 +49,7 @@ export function TenantPage() {
   const scans = useScans(tenantId);
   const pipelines = usePipelines(tenantId);
   const [scanning, setScanning] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const connecting = params.get("connect") === "1" && can("tenant.connect");
   const setConnecting = (open: boolean) => setParams(open ? { connect: "1" } : {}, { replace: true });
 
@@ -51,11 +63,18 @@ export function TenantPage() {
         title={tenant.data.name}
         subtitle={tenant.data.host ?? "No Datasphere URL: this tenant only has imported scans."}
         actions={
-          can("discovery.run") && (
-            <Button design="Emphasized" icon="refresh" disabled={!tenant.data.host} onClick={() => setScanning(true)}>
-              Scan spaces
-            </Button>
-          )
+          <>
+            {can("discovery.run") && (
+              <Button design="Emphasized" icon="refresh" disabled={!tenant.data.host} onClick={() => setScanning(true)}>
+                Scan spaces
+              </Button>
+            )}
+            {can("tenant.connect") && (
+              <Button design="Transparent" icon="delete" onClick={() => setDeleting(true)}>
+                Delete
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -126,7 +145,60 @@ export function TenantPage() {
       </section>
 
       {scanning && <ScanDialog tenantId={tenantId} onClose={() => setScanning(false)} />}
+      {deleting && (
+        <DeleteTenantDialog tenant={tenant.data} scans={scans.data?.length ?? 0} pipelines={pipelines.data?.length ?? 0} onClose={() => setDeleting(false)} />
+      )}
     </div>
+  );
+}
+
+/**
+ * Says what goes with the tenant before it is deleted: everything Ystara stored
+ * for it, including the secrets it holds. Nothing in Datasphere.
+ */
+function DeleteTenantDialog({ tenant, scans, pipelines, onClose }: { tenant: TenantJson; scans: number; pipelines: number; onClose: () => void }) {
+  const navigate = useNavigate();
+  const remove = useDeleteTenant();
+  const connection = useConnection(tenant.id).data ?? null;
+  const users = useDatabaseUsers(tenant.id).data ?? [];
+  const goes = [
+    `${counted(scans, "scan")}, with the object definitions ${scans === 1 ? "it" : "they"} read`,
+    `${counted(pipelines, "saved pipeline")}, with ${pipelines === 1 ? "its" : "all their"} snapshots`,
+    connection && `the technical client ${connection.clientId}, with its stored secret`,
+    users.length > 0 && `${counted(users.length, "database user")}, with ${users.length === 1 ? "its" : "their"} stored password${users.length === 1 ? "" : "s"}`,
+  ].filter((line): line is string => typeof line === "string");
+
+  return (
+    <Dialog
+      open
+      state="Negative"
+      headerText={`Delete ${tenant.name}?`}
+      onClose={onClose}
+      footer={
+        <div className="dialog-footer">
+          <Button design="Negative" disabled={remove.isPending} onClick={() => remove.mutate(tenant.id, { onSuccess: () => navigate("/", { replace: true }) })}>
+            Delete tenant
+          </Button>
+          <Button design="Transparent" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      }
+    >
+      <div className="dialog-body">
+        <p>This removes the tenant from Ystara, with everything stored for it:</p>
+        <ul className="deleted-with">
+          {goes.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+        <MessageStrip design="Information" hideCloseButton>
+          Nothing is deleted or changed in the Datasphere tenant itself.
+        </MessageStrip>
+        <p className="muted">This can&apos;t be undone. To use the tenant again, add it, connect it and scan it again.</p>
+        <ErrorStrip error={remove.error} />
+      </div>
+    </Dialog>
   );
 }
 

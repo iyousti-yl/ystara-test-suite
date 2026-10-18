@@ -3,13 +3,16 @@ import type { FastifyInstance } from "fastify";
 import { graphFromRaw, type RawObject } from "@ystara/connector";
 import {
   createScan,
+  createSnapshot,
   getConnectionLogin,
   getDatabaseUserLogin,
   recordConnectionCheck,
   recordDatabaseCheck,
   saveScanResult,
+  saveSnapshotObject,
   setConnection,
   setDatabaseUser,
+  snapshotSalt,
   type Db,
 } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
@@ -87,6 +90,32 @@ describe("tenants", () => {
       expect(res.json().issues[0].message, host).toMatch(/hcs\.cloud\.sap/);
     }
     expect((await post("/tenants", { name: "Partner", host: "https://synthetic.eu10.hcs.cloud.sap" })).statusCode).toBe(409);
+  });
+
+  it("are deleted by admins with everything stored for them, and nothing else", async () => {
+    const { tenant, scan } = await tenantWithScan("To delete");
+    const kept = await tenantWithScan("To keep");
+    const pipeline = (await post(`/tenants/${tenant.id}/pipelines`, { name: "Gone", output: "S.V_OUT" })).json();
+    await setConnection(db, { tenantId: tenant.id, clientId: "sb-synthetic", sealedSecret: "v1.sealed", tokenUrl, spaces: ["S"], updatedBy: null });
+    await setDatabaseUser(db, { tenantId: tenant.id, space: "S", host: "synthetic.hana.prod-eu10.hanacloud.ondemand.com", user: "S#SYNTH", sealedPassword: "v1.sealed", updatedBy: null });
+    await snapshotSalt(db, tenant.id, () => "v1.sealed-salt");
+    const snapshot = await createSnapshot(db, { tenantId: tenant.id, pipelineId: pipeline.id, requestedBy: null });
+    await saveSnapshotObject(db, snapshot.id, 0, { space: "S", technicalName: "V_OUT", type: "sql_view", definitionHash: "h", status: "not_measurable", reason: "not-visible", rows: null, columns: null, tookMs: null });
+
+    const developer = await testUser(db, { account: "Customer", email: "dev-delete@customer.example.com", role: "developer" });
+    expect((await del(`/tenants/${tenant.id}`, developer)).statusCode).toBe(403);
+    expect((await del(`/tenants/${tenant.id}`)).statusCode).toBe(204);
+    expect((await get(`/tenants/${tenant.id}`)).statusCode).toBe(404);
+    expect((await del(`/tenants/${tenant.id}`)).statusCode).toBe(404);
+
+    const left = async (sql: string, id: string) => Number((await db.query<{ n: string }>(`select count(*) as n from ${sql}`, [id])).rows[0].n);
+    for (const table of ["scans", "object_definitions", "pipelines", "tenant_connections", "space_database_users", "tenant_snapshot_salts", "snapshots"]) {
+      expect(await left(`${table} where tenant_id = $1`, tenant.id), table).toBe(0);
+    }
+    expect(await left("scan_objects where scan_id = $1", scan.id)).toBe(0);
+    expect(await left("scan_edges where scan_id = $1", scan.id)).toBe(0);
+    expect(await left("snapshot_objects where snapshot_id = $1", snapshot.id)).toBe(0);
+    expect((await get(`/tenants/${kept.tenant.id}/scans`)).json()).toHaveLength(1);
   });
 });
 
@@ -273,6 +302,7 @@ describe("access", () => {
     expect((await post(`/tenants/${tenant.id}/scans`, { spaces: ["S"] }, outsider)).statusCode).toBe(404);
     expect((await post(`/tenants/${tenant.id}/pipelines`, { name: "Theirs", output: "S.V_OUT" }, outsider)).statusCode).toBe(404);
     expect((await del(`/pipelines/${pipeline.id}`, outsider)).statusCode).toBe(404);
+    expect((await del(`/tenants/${tenant.id}`, outsider)).statusCode).toBe(404);
     expect((await get(`/pipelines/${pipeline.id}`)).statusCode).toBe(200);
 
     // The same tenant name is fine in another account.
