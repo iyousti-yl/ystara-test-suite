@@ -3,6 +3,19 @@ const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeS
 /** "15 Oct 2026, 21:30" in the browser's locale, or a dash. */
 export const formatDateTime = (iso: string | null | undefined) => (iso ? dateTime.format(new Date(iso)) : "–");
 
+const dateTimeSeconds = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" });
+
+/**
+ * formatDateTime for times shown side by side (snapshots in a list): to the
+ * second for those that share their minute with another, so two taken one
+ * after the other don't look the same.
+ */
+export function formatDateTimesApart(isos: (string | null | undefined)[]): (iso: string | null | undefined) => string {
+  const perMinute = new Map<string, number>();
+  for (const iso of new Set(isos)) if (iso) perMinute.set(formatDateTime(iso), (perMinute.get(formatDateTime(iso)) ?? 0) + 1);
+  return (iso) => (iso && (perMinute.get(formatDateTime(iso)) ?? 0) > 1 ? dateTimeSeconds.format(new Date(iso)) : formatDateTime(iso));
+}
+
 const number = new Intl.NumberFormat();
 
 /** "1,234" in the browser's locale, or a dash. */

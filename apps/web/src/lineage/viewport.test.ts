@@ -13,9 +13,10 @@ function pipeline(columns: number[][]): { nodes: Box[]; output: Box } {
 
 const onCanvas = (b: Box, v: Viewport) => ({ left: v.x + b.x * v.zoom, right: v.x + (b.x + b.width) * v.zoom });
 
+// Eight columns of 240px nodes: about 2.5 times the width of a 1000px canvas.
+const eight = pipeline([[240, 240], [240], [240, 240, 240], [240], [240, 240], [240], [240], [240]]);
+
 describe("opening view", () => {
-  // Eight columns of 240px nodes: about 2.5 times the width of a 1000px canvas.
-  const eight = pipeline([[240, 240], [240], [240, 240, 240], [240], [240, 240], [240], [240], [240]]);
 
   it("shows the whole pipeline when it fits at MIN_FIT_ZOOM or more", () => {
     const v = openingViewport(eight.nodes, eight.output, { width: 1200, height: 700 });
@@ -49,6 +50,38 @@ describe("opening view", () => {
       expect(left < 0 && right > 0).toBe(false);
     }
     expect(onCanvas(mixed.output, v).right).toBeLessThanOrEqual(900);
+  });
+});
+
+describe("opening view and the minimap", () => {
+  // A short, wide canvas (the compare page's picture) with the minimap in its bottom-right corner.
+  const canvas = { width: 1150, height: 350 };
+  const minimap = { x: 1150 - 15 - 200, y: 350 - 15 - 150, width: 200, height: 150 };
+  const under = (b: Box, v: Viewport) => {
+    const left = v.x + b.x * v.zoom;
+    const top = v.y + b.y * v.zoom;
+    return left < minimap.x + minimap.width && left + b.width * v.zoom > minimap.x && top < minimap.y + minimap.height && top + b.height * v.zoom > minimap.y;
+  };
+
+  it("opens a small pipeline whole and clear of the minimap", () => {
+    const small = pipeline([[240], [240], [240]]);
+    // Fitted and centred, the output would sit under the minimap.
+    expect(under(small.output, openingViewport(small.nodes, small.output, canvas))).toBe(true);
+    const v = openingViewport(small.nodes, small.output, canvas, minimap);
+    expect(small.nodes.some((n) => under(n, v))).toBe(false);
+    expect(v.zoom).toBeGreaterThanOrEqual(MIN_FIT_ZOOM);
+  });
+
+  it("keeps whole columns from the output end clear of it too", () => {
+    const v = openingViewport(eight.nodes, eight.output, canvas, minimap);
+    expect(eight.nodes.some((n) => under(n, v))).toBe(false);
+    expect(onCanvas(eight.output, v).right).toBeLessThanOrEqual(minimap.x);
+  });
+
+  it("changes nothing when no node would be under it", () => {
+    const tall = { width: 1150, height: 700 };
+    const corner = { x: 1150 - 215, y: 700 - 165, width: 200, height: 150 };
+    expect(openingViewport(eight.nodes, eight.output, tall, corner)).toEqual(openingViewport(eight.nodes, eight.output, tall));
   });
 });
 

@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router";
 import { useSnapshot, useSnapshots, useTenant, type SnapshotJson } from "../api";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
-import { formatDateTime, formatNumber } from "../format";
+import { formatDateTime, formatDateTimesApart, formatNumber } from "../format";
 import { notMeasurableLabel } from "../lineage/model";
 import { typeLabel } from "../objectTypes";
 
@@ -16,6 +16,7 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
   const navigate = useNavigate();
   const snapshots = useSnapshots(pipelineId);
   const succeeded = (snapshots.data ?? []).filter((s) => s.status === "succeeded").length;
+  const time = formatDateTimesApart((snapshots.data ?? []).map((s) => s.finishedAt ?? s.requestedAt));
   return (
     <section className="block">
       <div className="list-toolbar section-toolbar">
@@ -57,7 +58,7 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
       >
         {snapshots.data?.map((s) => (
           <TableRow key={s.id} rowKey={s.id} interactive>
-            <TableCell>{formatDateTime(s.finishedAt ?? s.requestedAt)}</TableCell>
+            <TableCell>{time(s.finishedAt ?? s.requestedAt)}</TableCell>
             <TableCell>
               <ScanStatusTag status={s.status} />
             </TableCell>

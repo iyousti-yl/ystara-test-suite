@@ -27,8 +27,30 @@ export const MARGIN = 24;
  * whole columns as fit at READABLE_ZOOM, counted from the output end (where
  * people start reading), so no column is cut at the left edge; the minimap
  * shows the rest.
+ *
+ * `minimap` is the minimap's box in canvas pixels, when it is shown. If a
+ * node would open under it (a short canvas, the output on the right), the
+ * picture opens in the part of the canvas left of the minimap instead, or
+ * above it when that shows the picture larger and clears it too.
  */
-export function openingViewport(nodes: Box[], output: Box | undefined, canvas: { width: number; height: number }): Viewport {
+export function openingViewport(nodes: Box[], output: Box | undefined, canvas: { width: number; height: number }, minimap?: Box): Viewport {
+  const view = fitted(nodes, output, canvas);
+  if (!minimap || !covers(minimap, nodes, view)) return view;
+  const beside = fitted(nodes, output, { width: minimap.x, height: canvas.height });
+  const above = fitted(nodes, output, { width: canvas.width, height: minimap.y });
+  return above.zoom > beside.zoom && !covers(minimap, nodes, above) ? above : beside;
+}
+
+/** Whether `area` (canvas pixels) hides part of a node shown at `view`. */
+function covers(area: Box, nodes: Box[], view: Viewport): boolean {
+  return nodes.some((n) => {
+    const left = view.x + n.x * view.zoom;
+    const top = view.y + n.y * view.zoom;
+    return left < area.x + area.width && left + n.width * view.zoom > area.x && top < area.y + area.height && top + n.height * view.zoom > area.y;
+  });
+}
+
+function fitted(nodes: Box[], output: Box | undefined, canvas: { width: number; height: number }): Viewport {
   if (nodes.length === 0) return { x: 0, y: 0, zoom: 1 };
   const all = bounds(nodes);
   const fit = Math.min(1, (canvas.width - 2 * MARGIN) / all.width, (canvas.height - 2 * MARGIN) / all.height);

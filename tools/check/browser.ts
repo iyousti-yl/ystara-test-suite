@@ -2,8 +2,8 @@
  * Opens the running web app in Chromium at several widths, as a signed-in
  * user, and records what a person would not see at a glance: console errors
  * and warnings, uncaught exceptions, Content-Security-Policy violations,
- * requests to any other site, failed API calls and pages wider than the
- * window. Every page and width gets a screenshot, and a page taller than the
+ * requests to any other site, failed API calls, pages wider than the
+ * window and lineage nodes the minimap covers when the picture opens. Every page and width gets a screenshot, and a page taller than the
  * window one more per screenful. It only opens pages: it clicks nothing and
  * changes nothing in the app.
  *
@@ -62,7 +62,7 @@ class Stop extends Error {}
 
 /** One thing worth a look on one page at one width. */
 interface Problem {
-  kind: "console" | "exception" | "csp" | "outside-request" | "http" | "request-failed" | "overflow";
+  kind: "console" | "exception" | "csp" | "outside-request" | "http" | "request-failed" | "overflow" | "covered";
   detail: string;
 }
 interface PageResult {
@@ -189,6 +189,18 @@ async function check(context: BrowserContext, target: PageToOpen, width: number,
   for (const v of await page.evaluate(() => (window as unknown as { __cspViolations?: string[] }).__cspViolations ?? [])) problems.push({ kind: "csp", detail: v });
   const overflow = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth);
   if (overflow > 1) problems.push({ kind: "overflow", detail: `the page is ${overflow}px wider than the window (sideways scrolling)` });
+  // The lineage picture opens clear of its minimap (openingViewport in the web app): a node under it is a layout bug.
+  const covered = await page.evaluate(() => {
+    const minimap = document.querySelector(".react-flow__minimap")?.getBoundingClientRect();
+    if (!minimap) return [];
+    return [...document.querySelectorAll(".react-flow__node")]
+      .filter((n) => {
+        const r = n.getBoundingClientRect();
+        return r.left < minimap.right && r.right > minimap.left && r.top < minimap.bottom && r.bottom > minimap.top;
+      })
+      .map((n) => n.querySelector(".lineage-node-name")?.textContent ?? "a node");
+  });
+  for (const name of covered) problems.push({ kind: "covered", detail: `the lineage minimap covers ${name} when the picture opens` });
 
   const screenshot = path.join(outDir, `${target.label}@${width}${values.dark ? "-dark" : ""}.png`);
   await page.screenshot({ path: screenshot, fullPage: true });

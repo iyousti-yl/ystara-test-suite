@@ -121,16 +121,32 @@ export function LineageGraph(props: {
 
 /** Below this canvas width (a phone) the minimap would cover much of the picture, so it isn't shown. */
 const MINIMAP_FROM_WIDTH = 600;
+/** The minimap's size, and its distance from the canvas edges (React Flow's panel margin). */
+const MINIMAP = { width: 200, height: 150, margin: 15 };
+
+/** Where the minimap sits on a canvas of this size, in canvas pixels, or undefined when it isn't shown. */
+function minimapBox(width: number, height: number): Box | undefined {
+  if (width < MINIMAP_FROM_WIDTH) return undefined;
+  return { x: width - MINIMAP.margin - MINIMAP.width, y: height - MINIMAP.margin - MINIMAP.height, width: MINIMAP.width, height: MINIMAP.height };
+}
 
 function RoomyMiniMap() {
   const width = useStore((s) => s.width);
   if (width < MINIMAP_FROM_WIDTH) return null;
-  return <MiniMap pannable zoomable nodeClassName={(n) => `minimap-${OBJECT_TYPE[(n as ObjectNodeType).data.node.ref.type].category}`} />;
+  return (
+    <MiniMap
+      pannable
+      zoomable
+      style={{ width: MINIMAP.width, height: MINIMAP.height }}
+      nodeClassName={(n) => `minimap-${OBJECT_TYPE[(n as ObjectNodeType).data.node.ref.type].category}`}
+    />
+  );
 }
 
 /**
  * The first view: the whole pipeline when it fits at a readable size,
- * otherwise whole columns from its output end (openingViewport in viewport.ts).
+ * otherwise whole columns from its output end, clear of the minimap
+ * (openingViewport in viewport.ts).
  * Until the person touches the picture it follows the canvas size, because
  * the page around it settles after the picture is drawn: the snapshots below
  * load later and make the canvas shorter.
@@ -146,7 +162,7 @@ function OpeningView({ outputKey, follows }: { outputKey?: string; follows: () =
     if (!measured || (done.current && !follows()) || width === 0 || height === 0) return;
     done.current = true;
     const output = outputKey ? flow.getNode(outputKey) : undefined;
-    void flow.setViewport(openingViewport(flow.getNodes().map(box), output && box(output), { width, height }));
+    void flow.setViewport(openingViewport(flow.getNodes().map(box), output && box(output), { width, height }, minimapBox(width, height)));
   }, [measured, flow, outputKey, width, height, follows]);
   return null;
 }

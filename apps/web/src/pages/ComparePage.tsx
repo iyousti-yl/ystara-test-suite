@@ -5,7 +5,7 @@ import { useParams, useSearchParams } from "react-router";
 import { useComparison, useSavedPipeline, useSnapshots, useTenant, type SnapshotComparisonJson, type SnapshotJson } from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
-import { counted, formatDateTime, formatDifference, formatExact, formatNumber } from "../format";
+import { counted, formatDateTimesApart, formatDifference, formatExact, formatNumber } from "../format";
 import { LineageGraph } from "../lineage/LineageGraph";
 import { lineageModel, MARK_LABEL, notMeasurableLabel, stepMarks } from "../lineage/model";
 import { typeLabel } from "../objectTypes";
@@ -76,13 +76,14 @@ export function ComparePage() {
 }
 
 function SnapshotPicker(props: { id: string; label: string; snapshots: SnapshotJson[]; value: string; onPick: (id: string) => void }) {
+  const time = formatDateTimesApart(props.snapshots.map(taken));
   return (
     <div className="compare-picker">
       <Label for={props.id}>{props.label}</Label>
       <Select id={props.id} value={props.value} onChange={(e) => props.onPick(e.detail.selectedOption.value ?? "")}>
         {props.snapshots.map((s) => (
           <Option key={s.id} value={s.id}>
-            {formatDateTime(s.finishedAt ?? s.requestedAt)}
+            {time(taken(s))}
             {s.status === "failed" ? " (failed)" : ""}
           </Option>
         ))}
@@ -217,8 +218,12 @@ function summary(c: SnapshotComparisonJson): string {
   if (definitions) parts.push(`${definitions} ${definitions === 1 ? "definition" : "definitions"} changed`);
   if (c.added.length || c.removed.length) parts.push(`${c.added.length} added, ${c.removed.length} removed`);
   if (c.measuredOnce.length) parts.push(`${c.measuredOnce.length} not compared`);
-  return `${parts.join(" · ")}. From ${formatDateTime(c.before.finishedAt ?? c.before.requestedAt)} to ${formatDateTime(c.after.finishedAt ?? c.after.requestedAt)}.`;
+  const time = formatDateTimesApart([taken(c.before), taken(c.after)]);
+  return `${parts.join(" · ")}. From ${time(taken(c.before))} to ${time(taken(c.after))}.`;
 }
+
+/** When a snapshot was taken, as the list of snapshots shows it. */
+const taken = (s: SnapshotJson) => s.finishedAt ?? s.requestedAt;
 
 const anchor = (key: string) => `step-${key}`;
 
