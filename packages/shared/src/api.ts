@@ -200,6 +200,12 @@ export interface ColumnMeasures {
   sum?: string | null;
   /** On an object with fewer rows: the sum's hash instead. */
   sumHash?: string | null;
+  /**
+   * The scale the sum was taken at: the column's own for integers and DECIMAL(p,s), 6 for floating types, which are
+   * summed as DECIMAL(38, 6) so the order HANA adds rows in can't change the last digits. Missing on snapshots from
+   * before it was stored; a comparison then assumes 0 for integers and 6 otherwise.
+   */
+  sumScale?: number;
 }
 
 /** One pipeline step in a snapshot. */

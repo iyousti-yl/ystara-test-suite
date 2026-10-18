@@ -4,6 +4,7 @@ import type { Me } from "@ystara/shared";
 import { createBrowserRouter, isRouteErrorResponse, Navigate, Outlet, useLocation, useNavigate, useRouteError } from "react-router";
 import { isUnauthorized, useMe, useSignOut, useSwitchAccount } from "./api";
 import { ErrorStrip, Loading } from "./components/Feedback";
+import { ComparePage } from "./pages/ComparePage";
 import { InvitePage } from "./pages/InvitePage";
 import { OperatorPage } from "./pages/OperatorPage";
 import { PipelineOnScanPage, SavedPipelinePage } from "./pages/PipelinePages";
@@ -36,6 +37,7 @@ export const router = createBrowserRouter([
       { path: "scans/:scanId", element: <ScanPage /> },
       { path: "scans/:scanId/pipeline", element: <PipelineOnScanPage /> },
       { path: "pipelines/:pipelineId", element: <SavedPipelinePage /> },
+      { path: "pipelines/:pipelineId/compare", element: <ComparePage /> },
       { path: "snapshots/:snapshotId", element: <SnapshotPage /> },
       { path: "users", element: <UsersPage /> },
       { path: "operator", element: <OperatorPage /> },

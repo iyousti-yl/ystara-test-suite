@@ -1,4 +1,4 @@
-import { refKey, type DspEdge, type GraphNode, type Measurability, type Pipeline } from "@ystara/shared";
+import { refKey, type DspEdge, type DspObjectRef, type GraphNode, type Measurability, type Pipeline, type Verdict } from "@ystara/shared";
 
 /**
  * Turns a pipeline (from the API) into what the lineage picture draws: one
@@ -22,6 +22,8 @@ export interface LineageNode {
   inLoop: boolean;
   /** Whether a snapshot can measure it with SQL, and if not, why. Undefined for an excluded writer, which is no step. */
   measurement?: Measurability;
+  /** On a comparison of two snapshots: what changed in this step (StepMark). */
+  mark?: StepMark;
 }
 
 export interface LineageEdge {
@@ -110,3 +112,31 @@ export function notMeasurableLabel(reason: Exclude<Measurability, { measurable: 
     "not-visible": "Not exposed for consumption",
   }[reason];
 }
+
+/**
+ * What a comparison of two snapshots says about a step, drawn on its node: a
+ * verdict for a step measured in both; "not_compared" for one measured in
+ * only one of them (its definition unchanged); "added" for a step only the
+ * later snapshot has. A step measured in neither is marked only when its
+ * definition changed.
+ */
+export type StepMark = Verdict | "not_compared" | "added";
+
+export function stepMarks(c: { compared: (DspObjectRef & { verdict: Verdict })[]; measuredOnce: StepChangeRef[]; definitionsOnly: StepChangeRef[]; added: DspObjectRef[] }) {
+  const marks = new Map<string, StepMark>();
+  for (const o of c.compared) marks.set(refKey(o), o.verdict);
+  for (const s of c.measuredOnce) marks.set(refKey(s), s.definitionChanged ? "definition_changed" : "not_compared");
+  for (const s of c.definitionsOnly) if (s.definitionChanged) marks.set(refKey(s), "definition_changed");
+  for (const a of c.added) marks.set(refKey(a), "added");
+  return marks;
+}
+type StepChangeRef = DspObjectRef & { definitionChanged: boolean };
+
+export const MARK_LABEL: Record<StepMark, string> = {
+  unchanged: "Unchanged",
+  data_changed: "Data changed",
+  definition_changed: "Definition changed",
+  both: "Data and definition changed",
+  not_compared: "Not compared",
+  added: "New step",
+};

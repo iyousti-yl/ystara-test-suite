@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assertSelectOnly, NotSelectError } from "./readonly.js";
-import { checkDatabaseUser, columnMetrics, measureObject, metricsQuery, quoteIdentifier, SqlReader } from "./sql.js";
+import { checkDatabaseUser, columnMetrics, measureObject, metricsQuery, quoteIdentifier, SqlReader, sumScale } from "./sql.js";
 
 // A stand-in for hdb that records what reaches the database. `rowsFor` answers each statement; `failWith` fails every call.
 const sent: { sql: string; params?: unknown[] }[] = [];
@@ -92,6 +92,17 @@ describe("columnMetrics", () => {
     expect(columnMetrics("BOOLEAN")).toEqual(["nonNull", "distinct"]);
     expect(columnMetrics("NCLOB")).toEqual(["nonNull"]);
   });
+
+  it("takes sums exactly: integers and DECIMAL(p,s) at their scale, floating types at 6 decimals", () => {
+    expect(sumScale("INTEGER", 0)).toEqual({ scale: 0, floating: false });
+    expect(sumScale("BIGINT", null)).toEqual({ scale: 0, floating: false });
+    expect(sumScale("DECIMAL", 2)).toEqual({ scale: 2, floating: false });
+    expect(sumScale("decimal", 6)).toEqual({ scale: 6, floating: false });
+    for (const [type, scale] of [["DECIMAL", null], ["DECIMAL", undefined], ["DOUBLE", null], ["REAL", null], ["SMALLDECIMAL", null], ["DECIMAL", 32767]] as const) {
+      expect(sumScale(type, scale), `${type} ${scale}`).toEqual({ scale: 6, floating: true });
+    }
+    expect(sumScale("NVARCHAR", null)).toBeUndefined();
+  });
 });
 
 const salt = "ab".repeat(32);
@@ -103,7 +114,7 @@ describe("metricsQuery", () => {
       "ORDERS_SYNTH_V",
       [
         { name: "ORDER_ID", dataType: "NVARCHAR" },
-        { name: "AMOUNT", dataType: "DECIMAL" },
+        { name: "AMOUNT", dataType: "DECIMAL", scale: 2 },
         { name: 'ODD"NAME;--', dataType: "NCLOB" },
       ],
       salt,
@@ -121,6 +132,31 @@ describe("metricsQuery", () => {
     expect(columns.map((c) => c.metrics.length)).toEqual([4, 6, 1]);
   });
 
+  it("sums floating columns at a fixed scale, so the order HANA adds rows in can't change the last digits", () => {
+    const { sql, columns } = metricsQuery(
+      "SALES",
+      "ORDERS_SYNTH_V",
+      [
+        { name: "RATE", dataType: "DOUBLE", scale: null },
+        { name: "SHARE", dataType: "DECIMAL", scale: null },
+        { name: "QTY", dataType: "INTEGER", scale: 0 },
+      ],
+      salt,
+    );
+    const hashed = (value: string) => `hash_sha256(hextobin('${salt}'), to_binary(to_nvarchar(${value})))`;
+    for (const [i, c] of [[0, "RATE"], [1, "SHARE"]] as const) {
+      expect(sql).toContain(`case when count(*) >= 10 then sum(cast("${c}" as decimal(38, 6))) end as "c${i}_sum"`);
+      expect(sql).toContain(`case when count(*) < 10 then ${hashed(`sum(cast("${c}" as decimal(38, 6)))`)} end as "c${i}_sumHash"`);
+    }
+    expect(sql).toContain('case when count(*) >= 10 then sum("QTY") end as "c2_sum"');
+    expect(() => assertSelectOnly(sql)).not.toThrow();
+    expect(columns.map((c) => c.sum)).toEqual([
+      { scale: 6, floating: true },
+      { scale: 6, floating: true },
+      { scale: 0, floating: false },
+    ]);
+  });
+
   it("writes nothing but a hex salt into the statement", () => {
     for (const bad of ["", "AB".repeat(32), "ab".repeat(31), `${"ab".repeat(31)}')`]) {
       expect(() => metricsQuery("SALES", "ORDERS_SYNTH_V", [{ name: "A", dataType: "DATE" }], bad), bad).toThrow("salt");
@@ -135,8 +171,8 @@ describe("measureObject", () => {
     rowsFor = (sql) =>
       sql.includes("view_columns")
         ? [
-            { name: "ORDER_ID", dataType: "NVARCHAR" },
-            { name: "AMOUNT", dataType: "DECIMAL" },
+            { name: "ORDER_ID", dataType: "NVARCHAR", scale: null },
+            { name: "AMOUNT", dataType: "DECIMAL", scale: 2 },
           ]
         : [{ rows: 24, c0_nonNull: 24, c0_distinct: 24, c0_minHash: hash("01"), c0_maxHash: hash("02"), c1_nonNull: 20, c1_distinct: 7, c1_minHash: hash("03"), c1_maxHash: hash("04"), c1_sum: "1234.50", c1_sumHash: null }];
     const sql = await SqlReader.connect(user);
@@ -144,7 +180,7 @@ describe("measureObject", () => {
       rows: 24,
       columns: [
         { name: "ORDER_ID", dataType: "NVARCHAR", nonNull: 24, distinct: 24, minHash: "01".repeat(32), maxHash: "02".repeat(32) },
-        { name: "AMOUNT", dataType: "DECIMAL", nonNull: 20, distinct: 7, minHash: "03".repeat(32), maxHash: "04".repeat(32), sum: "1234.50", sumHash: null },
+        { name: "AMOUNT", dataType: "DECIMAL", nonNull: 20, distinct: 7, minHash: "03".repeat(32), maxHash: "04".repeat(32), sum: "1234.50", sumHash: null, sumScale: 2 },
       ],
     });
     expect(sent.filter((s) => s.sql !== "(dropped)").map((s) => s.params)).toEqual([["SALES", "ORDERS_SYNTH_V"], undefined]);
@@ -152,7 +188,7 @@ describe("measureObject", () => {
 
   it("reads a table's columns from table_columns, and keeps an empty object's hashes empty", async () => {
     rowsFor = (sql) =>
-      sql.includes("table_columns") ? [{ name: "DAY", dataType: "DATE" }] : [{ rows: 0, c0_nonNull: 0, c0_distinct: 0, c0_minHash: null, c0_maxHash: null }];
+      sql.includes("table_columns") ? [{ name: "DAY", dataType: "DATE", scale: null }] : [{ rows: 0, c0_nonNull: 0, c0_distinct: 0, c0_minHash: null, c0_maxHash: null }];
     const sql = await SqlReader.connect(user);
     expect(await measureObject(sql, "SALES", { name: "CALENDAR_SYNTH", type: "TABLE" }, salt)).toEqual({
       rows: 0,

@@ -4,6 +4,7 @@ import { graphFromRaw, type RawObject } from "@ystara/connector";
 import {
   createPipeline,
   createScan,
+  createSnapshot,
   createTenant,
   finishSnapshot,
   getDatabaseUserLogin,
@@ -125,5 +126,64 @@ describe("snapshots", () => {
     expect((await call("POST", `/pipelines/${pipeline.id}/snapshots`, stranger)).statusCode).toBe(404);
     expect((await call("GET", `/snapshots/${snapshot.id}`, stranger)).statusCode).toBe(404);
     expect((await call("GET", "/snapshots/not-an-id", admin)).statusCode).toBe(400);
+  });
+});
+
+describe("comparing two snapshots", () => {
+  /** A snapshot of V_OUT as the worker leaves it, taken at `at`; "running" leaves it unfinished. */
+  async function taken(pipeline: { id: string; tenantId: string }, rows: number, at: string, status: "succeeded" | "failed" | "running" = "succeeded") {
+    const snapshot = await createSnapshot(db, { tenantId: pipeline.tenantId, pipelineId: pipeline.id, requestedBy: null });
+    await db.query("update snapshots set requested_at = $2 where id = $1", [snapshot.id, at]);
+    await startSnapshot(db, snapshot.id, null);
+    await saveSnapshotObject(db, snapshot.id, 0, {
+      space: "S",
+      technicalName: "V_OUT",
+      type: "sql_view",
+      definitionHash: "h1",
+      status: "measured",
+      reason: null,
+      rows,
+      columns: [{ name: "ID", dataType: "INTEGER", nonNull: rows, distinct: rows, minHash: "01".repeat(32), maxHash: "02".repeat(32), sum: String(rows), sumHash: null, sumScale: 0 }],
+      tookMs: 3,
+    });
+    if (status !== "running") await finishSnapshot(db, snapshot.id, { status, error: status === "failed" ? "A step failed" : undefined });
+    return snapshot;
+  }
+
+  it("compares the latest two successful ones by default, and any two the reader picks", async () => {
+    const pipeline = await pipelineOf("Compared", ["V_OUT"]);
+    expect((await call("GET", `/pipelines/${pipeline.id}/compare`, viewer)).statusCode).toBe(409);
+    const first = await taken(pipeline, 100, "2026-01-01T10:00:00Z");
+    const second = await taken(pipeline, 100, "2026-01-02T10:00:00Z");
+    const third = await taken(pipeline, 120, "2026-01-03T10:00:00Z");
+    const failed = await taken(pipeline, 90, "2026-01-04T10:00:00Z", "failed");
+
+    const latest = await call("GET", `/pipelines/${pipeline.id}/compare`, viewer);
+    expect(latest.statusCode).toBe(200);
+    expect(latest.json()).toMatchObject({
+      before: { id: second.id },
+      after: { id: third.id },
+      verdict: "data_changed",
+      compared: [{ technicalName: "V_OUT", verdict: "data_changed", rows: { before: 100, after: 120, difference: 20, percent: 20 } }],
+    });
+    expect(latest.json().before).not.toHaveProperty("objects");
+    expect((await call("GET", `/pipelines/${pipeline.id}/compare?from=${first.id}&to=${second.id}`, viewer)).json()).toMatchObject({ verdict: "unchanged" });
+    // A failed snapshot keeps what it measured, so it can be picked.
+    expect((await call("GET", `/pipelines/${pipeline.id}/compare?from=${third.id}&to=${failed.id}`, viewer)).json()).toMatchObject({ after: { id: failed.id }, verdict: "data_changed" });
+  });
+
+  it("refuses an unfinished snapshot, half a pair, and another pipeline's or account's snapshots", async () => {
+    const pipeline = await pipelineOf("Compared strictly", ["V_OUT"]);
+    const other = await pipelineOf("Other pipeline", ["V_OUT"]);
+    const done = await taken(pipeline, 10, "2026-02-01T10:00:00Z");
+    const running = await taken(pipeline, 10, "2026-02-02T10:00:00Z", "running");
+    const elsewhere = await taken(other, 10, "2026-02-03T10:00:00Z");
+    const compare = (query: string, as = admin) => call("GET", `/pipelines/${pipeline.id}/compare${query}`, as);
+
+    expect((await compare(`?from=${done.id}&to=${running.id}`)).json()).toEqual({ error: "A snapshot can be compared once it has finished" });
+    expect((await compare(`?from=${done.id}`)).statusCode).toBe(400);
+    expect((await compare(`?from=${done.id}&to=not-an-id`)).statusCode).toBe(400);
+    expect((await compare(`?from=${done.id}&to=${elsewhere.id}`)).statusCode).toBe(404);
+    expect((await compare(`?from=${done.id}&to=${done.id}`, stranger)).statusCode).toBe(404);
   });
 });

@@ -99,6 +99,11 @@ section.block > ui5-title {
 .mono {
   font-family: var(--sapFontFamily_Mono, "72Mono", ui-monospace, monospace);
 }
+/* Technical names have no spaces to break at: in a narrow table column they wrap anywhere instead of being cut off. */
+ui5-table-cell .mono,
+ui5-table-cell.mono {
+  overflow-wrap: anywhere;
+}
 .type-dot {
   display: inline-block;
   width: 0.5rem;
@@ -214,6 +219,78 @@ section.block > ui5-title {
   font-size: var(--sapFontSmallSize);
 }
 
+/* --- Comparing two snapshots */
+
+.section-toolbar {
+  margin-bottom: 0.5rem;
+}
+.compare-pickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin: 0.5rem 0;
+}
+.compare-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 0 1 16rem;
+}
+.compare-picker ui5-select {
+  width: 100%;
+}
+.compare-verdict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0.75rem 0 0.5rem;
+}
+.verdict-large {
+  font-size: var(--sapFontLargeSize);
+}
+.compare-graph {
+  flex: none;
+  height: 22rem;
+  margin-top: 0.5rem;
+}
+.compare-step {
+  margin: 0.5rem 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--sapGroup_ContentBorderColor);
+  border-left: 4px solid var(--sapCriticalElementColor);
+  border-radius: var(--sapElement_BorderCornerRadius);
+  background: var(--sapGroup_ContentBackground);
+  /* Room above it when the picture scrolls it into view. */
+  scroll-margin-top: 1rem;
+}
+.compare-step-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+}
+.compare-step-name {
+  font-weight: bold;
+  overflow-wrap: anywhere;
+}
+.compare-facts {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+.compare-facts li + li {
+  margin-top: 0.2rem;
+}
+.panel-intro {
+  margin: 0 0 0.5rem;
+}
+.compare-difference {
+  color: var(--sapCriticalTextColor);
+  font-weight: bold;
+  white-space: nowrap;
+}
+
 /* --- Lineage nodes and edges (React Flow) */
 
 /* Width is set per node from its names (nodeWidth in lineage/layout.ts); height is NODE_HEIGHT there. */
@@ -235,6 +312,11 @@ section.block > ui5-title {
 }
 .lineage-node.is-output {
   border-color: var(--sapPositiveElementColor);
+  border-width: 2px 2px 2px 4px;
+}
+/* A step that changed between two compared snapshots. */
+.lineage-node.is-changed {
+  border-color: var(--sapCriticalElementColor);
   border-width: 2px 2px 2px 4px;
 }
 .lineage-node.is-excluded {

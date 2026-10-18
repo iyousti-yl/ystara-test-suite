@@ -184,8 +184,8 @@ try {
       const nameColumn = chosen.type === "VIEW" ? "view_name" : "table_name";
       const columns = await step(
         `columns of ${chosen.name}`,
-        () => sql.select<{ name: string; dataType: string }>(
-          `select column_name as "name", data_type_name as "dataType" from ${columnsView} where schema_name = ? and ${nameColumn} = ? order by position`,
+        () => sql.select<{ name: string; dataType: string; scale: number | null }>(
+          `select column_name as "name", data_type_name as "dataType", scale as "scale" from ${columnsView} where schema_name = ? and ${nameColumn} = ? order by position`,
           [space, chosen.name],
         ),
         (list) => `${list.length} columns`,
@@ -199,7 +199,12 @@ try {
         // A throwaway salt: the spike times the query and prints none of its results.
         const query = metricsQuery(space, chosen.name, columns, randomBytes(32).toString("hex"));
         const measures = query.columns.reduce((n, c) => n + c.metrics.length, 1);
-        await step(`all snapshot metrics of ${chosen.name}`, () => sql.select(query.sql), () => `${measures} measures over ${columns.length} columns in one pass`);
+        const floating = query.columns.filter((c) => c.sum?.floating).length;
+        await step(
+          `all snapshot metrics of ${chosen.name}`,
+          () => sql.select(query.sql),
+          () => `${measures} measures over ${columns.length} columns in one pass (${floating} floating column(s) summed at a fixed scale)`,
+        );
       }
     }
   }

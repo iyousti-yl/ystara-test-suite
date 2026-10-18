@@ -1,4 +1,4 @@
-import { MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Title } from "@ui5/webcomponents-react";
+import { Button, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Title } from "@ui5/webcomponents-react";
 import type { ColumnMeasures, SnapshotObject } from "@ystara/shared";
 import { useNavigate, useParams } from "react-router";
 import { useSnapshot, useSnapshots, useTenant, type SnapshotJson } from "../api";
@@ -8,13 +8,27 @@ import { formatDateTime, formatNumber } from "../format";
 import { notMeasurableLabel } from "../lineage/model";
 import { typeLabel } from "../objectTypes";
 
-/** A saved pipeline's snapshots, newest first; refreshed while one is taken. `canTake`: a step is measurable. */
+/**
+ * A saved pipeline's snapshots, newest first; refreshed while one is taken. `canTake`: a step is measurable.
+ * Compare opens the latest two successful ones side by side; other pairs are picked there.
+ */
 export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; canTake: boolean }) {
   const navigate = useNavigate();
   const snapshots = useSnapshots(pipelineId);
+  const succeeded = (snapshots.data ?? []).filter((s) => s.status === "succeeded").length;
   return (
     <section className="block">
-      <Title level="H4">Snapshots</Title>
+      <div className="list-toolbar section-toolbar">
+        <Title level="H4">Snapshots</Title>
+        <Button
+          icon="compare"
+          disabled={succeeded < 2}
+          tooltip={succeeded < 2 ? "Two successful snapshots are needed to compare" : "See what changed between the latest two snapshots"}
+          onClick={() => navigate(`/pipelines/${pipelineId}/compare`)}
+        >
+          Compare
+        </Button>
+      </div>
       <ErrorStrip error={snapshots.error} />
       <Table
         loading={snapshots.isPending}

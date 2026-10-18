@@ -138,6 +138,28 @@ const UNCOMPARABLE = new Set(["BLOB", "CLOB", "NCLOB", "TEXT", "BINTEXT", "ST_GE
 /** Below this many rows a sum could be one person's value, so it is hashed like min and max. */
 export const SMALL_OBJECT_ROWS = 10;
 
+const INTEGER = new Set(["TINYINT", "SMALLINT", "INTEGER", "BIGINT"]);
+
+/** The scale floating sums are taken at (see `sumScale`). */
+export const FLOATING_SUM_SCALE = 6;
+
+/**
+ * The scale a column's sum is taken at, or undefined when it has no sum.
+ * HANA adds integers and DECIMAL(p,s) exactly, at their own scale. Floating
+ * types (DOUBLE, REAL, SMALLDECIMAL, DECIMAL without a scale) it adds in no
+ * fixed order, and their last digits then change from one snapshot of the
+ * same data to the next: those are summed as DECIMAL(38, 6), each value
+ * rounded to 6 decimals and then added exactly, so the sum is the same every
+ * time. `scale` is the column's SCALE in HANA's catalog.
+ */
+export function sumScale(dataType: string, scale?: number | null): { scale: number; floating: boolean } | undefined {
+  const type = dataType.toUpperCase();
+  if (!NUMERIC.has(type)) return undefined;
+  if (INTEGER.has(type)) return { scale: 0, floating: false };
+  if (type === "DECIMAL" && typeof scale === "number" && scale >= 0 && scale <= 38) return { scale, floating: false };
+  return { scale: FLOATING_SUM_SCALE, floating: true };
+}
+
 /** The metrics for a column of `dataType` (HANA's DATA_TYPE_NAME). */
 export function columnMetrics(dataType: string): ColumnMetric[] {
   const type = dataType.toUpperCase();
@@ -155,8 +177,9 @@ export function columnMetrics(dataType: string): ColumnMetric[] {
  * SAP HANA functions). A sum is plain on objects with at least
  * SMALL_OBJECT_ROWS rows and hashed below that, never both.
  */
-function aggregate(metric: ColumnMetric, c: string, salt: string): string {
+function aggregate(metric: ColumnMetric, c: string, salt: string, floatingSum: boolean): string {
   const hashed = (value: string) => `hash_sha256(hextobin('${salt}'), to_binary(to_nvarchar(${value})))`;
+  const summed = floatingSum ? `sum(cast(${c} as decimal(38, ${FLOATING_SUM_SCALE})))` : `sum(${c})`;
   switch (metric) {
     case "nonNull":
       return `count(${c})`;
@@ -167,9 +190,9 @@ function aggregate(metric: ColumnMetric, c: string, salt: string): string {
     case "maxHash":
       return hashed(`max(${c})`);
     case "sum":
-      return `case when count(*) >= ${SMALL_OBJECT_ROWS} then sum(${c}) end`;
+      return `case when count(*) >= ${SMALL_OBJECT_ROWS} then ${summed} end`;
     case "sumHash":
-      return `case when count(*) < ${SMALL_OBJECT_ROWS} then ${hashed(`sum(${c})`)} end`;
+      return `case when count(*) < ${SMALL_OBJECT_ROWS} then ${hashed(summed)} end`;
   }
 }
 
@@ -178,20 +201,21 @@ function aggregate(metric: ColumnMetric, c: string, salt: string): string {
  * count, and per column the metrics of its type. Each result is named
  * c<column index>_<metric> (and "rows"), so any column name is safe. `salt` is
  * the tenant's snapshot salt in hex (32 bytes); it is the only text written
- * into the statement, and only after this check.
+ * into the statement, and only after this check. A sum is taken at the scale
+ * `sumScale` gives, from the column's `scale` in the catalog.
  */
-export function metricsQuery(schema: string, object: string, columns: { name: string; dataType: string }[], salt: string) {
+export function metricsQuery(schema: string, object: string, columns: { name: string; dataType: string; scale?: number | null }[], salt: string) {
   if (!/^[0-9a-f]{64}$/.test(salt)) throw new Error("The snapshot salt must be 32 bytes in lowercase hex");
-  const measured = columns.map((c, i) => ({ ...c, index: i, metrics: columnMetrics(c.dataType) }));
+  const measured = columns.map(({ name, dataType, scale }, i) => ({ name, dataType, index: i, metrics: columnMetrics(dataType), sum: sumScale(dataType, scale) }));
   const parts = ['count(*) as "rows"'];
-  for (const c of measured) for (const m of c.metrics) parts.push(`${aggregate(m, quoteIdentifier(c.name), salt)} as "c${c.index}_${m}"`);
+  for (const c of measured) for (const m of c.metrics) parts.push(`${aggregate(m, quoteIdentifier(c.name), salt, c.sum?.floating === true)} as "c${c.index}_${m}"`);
   return { sql: `select ${parts.join(", ")} from ${quoteIdentifier(schema)}.${quoteIdentifier(object)}`, columns: measured };
 }
 
 /** The measures in the row `metricsQuery` returned: counts as numbers, hashes in hex, sums as text. */
 export function readMeasures(row: Row, query: ReturnType<typeof metricsQuery>): ObjectMeasures {
   const columns = query.columns.map((c) => {
-    const measures: ColumnMeasures = { name: c.name, dataType: c.dataType, nonNull: 0 };
+    const measures: ColumnMeasures = { name: c.name, dataType: c.dataType, nonNull: 0, ...(c.sum && { sumScale: c.sum.scale }) };
     for (const m of c.metrics) {
       const value = row[`c${c.index}_${m}`];
       if (m === "nonNull" || m === "distinct") measures[m] = Number(value);
@@ -215,8 +239,8 @@ export interface ObjectMeasures {
  */
 export async function measureObject(sql: SqlReader, space: string, object: { name: string; type: "VIEW" | "TABLE" }, salt: string): Promise<ObjectMeasures> {
   const [columnsView, nameColumn] = object.type === "VIEW" ? ["sys.view_columns", "view_name"] : ["sys.table_columns", "table_name"];
-  const columns = await sql.select<{ name: string; dataType: string }>(
-    `select column_name as "name", data_type_name as "dataType" from ${columnsView} where schema_name = ? and ${nameColumn} = ? order by position`,
+  const columns = await sql.select<{ name: string; dataType: string; scale: number | null }>(
+    `select column_name as "name", data_type_name as "dataType", scale as "scale" from ${columnsView} where schema_name = ? and ${nameColumn} = ? order by position`,
     [space, object.name],
   );
   if (!columns.length) throw new Error(`The database user sees no columns of ${object.name}`);

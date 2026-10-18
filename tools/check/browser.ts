@@ -3,8 +3,9 @@
  * user, and records what a person would not see at a glance: console errors
  * and warnings, uncaught exceptions, Content-Security-Policy violations,
  * requests to any other site, failed API calls and pages wider than the
- * window. Every page and width gets a screenshot. It only opens pages: it
- * clicks nothing and changes nothing in the app.
+ * window. Every page and width gets a screenshot, and a page taller than the
+ * window one more per screenful. It only opens pages: it clicks nothing and
+ * changes nothing in the app.
  *
  *   npm run check:browser                                   # as the operator, or else the first admin
  *   npm run check:browser -- --as you@example.com --account "My company"
@@ -13,7 +14,8 @@
  *
  * Without --page it opens every kind of page that has data: sign-in (signed
  * out), tenants, the first tenant, its newest successful scan, its first saved
- * pipeline, Users and roles for admins and Operator for operators. --page
+ * pipeline with its newest snapshot and the comparison of its latest two,
+ * Users and roles for admins and Operator for operators. --page
  * takes a path on this app that starts with one "/", so it never opens
  * another site.
  *
@@ -23,7 +25,8 @@
  * still, the check refuses an app or database that is not on this machine.
  *
  * Output: tools/check/output/browser-<time>/ (git-ignored, the screenshots
- * can show tenant object names) with one PNG per page and width, and
+ * can show tenant object names) with one PNG per page and width (page@1440.png,
+ * then page@1440-2.png and on for each screenful further down), and
  * report.json. The exit code is 1 when anything was found.
  *
  * First time on a machine: `npx playwright install chromium`.
@@ -32,9 +35,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { chromium, type Browser, type BrowserContext } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { connect, createSession, databaseUrl, deleteSession, findUserByEmail, listUserOverviews, membershipsOf } from "@ystara/db";
-import type { PipelineDefinition, Scan, Tenant } from "@ystara/shared";
+import type { PipelineDefinition, Scan, Snapshot, Tenant } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -68,6 +71,8 @@ interface PageResult {
   width: number;
   signedIn: boolean;
   screenshot: string;
+  /** The screenfuls further down a page taller than the window, in order. */
+  more: string[];
   problems: Problem[];
   /** Expected answers, such as the 401 a signed-out page gets for "who am I". */
   notes: string[];
@@ -187,8 +192,41 @@ async function check(context: BrowserContext, target: PageToOpen, width: number,
 
   const screenshot = path.join(outDir, `${target.label}@${width}${values.dark ? "-dark" : ""}.png`);
   await page.screenshot({ path: screenshot, fullPage: true });
+  const more = await screenfuls(page, screenshot);
   await page.close();
-  return { label: target.label, path: target.path, width, signedIn: target.signedIn, screenshot: path.relative(root, screenshot), problems, notes };
+  return {
+    label: target.label,
+    path: target.path,
+    width,
+    signedIn: target.signedIn,
+    screenshot: path.relative(root, screenshot),
+    more: more.map((file) => path.relative(root, file)),
+    problems,
+    notes,
+  };
+}
+
+/**
+ * Pages scroll inside the app's main area rather than the window, so a
+ * full-page screenshot shows only the first screenful. Scroll it down a
+ * screen at a time (a little overlap, at most 5 more) and take each.
+ */
+async function screenfuls(page: Page, first: string): Promise<string[]> {
+  const files: string[] = [];
+  for (let n = 2; n <= 6; n++) {
+    const scrolled = await page.evaluate(() => {
+      const main = document.querySelector(".app-main");
+      if (!main || main.scrollTop + main.clientHeight >= main.scrollHeight - 1) return false;
+      main.scrollTop += main.clientHeight - 60;
+      return true;
+    });
+    if (!scrolled) break;
+    await page.waitForTimeout(200);
+    const file = first.replace(/\.png$/, `-${n}.png`);
+    await page.screenshot({ path: file });
+    files.push(file);
+  }
+  return files;
 }
 
 /** --as and --account, or else the operator (or the first admin) in their first account. */
@@ -226,7 +264,12 @@ async function discoverPages(cookie: string, who: { role: string; operator: bool
     const scan = (await get<Scan[]>(`/tenants/${tenant.id}/scans`)).find((s) => s.status === "succeeded");
     if (scan) pages.push({ label: "scan", path: `/scans/${scan.id}`, signedIn: true });
     const [pipeline] = await get<PipelineDefinition[]>(`/tenants/${tenant.id}/pipelines`);
-    if (pipeline) pages.push({ label: "pipeline", path: `/pipelines/${pipeline.id}`, signedIn: true });
+    if (pipeline) {
+      pages.push({ label: "pipeline", path: `/pipelines/${pipeline.id}`, signedIn: true });
+      const snapshots = await get<Snapshot[]>(`/pipelines/${pipeline.id}/snapshots`);
+      if (snapshots[0]) pages.push({ label: "snapshot", path: `/snapshots/${snapshots[0].id}`, signedIn: true });
+      if (snapshots.filter((s) => s.status === "succeeded").length >= 2) pages.push({ label: "compare", path: `/pipelines/${pipeline.id}/compare`, signedIn: true });
+    }
   }
   if (who.role === "admin") pages.push({ label: "users", path: "/users", signedIn: true });
   if (who.operator) pages.push({ label: "operator", path: "/operator", signedIn: true });

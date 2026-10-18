@@ -18,6 +18,7 @@ import type {
   SavedPipelineResult,
   Scan,
   Snapshot,
+  SnapshotComparison,
   SnapshotDetails,
   ScanGraph,
   SpaceDatabaseUser,
@@ -48,6 +49,7 @@ export type ConnectionJson = Json<TenantConnection>;
 export type DatabaseUserJson = Json<SpaceDatabaseUser>;
 export type SnapshotJson = Json<Snapshot>;
 export type SnapshotDetailsJson = Json<SnapshotDetails>;
+export type SnapshotComparisonJson = Json<SnapshotComparison>;
 
 export class ApiError extends Error {
   constructor(
@@ -384,6 +386,17 @@ export const useSnapshot = (id: string) =>
     queryKey: ["snapshots", id],
     queryFn: () => request<SnapshotDetailsJson>("GET", `/snapshots/${id}`),
     refetchInterval: (q) => pollWhile(q.state.data ? active(q.state.data.status) : false),
+  });
+
+/** Two snapshots of the pipeline compared, the earlier one first; without a pair, the latest two that succeeded. */
+/** Two snapshots compared: the pair given, or else the latest two successful ones. `enabled`: false while it is known there aren't two. */
+export const useComparison = (pipelineId: string, pair: { from: string; to: string } | undefined, enabled: boolean) =>
+  useQuery({
+    queryKey: ["pipelines", pipelineId, "compare", pair?.from ?? "", pair?.to ?? ""],
+    queryFn: () =>
+      request<SnapshotComparisonJson>("GET", `/pipelines/${pipelineId}/compare${pair ? `?${new URLSearchParams(pair).toString()}` : ""}`),
+    enabled,
+    retry: false,
   });
 
 export function useTakeSnapshot(pipelineId: string) {
