@@ -92,6 +92,11 @@ export async function buildServer(deps: { db: Db; queue: JobQueue; secrets: Secr
   // which its types don't take).
   const { trustProxy = false } = opts;
   const app = Fastify({ logger, trustProxy: typeof trustProxy === "number" ? (_address: string, hop: number) => hop < trustProxy : trustProxy });
+  // An empty JSON body is no body: scripts often send `content-type: application/json` on a DELETE. Any other
+  // body is parsed as Fastify does by default, refusing __proto__ and constructor keys.
+  const json = app.getDefaultJsonParser("error", "error");
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (req, body: string, done) => (body === "" ? done(null, undefined) : json(req, body, done)));
   await app.register(cookie);
   // Only routes that ask for it are limited (sign-in, codes, invitation links).
   await app.register(rateLimit, { global: false });

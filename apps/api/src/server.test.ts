@@ -76,6 +76,22 @@ describe("one port for the API and the web app", () => {
   });
 });
 
+describe("JSON bodies", () => {
+  const login = (payload: string) => apiOnly.inject({ method: "POST", url: "/api/auth/login", payload, headers: { "content-type": "application/json" } });
+
+  it("are still refused when they don't parse or set __proto__ or constructor", async () => {
+    for (const payload of ['{"email":', '{"__proto__":{"admin":true},"email":"a@example.com","password":"x"}', '{"constructor":{"prototype":{}}}']) {
+      expect((await login(payload)).statusCode, payload).toBe(400);
+    }
+  });
+
+  it("may be empty: an empty body is no body, which the route's own check refuses where it needs one", async () => {
+    const res = await login("");
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("Invalid request");
+  });
+});
+
 describe("the log", () => {
   it("never holds the token of an invitation or reset link", async () => {
     const lines: string[] = [];

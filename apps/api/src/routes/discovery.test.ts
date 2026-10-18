@@ -117,6 +117,12 @@ describe("tenants", () => {
     expect(await left("snapshot_objects where snapshot_id = $1", snapshot.id)).toBe(0);
     expect((await get(`/tenants/${kept.tenant.id}/scans`)).json()).toHaveLength(1);
   });
+
+  it("are deleted by scripts that send a JSON content type without a body", async () => {
+    const { tenant } = await tenantWithScan("Deleted by a script");
+    const res = await app.inject({ method: "DELETE", url: `/api/tenants/${tenant.id}`, headers: { cookie: admin.cookie, "content-type": "application/json" } });
+    expect(res.statusCode).toBe(204);
+  });
 });
 
 describe("scans", () => {
