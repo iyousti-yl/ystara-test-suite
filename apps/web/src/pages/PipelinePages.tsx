@@ -1,8 +1,20 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label, MessageStrip, Tab, TabContainer, Token, Tokenizer } from "@ui5/webcomponents-react";
+import { Button, Dialog, Input, Label, MessageStrip, Tab, TabContainer, ToggleButton, Token, Tokenizer } from "@ui5/webcomponents-react";
 import { whyNothingMeasurable, type PipelineResult } from "@ystara/shared";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { pipelineQuery, useCan, useDeletePipeline, usePipelineOnScan, useSavedPipeline, useSavePipeline, useScan, useTakeSnapshot, useTenant } from "../api";
+import {
+  pipelineQuery,
+  useCan,
+  useDeletePipeline,
+  usePipelineOnScan,
+  useSavedPipeline,
+  useSavePipeline,
+  useScan,
+  useSetWatching,
+  useTakeSnapshot,
+  useTenant,
+  useWatch,
+} from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTime } from "../format";
@@ -127,6 +139,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
                 Take snapshot
               </Button>
             )}
+            <WatchButton pipelineId={definition.id} />
             <Button
               icon="chain-link"
               onClick={() => navigate(`/scans/${result.data.scanId}/pipeline?${pipelineQuery(output, definition.excludeWriters)}`)}
@@ -179,6 +192,28 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
         </>
       )}
     </div>
+  );
+}
+
+/** Watchers get an email when a scheduled snapshot of the pipeline calls for an alert. Anyone in the account can watch. */
+function WatchButton({ pipelineId }: { pipelineId: string }) {
+  const watch = useWatch(pipelineId);
+  const setWatching = useSetWatching(pipelineId);
+  const state = watch.data;
+  const others = state ? state.watchers - (state.watching ? 1 : 0) : 0;
+  const tooltip = `${state?.watching ? "You get" : "Get"} an email when a scheduled snapshot fails or its output or definitions change.${
+    others ? ` ${others === 1 ? "1 other person watches" : `${others} other people watch`} this pipeline.` : ""
+  }`;
+  return (
+    <ToggleButton
+      icon="bell"
+      pressed={!!state?.watching}
+      disabled={!state || setWatching.isPending}
+      tooltip={tooltip}
+      onClick={() => state && setWatching.mutate(!state.watching)}
+    >
+      {state?.watching ? "Watching" : "Watch"}
+    </ToggleButton>
   );
 }
 

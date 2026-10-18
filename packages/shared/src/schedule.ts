@@ -21,6 +21,8 @@ export interface PipelineSchedule {
   cron: string;
   timeZone: string;
   nextRunAt: Date;
+  /** An alert when the output loses more than this share of its rows (percent, 1 to 100). */
+  rowDropPercent: number;
   updatedBy: string | null;
   updatedAt: Date;
 }

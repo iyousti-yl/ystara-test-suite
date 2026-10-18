@@ -1,3 +1,4 @@
+import type { SnapshotAlert } from "./alerts.js";
 import type { Measurability } from "./database-users.js";
 import type { DspEdge, DspObject, DspObjectRef, Pipeline } from "./objects.js";
 import type { Permission, Role } from "./roles.js";
@@ -237,6 +238,14 @@ export interface Snapshot {
   error: string | null;
   /** How many steps were measured, couldn't be measured, and failed. */
   counts: { measured: number; notMeasurable: number; failed: number };
+  /** The alert this scheduled snapshot raised, if it called for one (alerts.ts). */
+  alert: SnapshotAlert | null;
+}
+
+/** GET, PUT and DELETE /api/pipelines/:id/watch: whether the signed-in user watches the pipeline, and how many people do. */
+export interface WatchState {
+  watching: boolean;
+  watchers: number;
 }
 
 /** GET /api/snapshots/:id */

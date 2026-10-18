@@ -10,3 +10,4 @@ export * from "./scans.js";
 export * from "./pipelines.js";
 export * from "./snapshots.js";
 export * from "./schedules.js";
+export * from "./alerts.js";

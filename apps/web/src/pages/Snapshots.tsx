@@ -1,5 +1,5 @@
-import { Button, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Title } from "@ui5/webcomponents-react";
-import type { ColumnMeasures, SnapshotObject } from "@ystara/shared";
+import { Button, Link, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Title } from "@ui5/webcomponents-react";
+import { describeAlertReason, type ColumnMeasures, type Json, type SnapshotAlert, type SnapshotObject } from "@ystara/shared";
 import { useNavigate, useParams } from "react-router";
 import { useSchedule, useSnapshot, useSnapshots, type SnapshotJson } from "../api";
 import { monoColumnWidth } from "../columns";
@@ -66,7 +66,7 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
             <TableCell>
               <ScanStatusTag status={s.status} />
             </TableCell>
-            <TableCell>{s.scheduled ? "Scheduled" : "By hand"}</TableCell>
+            <TableCell>{s.scheduled ? (s.alert ? "Scheduled, alert" : "Scheduled") : "By hand"}</TableCell>
             <TableCell horizontalAlign="End">{s.counts.measured}</TableCell>
             <TableCell horizontalAlign="End">{s.counts.notMeasurable}</TableCell>
             <TableCell horizontalAlign="End">{s.counts.failed || "–"}</TableCell>
@@ -114,6 +114,7 @@ export function SnapshotPage() {
           {s.error}
         </MessageStrip>
       )}
+      {s.alert && <AlertStrip alert={s.alert} pipelineId={s.pipelineId} snapshotId={s.id} />}
       {(s.status === "queued" || s.status === "running") && (
         <p className="muted">The worker is measuring the steps the database users can see. This page refreshes on its own.</p>
       )}
@@ -164,6 +165,26 @@ export function SnapshotPage() {
         </Table>
       </section>
     </div>
+  );
+}
+
+/** The alert this scheduled snapshot raised: why, and whether the watchers got it. */
+function AlertStrip({ alert, pipelineId, snapshotId }: { alert: Json<SnapshotAlert>; pipelineId: string; snapshotId: string }) {
+  const navigate = useNavigate();
+  const sent: Record<SnapshotAlert["status"], string> = {
+    sent: `Emailed to ${counted(alert.recipients, "watcher")} on ${formatDateTime(alert.sentAt)}.`,
+    sending: "The email is being sent.",
+    failed: `The email could not be sent (${alert.error ?? "no reason given"}). The worker tries again a few times.`,
+    no_watchers: "Nobody watches this pipeline, so no email went out.",
+    no_mail_server: "No email went out: this Ystara has no mail server (SMTP_URL) set.",
+  };
+  return (
+    <MessageStrip design="Critical" hideCloseButton className="block wrap-anywhere">
+      <strong>This scheduled snapshot raised an alert.</strong> {alert.reasons.map(describeAlertReason).join(" ")} {sent[alert.status]}{" "}
+      {alert.comparedWith && (
+        <Link onClick={() => navigate(`/pipelines/${pipelineId}/compare?from=${alert.comparedWith}&to=${snapshotId}`)}>Compare with the snapshot before</Link>
+      )}
+    </MessageStrip>
   );
 }
 

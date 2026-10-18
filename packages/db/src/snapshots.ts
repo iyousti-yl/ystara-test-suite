@@ -1,4 +1,4 @@
-import type { ColumnMeasures, Snapshot, SnapshotDetails, SnapshotObject, SnapshotStatus } from "@ystara/shared";
+import type { AlertReason, AlertStatus, ColumnMeasures, Snapshot, SnapshotDetails, SnapshotObject, SnapshotStatus } from "@ystara/shared";
 import type { Queryable } from "./db.js";
 
 /**
@@ -23,14 +23,22 @@ interface Row {
   measured: number;
   not_measurable: number;
   failed: number;
+  alert_reasons: AlertReason[] | null;
+  alert_compared_with: string | null;
+  alert_status: AlertStatus | null;
+  alert_recipients: number | null;
+  alert_error: string | null;
+  alert_sent_at: Date | null;
 }
 
-/** A snapshot with how many of its steps were measured, couldn't be, and failed. */
+/** A snapshot with how many of its steps were measured, couldn't be, and failed, and its alert (migration 009). */
 const SELECT = `select s.*, p.name as pipeline_name,
     (select count(*)::int from snapshot_objects o where o.snapshot_id = s.id and o.status = 'measured') as measured,
     (select count(*)::int from snapshot_objects o where o.snapshot_id = s.id and o.status = 'not_measurable') as not_measurable,
-    (select count(*)::int from snapshot_objects o where o.snapshot_id = s.id and o.status = 'failed') as failed
-  from snapshots s join pipelines p on p.id = s.pipeline_id`;
+    (select count(*)::int from snapshot_objects o where o.snapshot_id = s.id and o.status = 'failed') as failed,
+    a.reasons as alert_reasons, a.compared_with as alert_compared_with, a.status as alert_status,
+    a.recipients as alert_recipients, a.error as alert_error, a.sent_at as alert_sent_at
+  from snapshots s join pipelines p on p.id = s.pipeline_id left join snapshot_alerts a on a.snapshot_id = s.id`;
 
 const toSnapshot = (r: Row): Snapshot => ({
   id: r.id,
@@ -45,10 +53,22 @@ const toSnapshot = (r: Row): Snapshot => ({
   finishedAt: r.finished_at,
   error: r.error,
   counts: { measured: r.measured, notMeasurable: r.not_measurable, failed: r.failed },
+  alert: r.alert_status
+    ? {
+        reasons: r.alert_reasons ?? [],
+        comparedWith: r.alert_compared_with,
+        status: r.alert_status,
+        recipients: r.alert_recipients ?? 0,
+        error: r.alert_error,
+        sentAt: r.alert_sent_at,
+      }
+    : null,
 });
 
-/** A queued snapshot, asked for by a person (`requestedBy`) or by the pipeline's schedule (`scheduled`). */
-/** `requestedAt`: the schedule tick's own clock, so a tick and the snapshots it queued agree on the time. Otherwise the database's. */
+/**
+ * A queued snapshot, asked for by a person (`requestedBy`) or by the pipeline's schedule (`scheduled`).
+ * `requestedAt`: the schedule tick's own clock, so a tick and the snapshots it queued agree on the time. Otherwise the database's.
+ */
 export async function createSnapshot(
   db: Queryable,
   input: { tenantId: string; pipelineId: string; requestedBy: string | null; scheduled?: boolean; requestedAt?: Date },

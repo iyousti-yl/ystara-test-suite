@@ -247,3 +247,37 @@ describe("schedules", () => {
     expect(await getSchedule(db, pipeline.id)).toBeUndefined();
   });
 });
+
+describe("watching a pipeline", () => {
+  it("is open to everyone in the account, and whoever saves a pipeline watches it", async () => {
+    const tenantPipeline = await pipelineOf("Watched", ["V_OUT"]);
+    const saved = await app.inject({
+      method: "POST",
+      url: `/api/tenants/${tenantPipeline.tenantId}/pipelines`,
+      headers: { cookie: admin.cookie },
+      payload: { name: "Saved and watched", output: "S.V_OUT" },
+    });
+    expect(saved.statusCode).toBe(201);
+    const url = `/pipelines/${saved.json().id}/watch`;
+    expect((await call("GET", url, admin)).json()).toEqual({ watching: true, watchers: 1 });
+
+    expect((await call("GET", url, viewer)).json()).toEqual({ watching: false, watchers: 1 });
+    expect((await call("PUT", url, viewer)).json()).toEqual({ watching: true, watchers: 2 });
+    expect((await call("PUT", url, viewer)).json()).toEqual({ watching: true, watchers: 2 });
+    expect((await call("DELETE", url, admin)).json()).toEqual({ watching: false, watchers: 1 });
+    expect((await call("GET", url, coordinator)).json()).toEqual({ watching: false, watchers: 1 });
+  });
+
+  it("is another account's business: 404", async () => {
+    const pipeline = await pipelineOf("Watched privately", ["V_OUT"]);
+    for (const method of ["GET", "PUT", "DELETE"] as const) expect((await call(method, `/pipelines/${pipeline.id}/watch`, stranger)).statusCode).toBe(404);
+  });
+
+  it("alerts above the row drop the schedule sets, 20% unless it says otherwise", async () => {
+    const pipeline = await pipelineOf("Alert threshold", ["V_OUT"]);
+    const url = `/pipelines/${pipeline.id}/schedule`;
+    expect((await call("PUT", url, admin, { cron: "0 6 * * *", timeZone: "UTC" })).json().schedule).toMatchObject({ rowDropPercent: 20 });
+    expect((await call("PUT", url, admin, { cron: "0 6 * * *", timeZone: "UTC", rowDropPercent: 5 })).json().schedule).toMatchObject({ rowDropPercent: 5 });
+    for (const rowDropPercent of [0, 101, 2.5]) expect((await call("PUT", url, admin, { cron: "0 6 * * *", timeZone: "UTC", rowDropPercent })).statusCode).toBe(400);
+  });
+});

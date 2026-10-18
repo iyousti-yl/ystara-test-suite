@@ -10,6 +10,9 @@ import {
   latestSucceededScan,
   listSnapshots,
   setSchedule,
+  unwatchPipeline,
+  watchPipeline,
+  watchState,
   type Db,
 } from "@ystara/db";
 import {
@@ -36,9 +39,11 @@ import { computePipeline } from "./discovery.js";
  * A pipeline can also have a schedule (a cron line in a time zone, checked by
  * checkSchedule in @ystara/shared): the worker then takes its snapshots on its
  * own. Setting or removing one needs "runs.execute", like taking a snapshot.
+ * Everyone in the account can watch a pipeline, to get an email when one of
+ * its scheduled snapshots calls for an alert (alerts.ts in @ystara/shared).
  */
 const id = z.object({ id: z.string().uuid() });
-const ScheduleBody = z.object({ cron: z.string().max(200), timeZone: z.string().max(100) });
+const ScheduleBody = z.object({ cron: z.string().max(200), timeZone: z.string().max(100), rowDropPercent: z.number().int().min(1).max(100).optional() });
 const ComparePair = z
   .object({ from: z.string().uuid().optional(), to: z.string().uuid().optional() })
   .refine((q) => (q.from === undefined) === (q.to === undefined), "Give both from and to, or neither for the latest two snapshots");
@@ -99,7 +104,14 @@ export function snapshotRoutes(db: Db, queue: JobQueue) {
       if (!check.ok) return reply.code(400).send({ error: check.error });
       const why = await whyNoSnapshot(own);
       if (why) return reply.code(409).send({ error: why });
-      const schedule = await setSchedule(db, { pipelineId: own.pipeline.id, cron: check.cron, timeZone: body.timeZone, nextRunAt: check.next[0], updatedBy: signedIn(req).userId });
+      const schedule = await setSchedule(db, {
+        pipelineId: own.pipeline.id,
+        cron: check.cron,
+        timeZone: body.timeZone,
+        nextRunAt: check.next[0],
+        rowDropPercent: body.rowDropPercent,
+        updatedBy: signedIn(req).userId,
+      });
       return { schedule };
     });
 
@@ -109,6 +121,23 @@ export function snapshotRoutes(db: Db, queue: JobQueue) {
       await deleteSchedule(db, pipeline.id);
       return reply.code(204).send();
     });
+
+    // Whether the signed-in user watches the pipeline, and how many members of the account do. Watching needs only "runs.read".
+    for (const method of ["GET", "PUT", "DELETE"] as const) {
+      app.route({
+        method,
+        url: "/pipelines/:id/watch",
+        config: { access: "runs.read" },
+        handler: async (req, reply) => {
+          const pipeline = await ownPipeline(req, id.parse(req.params).id);
+          if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
+          const { userId, accountId } = signedIn(req);
+          if (method === "PUT") await watchPipeline(db, pipeline.id, userId);
+          if (method === "DELETE") await unwatchPipeline(db, pipeline.id, userId);
+          return watchState(db, pipeline.id, userId, accountId);
+        },
+      });
+    }
 
     // Two stored snapshots of the pipeline compared (compareSnapshots in @ystara/shared): read-only, no tenant call.
     // Without from and to, the latest two that succeeded, the older one first.

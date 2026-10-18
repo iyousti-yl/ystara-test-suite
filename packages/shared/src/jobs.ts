@@ -13,6 +13,8 @@ export const JOBS = {
   snapshot: "snapshot-capture",
   /** Queue the snapshots whose pipeline schedule has come (every minute). */
   scheduleTick: "snapshot-schedule-tick",
+  /** After a scheduled snapshot: compare it with the previous one and email the watchers when it calls for an alert. */
+  snapshotAlert: "snapshot-alert",
 } as const;
 
 export interface ScanJobData {
@@ -54,3 +56,14 @@ export const SNAPSHOT_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 60 * 60 
  * schedules still due.
  */
 export const SCHEDULE_TICK_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 5 * 60, retentionMinutes: 5 };
+
+export interface SnapshotAlertJobData {
+  snapshotId: string;
+}
+
+/**
+ * Comparing two stored snapshots takes a moment; sending can meet a mail server
+ * that is briefly down, so a failed send is tried again three times, a minute
+ * apart and then longer. An alert already sent is never sent twice.
+ */
+export const SNAPSHOT_ALERT_QUEUE_OPTIONS = { retryLimit: 3, retryDelay: 60, retryBackoff: true, expireInSeconds: 5 * 60 };

@@ -27,6 +27,7 @@ import type {
   Tenant,
   TenantConnection,
   UserOverview,
+  WatchState,
 } from "@ystara/shared";
 
 /**
@@ -426,7 +427,7 @@ export const useSchedule = (pipelineId: string) =>
 export function useSetSchedule(pipelineId: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { cron: string; timeZone: string }) =>
+    mutationFn: async (input: { cron: string; timeZone: string; rowDropPercent: number }) =>
       (await request<{ schedule: ScheduleJson }>("PUT", `/pipelines/${pipelineId}/schedule`, input)).schedule,
     onSuccess: (schedule) => client.setQueryData(scheduleKey(pipelineId), schedule),
   });
@@ -437,5 +438,21 @@ export function useRemoveSchedule(pipelineId: string) {
   return useMutation({
     mutationFn: () => request<void>("DELETE", `/pipelines/${pipelineId}/schedule`),
     onSuccess: () => client.setQueryData(scheduleKey(pipelineId), null),
+  });
+}
+
+// --- Watching a pipeline
+
+const watchKey = (pipelineId: string) => ["pipelines", pipelineId, "watch"];
+
+/** Whether the signed-in user watches the pipeline (and gets its alerts), and how many people do. */
+export const useWatch = (pipelineId: string) =>
+  useQuery({ queryKey: watchKey(pipelineId), queryFn: () => request<WatchState>("GET", `/pipelines/${pipelineId}/watch`) });
+
+export function useSetWatching(pipelineId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (watching: boolean) => request<WatchState>(watching ? "PUT" : "DELETE", `/pipelines/${pipelineId}/watch`),
+    onSuccess: (state) => client.setQueryData(watchKey(pipelineId), state),
   });
 }

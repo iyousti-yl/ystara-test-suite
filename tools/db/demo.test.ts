@@ -34,6 +34,7 @@ describe("the demo tenant", () => {
       ["succeeded", true],
     ]);
     expect(await getSchedule(db, pipeline.id)).toMatchObject({ cron: "30 7 * * 1-5", timeZone: "Europe/Brussels" });
+    expect(snapshots[1].alert).toMatchObject({ status: "no_watchers", comparedWith: snapshots[0].id, reasons: [{ kind: "columns_changed" }] });
 
     const [before, after] = await Promise.all(snapshots.map((s) => getSnapshotDetails(db, s.id)));
     expect(before!.objects.map((o) => o.technicalName)).toEqual(

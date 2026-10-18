@@ -11,6 +11,7 @@ const snapshot = (id: string, objects: SnapshotObject[]): SnapshotDetails => ({
   scanId: null,
   status: "succeeded",
   scheduled: false,
+  alert: null,
   requestedAt: new Date(0),
   startedAt: null,
   finishedAt: null,

@@ -1,5 +1,5 @@
-import { Button, ComboBox, ComboBoxItem, Dialog, Input, Label, Link, MessageStrip, Title } from "@ui5/webcomponents-react";
-import { checkSchedule, describeRun, MIN_MINUTES_BETWEEN_RUNS } from "@ystara/shared";
+import { Button, ComboBox, ComboBoxItem, Dialog, Input, Label, Link, MessageStrip, StepInput, Title } from "@ui5/webcomponents-react";
+import { checkSchedule, DEFAULT_ROW_DROP_PERCENT, describeRun, MIN_MINUTES_BETWEEN_RUNS } from "@ystara/shared";
 import { useState } from "react";
 import { useCan, useRemoveSchedule, useSchedule, useSetSchedule, type ScheduleJson } from "../api";
 import { ErrorStrip } from "../components/Feedback";
@@ -24,9 +24,10 @@ function timeZones(): string[] {
 const LATE_AFTER_MS = 5 * 60 * 1000;
 
 /**
- * A saved pipeline's schedule on its Snapshots tab: the cron line, its zone and
- * the next runs, with Set, Change and Remove for those who take snapshots.
- * `whyNot`: why no snapshot can be taken yet, which also stops a schedule.
+ * A saved pipeline's schedule on its Snapshots tab: the cron line, its zone,
+ * the next runs and when watchers get an alert (the row drop that alerts is
+ * set with the schedule), with Set, Change and Remove for those who take
+ * snapshots. `whyNot`: why no snapshot can be taken yet, which also stops a schedule.
  */
 export function ScheduleSection({ pipelineId, whyNot }: { pipelineId: string; whyNot: string | undefined }) {
   const can = useCan();
@@ -76,6 +77,10 @@ function ScheduleSummary({ schedule, fetchedAt }: { schedule: ScheduleJson; fetc
       <p className="schedule-summary">
         <span className="mono">{schedule.cron}</span> <span className="muted">in {schedule.timeZone} time.</span> Next runs: {runs.join(", ")}.
       </p>
+      <p className="muted">
+        Watchers get an email when a scheduled snapshot fails, when a step&apos;s definition or columns change, or when the output goes empty or loses
+        more than {schedule.rowDropPercent}% of its rows.
+      </p>
       {late && (
         <MessageStrip design="Critical" hideCloseButton className="block">
           The run planned for {runs[0]} has not started, so the worker may be stopped. It takes the missed run once it is back.
@@ -91,8 +96,10 @@ function ScheduleDialog({ pipelineId, current, onClose }: { pipelineId: string; 
   const [openedAt] = useState(() => new Date());
   const [cron, setCron] = useState(current?.cron ?? EXAMPLES[0].cron);
   const [timeZone, setTimeZone] = useState(current?.timeZone ?? zones[0]);
+  const [rowDropPercent, setRowDropPercent] = useState(current?.rowDropPercent ?? DEFAULT_ROW_DROP_PERCENT);
   const check = checkSchedule(cron, timeZone, openedAt);
-  const submit = () => save.mutate({ cron, timeZone }, { onSuccess: onClose });
+  const dropOk = Number.isInteger(rowDropPercent) && rowDropPercent >= 1 && rowDropPercent <= 100;
+  const submit = () => save.mutate({ cron, timeZone, rowDropPercent }, { onSuccess: onClose });
 
   return (
     <Dialog
@@ -101,7 +108,7 @@ function ScheduleDialog({ pipelineId, current, onClose }: { pipelineId: string; 
       onClose={onClose}
       footer={
         <div className="dialog-footer">
-          <Button design="Emphasized" onClick={submit} disabled={!check.ok || save.isPending}>
+          <Button design="Emphasized" onClick={submit} disabled={!check.ok || !dropOk || save.isPending}>
             Save
           </Button>
           <Button design="Transparent" onClick={onClose}>
@@ -156,7 +163,15 @@ function ScheduleDialog({ pipelineId, current, onClose }: { pipelineId: string; 
             {check.error}
           </MessageStrip>
         )}
-        <p className="muted">Each run measures the steps the database users can see, as Take snapshot does.</p>
+        <Label for="schedule-drop" required>
+          Alert when the output loses more than (%)
+        </Label>
+        <StepInput id="schedule-drop" min={1} max={100} value={rowDropPercent} onChange={(e) => setRowDropPercent(e.target.value)} />
+        <p className="muted">
+          Each run measures the steps the database users can see, as Take snapshot does, and is compared with the snapshot before it. The
+          pipeline&apos;s watchers get an email when it fails, when a step&apos;s definition or columns change, or when the output goes empty or loses
+          more than this share of its rows.
+        </p>
         <ErrorStrip error={save.error} />
       </div>
     </Dialog>

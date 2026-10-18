@@ -18,6 +18,7 @@ import {
   listTenants,
   loadGraph,
   loadObject,
+  watchPipeline,
   type Db,
 } from "@ystara/db";
 import {
@@ -179,6 +180,7 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
       const input = PipelineInput.parse(req.body);
       const [space, technicalName] = input.output.split(".");
       const pipeline = await createPipeline(db, { tenantId: tenant.id, name: input.name, output: { space, technicalName }, excludeWriters: input.excludeWriters });
+      await watchPipeline(db, pipeline.id, signedIn(req).userId); // whoever saves a pipeline gets its alerts, until they unwatch it
       return reply.code(201).send(pipeline);
     });
 

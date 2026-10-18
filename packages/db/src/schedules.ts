@@ -1,4 +1,4 @@
-import type { PipelineSchedule } from "@ystara/shared";
+import { DEFAULT_ROW_DROP_PERCENT, type PipelineSchedule } from "@ystara/shared";
 import type { Queryable } from "./db.js";
 
 /** Snapshot schedules (migration 008; checkSchedule and nextRun in @ystara/shared work out the times). */
@@ -9,6 +9,7 @@ interface Row {
   cron: string;
   time_zone: string;
   next_run_at: Date;
+  row_drop_percent: number;
   updated_by: string | null;
   updated_at: Date;
 }
@@ -18,6 +19,7 @@ const toSchedule = (r: Row): PipelineSchedule => ({
   cron: r.cron,
   timeZone: r.time_zone,
   nextRunAt: r.next_run_at,
+  rowDropPercent: r.row_drop_percent,
   updatedBy: r.updated_by,
   updatedAt: r.updated_at,
 });
@@ -27,17 +29,17 @@ export async function getSchedule(db: Queryable, pipelineId: string): Promise<Pi
   return rows[0] && toSchedule(rows[0]);
 }
 
-/** Sets or replaces a pipeline's schedule; `nextRunAt` is its first run. */
+/** Sets or replaces a pipeline's schedule; `nextRunAt` is its first run. `rowDropPercent`: DEFAULT_ROW_DROP_PERCENT when not given. */
 export async function setSchedule(
   db: Queryable,
-  input: { pipelineId: string; cron: string; timeZone: string; nextRunAt: Date; updatedBy: string | null },
+  input: { pipelineId: string; cron: string; timeZone: string; nextRunAt: Date; rowDropPercent?: number; updatedBy: string | null },
 ): Promise<PipelineSchedule> {
   const { rows } = await db.query<Row>(
-    `insert into pipeline_schedules (pipeline_id, cron, time_zone, next_run_at, updated_by) values ($1, $2, $3, $4, $5)
+    `insert into pipeline_schedules (pipeline_id, cron, time_zone, next_run_at, row_drop_percent, updated_by) values ($1, $2, $3, $4, $5, $6)
      on conflict (pipeline_id) do update set cron = excluded.cron, time_zone = excluded.time_zone, next_run_at = excluded.next_run_at,
-       updated_by = excluded.updated_by, updated_at = now()
+       row_drop_percent = excluded.row_drop_percent, updated_by = excluded.updated_by, updated_at = now()
      returning *`,
-    [input.pipelineId, input.cron, input.timeZone, input.nextRunAt, input.updatedBy],
+    [input.pipelineId, input.cron, input.timeZone, input.nextRunAt, input.rowDropPercent ?? DEFAULT_ROW_DROP_PERCENT, input.updatedBy],
   );
   return toSchedule(rows[0]);
 }

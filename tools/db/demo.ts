@@ -10,12 +10,14 @@ import {
   findTenantByName,
   getSnapshot,
   saveScanResult,
+  getSnapshotDetails,
+  saveSnapshotAlert,
   saveSnapshotObject,
   setSchedule,
   startSnapshot,
   type Db,
 } from "@ystara/db";
-import { nextRun, refKey, type ColumnMeasures, type PipelineDefinition, type Scan, type Snapshot, type Tenant } from "@ystara/shared";
+import { alertReasons, DEFAULT_ROW_DROP_PERCENT, nextRun, refKey, type ColumnMeasures, type PipelineDefinition, type Scan, type Snapshot, type Tenant } from "@ystara/shared";
 
 /**
  * A synthetic tenant for looking at the web app without a real one: a scan
@@ -35,7 +37,8 @@ import { nextRun, refKey, type ColumnMeasures, type PipelineDefinition, type Sca
  * The second snapshot has more rows, a changed sum and an added column, so the
  * comparison has something in each of its sections. It is marked as taken by
  * the pipeline's schedule (weekdays at 07:30, Brussels time), which the worker
- * never runs: the tenant has no database (see schedule-tick.ts).
+ * never runs: the tenant has no database (see schedule-tick.ts). Its added
+ * column raised an alert, which nobody got: nobody watches the demo.
  */
 /** "Synthetic" in the name keeps the tenant-content check from taking it for a real tenant's, as it does with the demo's object names. */
 export const DEMO_TENANT = "Synthetic demo";
@@ -244,6 +247,10 @@ export async function loadDemo(db: Db, accountId: string): Promise<{ tenant: Ten
     }
     const [cron, timeZone] = ["30 7 * * 1-5", "Europe/Brussels"];
     await setSchedule(db, { pipelineId: pipeline.id, cron, timeZone, nextRunAt: nextRun(cron, timeZone, new Date()), updatedBy: null });
+    const [previous, current] = await Promise.all(snapshots.map((s) => getSnapshotDetails(db, s.id)));
+    const reasons = alertReasons({ previous, current: current!, output, rowDropPercent: DEFAULT_ROW_DROP_PERCENT });
+    await saveSnapshotAlert(db, current!.id, { reasons, comparedWith: previous!.id, status: "no_watchers" });
+    snapshots[1] = (await getSnapshot(db, current!.id))!;
     return { tenant, scan, pipeline, snapshots };
   } catch (e) {
     await deleteTenant(db, tenant.id);
