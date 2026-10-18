@@ -291,7 +291,7 @@ function ColumnChanges({ columns }: { columns: ColumnComparison[] }) {
       overflowMode="Popin"
       headerRow={
         <TableHeaderRow>
-          <TableHeaderCell minWidth="9rem" importance={2}>
+          <TableHeaderCell minWidth="12rem" importance={2}>
             Column
           </TableHeaderCell>
           <TableHeaderCell minWidth="10rem" importance={1}>
@@ -373,7 +373,7 @@ function NotComparedTable({ steps }: { steps: StepNotCompared[] }) {
       overflowMode="Popin"
       headerRow={
         <TableHeaderRow>
-          <TableHeaderCell minWidth="10rem" importance={2}>
+          <TableHeaderCell minWidth="14rem" importance={2}>
             Step
           </TableHeaderCell>
           <TableHeaderCell minWidth="10rem">Before</TableHeaderCell>
@@ -411,7 +411,7 @@ function DefinitionsTable({ steps }: { steps: StepNotCompared[] }) {
       overflowMode="Popin"
       headerRow={
         <TableHeaderRow>
-          <TableHeaderCell minWidth="10rem" importance={2}>
+          <TableHeaderCell minWidth="14rem" importance={2}>
             Step
           </TableHeaderCell>
           <TableHeaderCell minWidth="14rem">Not measured because</TableHeaderCell>

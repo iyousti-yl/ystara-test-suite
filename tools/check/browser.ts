@@ -3,7 +3,8 @@
  * user, and records what a person would not see at a glance: console errors
  * and warnings, uncaught exceptions, Content-Security-Policy violations,
  * requests to any other site, failed API calls, pages wider than the
- * window and lineage nodes the minimap covers when the picture opens. Every page and width gets a screenshot, and a page taller than the
+ * window, text a box cuts off, technical names broken mid-word in a column
+ * too narrow for them, and lineage nodes the minimap covers when the picture opens. Every page and width gets a screenshot, and a page taller than the
  * window one more per screenful. It only opens pages: it clicks nothing and
  * changes nothing in the app.
  *
@@ -63,7 +64,7 @@ class Stop extends Error {}
 
 /** One thing worth a look on one page at one width. */
 interface Problem {
-  kind: "console" | "exception" | "csp" | "outside-request" | "http" | "request-failed" | "overflow" | "covered";
+  kind: "console" | "exception" | "csp" | "outside-request" | "http" | "request-failed" | "overflow" | "clipped" | "broken-name" | "covered";
   detail: string;
 }
 interface PageResult {
@@ -190,6 +191,52 @@ async function check(context: BrowserContext, target: PageToOpen, width: number,
   for (const v of await page.evaluate(() => (window as unknown as { __cspViolations?: string[] }).__cspViolations ?? [])) problems.push({ kind: "csp", detail: v });
   const overflow = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth);
   if (overflow > 1) problems.push({ kind: "overflow", detail: `the page is ${overflow}px wider than the window (sideways scrolling)` });
+  // Text that sticks out of a box which hides its overflow (a card, say): it is cut off, and since the page itself
+  // doesn't get wider, the check above can't see it. The walk goes up through slots and shadow roots, because UI5
+  // components clip inside their own shadow DOM. Boxes that scroll, and the lineage picture, are left alone.
+  const clipped = await page.evaluate(() => {
+    const found: string[] = [];
+    for (const el of document.querySelectorAll(".app-main *")) {
+      const text = el.textContent?.trim() ?? "";
+      if (el.children.length > 0 || !text || el.closest(".react-flow")) continue;
+      const box = el.getBoundingClientRect();
+      if (box.width === 0 || box.height === 0) continue;
+      let up: Element | null = el.assignedSlot ?? el.parentElement ?? (el.parentNode as ShadowRoot | null)?.host ?? null;
+      while (up && !up.classList.contains("app-main")) {
+        const overflow = getComputedStyle(up).overflowX;
+        if (overflow === "auto" || overflow === "scroll") break;
+        const frame = up.getBoundingClientRect();
+        if ((overflow === "hidden" || overflow === "clip") && (box.right > frame.right + 1 || box.left < frame.left - 1)) {
+          found.push(text.slice(0, 60));
+          break;
+        }
+        up = up.assignedSlot ?? up.parentElement ?? (up.parentNode as ShadowRoot | null)?.host ?? null;
+      }
+    }
+    return [...new Set(found)];
+  });
+  for (const text of clipped) problems.push({ kind: "clipped", detail: `"${text}" runs out of its box and is cut off` });
+  // A technical name has no spaces, so in a table it can only wrap mid-word. That is a problem when it would fit on
+  // one line in most of the table's width: its column is too narrow, and could move the other columns under the row.
+  const broken = await page.evaluate(() => {
+    const found: string[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>(".app-main ui5-table-cell .mono, .app-main ui5-table-cell.mono")) {
+      const text = el.textContent?.trim() ?? "";
+      if (el.children.length > 0 || !text || /\s/.test(text)) continue;
+      const room = (el.closest("ui5-table")?.clientWidth ?? 0) * 0.8;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      if (new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size < 2) continue;
+      const style = el.style.cssText;
+      el.style.whiteSpace = "nowrap";
+      el.style.overflowWrap = "normal";
+      const natural = range.getBoundingClientRect().width;
+      el.style.cssText = style;
+      if (natural < room) found.push(text.slice(0, 60));
+    }
+    return [...new Set(found)];
+  });
+  for (const name of broken) problems.push({ kind: "broken-name", detail: `${name} breaks mid-word in a table column, though one line of the table would hold it` });
   // The lineage picture opens clear of its minimap (openingViewport in the web app): a node under it is a layout bug.
   const covered = await page.evaluate(() => {
     const minimap = document.querySelector(".react-flow__minimap")?.getBoundingClientRect();

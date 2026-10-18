@@ -136,7 +136,7 @@ export function SnapshotPage() {
           overflowMode="Popin"
           headerRow={
             <TableHeaderRow>
-              <TableHeaderCell minWidth="10rem" importance={1}>
+              <TableHeaderCell minWidth="14rem" importance={1}>
                 Step
               </TableHeaderCell>
               <TableHeaderCell minWidth="10rem">Result</TableHeaderCell>
@@ -189,7 +189,7 @@ function ColumnsTable({ columns }: { columns: ColumnMeasures[] }) {
       overflowMode="Popin"
       headerRow={
         <TableHeaderRow>
-          <TableHeaderCell minWidth="9rem" importance={2}>
+          <TableHeaderCell minWidth="12rem" importance={2}>
             Column
           </TableHeaderCell>
           <TableHeaderCell minWidth="7rem" importance={-1}>

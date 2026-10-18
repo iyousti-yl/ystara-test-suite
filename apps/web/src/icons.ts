@@ -7,6 +7,7 @@ import "@ui5/webcomponents-icons/dist/chain-link.js";
 import "@ui5/webcomponents-icons/dist/compare.js";
 import "@ui5/webcomponents-icons/dist/connected.js";
 import "@ui5/webcomponents-icons/dist/copy.js";
+import "@ui5/webcomponents-icons/dist/database.js";
 import "@ui5/webcomponents-icons/dist/delete.js";
 import "@ui5/webcomponents-icons/dist/edit.js";
 import "@ui5/webcomponents-icons/dist/group.js";

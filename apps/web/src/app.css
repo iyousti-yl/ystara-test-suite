@@ -141,10 +141,12 @@ ui5-table-cell.mono,
 .overview-body > p {
   margin: 0;
 }
+/* A technical client's ID is one long word ("sb-…!b…|client!b…"): it wraps inside the card instead of running out of it. */
 .overview-facts {
   margin: 0;
   padding: 0;
   list-style: none;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;

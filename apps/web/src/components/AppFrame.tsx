@@ -10,7 +10,7 @@ import {
   ShellBarBranding,
   SideNavigation,
   SideNavigationItem,
-  SideNavigationSubItem,
+  SideNavigationGroup,
   Text,
   UserMenu,
   UserMenuAccount,
@@ -105,16 +105,12 @@ function AppMenu({ me, slot }: { me: Me; slot?: string }) {
       {item("discovery", "Discovery", "search")}
       {item("pipelines", "Pipelines", "process")}
       {tenantId && (
-        // Opens its first entry: on a phone, a click that only unfolded it would close the menu too.
-        <SideNavigationItem
-          icon="connected"
-          text="Connection"
-          data-to={appPath("connection", tenantId)}
-          expanded={app === "connection" || app === "database-users" || undefined}
-        >
-          <SideNavigationSubItem text="Technical client" data-to={appPath("connection", tenantId)} selected={app === "connection"} />
-          <SideNavigationSubItem text="Database users" data-to={appPath("database-users", tenantId)} selected={app === "database-users"} />
-        </SideNavigationItem>
+        // A group rather than a parent item: its title only folds it (on a phone a parent item's click closes the menu too),
+        // and it draws no divider between the title and the arrow.
+        <SideNavigationGroup text="Connection" expanded>
+          {item("connection", "Technical client", "connected")}
+          {item("database-users", "Database users", "database")}
+        </SideNavigationGroup>
       )}
     </SideNavigation>
   );
