@@ -236,6 +236,21 @@ describe("a pipeline simulation", () => {
     expect(given.output).toBeDefined();
   });
 
+  it("says once that a flow's own target starts empty, however often its SQL reads it", () => {
+    const space = structuredClone(SALES_SPACE);
+    const flow = space.find((o) => o.technicalName === "TF_REGION_LOAD")!.definition as {
+      transformationflows: Record<string, { contents: { processes: Record<string, { metadata: { config: { definition: Record<string, string> } } }> } }>;
+    };
+    const step = flow.transformationflows.TF_REGION_LOAD.contents.processes.sqltransform1.metadata.config.definition;
+    const key = "@DataWarehouse.sqlEditor.query";
+    step[key] = step[key].replace(";", ' AND NOT EXISTS (SELECT 1 FROM "LT_REGION_TOTALS" u WHERE u."REGION" = "V_REGION_TOTALS"."REGION");');
+    const graph = graphFromRaw(space, ["SALES"]);
+    const sim = simulatePipeline(graph, buildPipeline(graph, { space: "SALES", technicalName: "V_REGION_OUT" }));
+    const load = sim.steps.find((s) => s.ref.technicalName === "TF_REGION_LOAD")!;
+    expect(load.note).toBe("compiled from its SQL step; its own target LT_REGION_TOTALS starts empty (full load)");
+    expect(load.reads.map((r) => r.technicalName)).toEqual(["V_REGION_TOTALS", "LT_REGION_TOTALS"]);
+  });
+
   it("returns what the pipeline's logic gives over the fixtures (run on PostgreSQL)", async () => {
     const graph = graphFromRaw(SALES_SPACE, ["SALES"]);
     const pipeline = buildPipeline(graph, { space: "SALES", technicalName: "V_REGION_OUT" });

@@ -105,10 +105,12 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
     const node = nodes.get(key);
     if (!node) throw new SimulationStop(`it reads ${parts.join(".")}, which isn't in the scan, so nothing can stand in for it`);
     if (!inPipeline.has(key)) throw new SimulationStop(`it reads ${node.technicalName}, which isn't part of the pipeline`);
-    step.reads.push({ space: node.space, technicalName: node.technicalName, type: node.type });
+    if (!step.reads.some((r) => refKey(r) === key)) step.reads.push({ space: node.space, technicalName: node.technicalName, type: node.type });
     // A flow that reads the table it loads (a delta check): at a full load, that table is empty.
     if (TABLE_TYPES.has(node.type) && writersOf(key).some((w) => w === reader)) {
-      step.note += `; its own target ${node.technicalName} starts empty (full load)`;
+      // Said once, however often the flow's SQL reads its target.
+      const empty = `; its own target ${node.technicalName} starts empty (full load)`;
+      if (!step.note.includes(empty)) step.note += empty;
       return fixtureQuery(node.technicalName, tableColumns(node.definition, node.technicalName).columns, []);
     }
     if (building.has(key)) throw new SimulationStop(`it reads ${node.technicalName}, which reads it back (a loop)`);
