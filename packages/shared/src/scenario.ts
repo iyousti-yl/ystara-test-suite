@@ -90,6 +90,7 @@ export const ScenarioSpec = z.object({
 });
 
 export type ScenarioSpec = z.infer<typeof ScenarioSpec>;
+export type Fixture = z.infer<typeof Fixture>;
 export type Assertion = z.infer<typeof Assertion>;
 
 export function parseScenarioYaml(text: string): ScenarioSpec {
@@ -98,4 +99,11 @@ export function parseScenarioYaml(text: string): ScenarioSpec {
 
 export function toScenarioYaml(spec: ScenarioSpec): string {
   return YAML.stringify(spec);
+}
+
+/** Fixtures from YAML: a scenario's `fixtures`, or a list of { table, rows }. */
+export function parseFixturesYaml(text: string): Fixture[] {
+  const parsed: unknown = YAML.parse(text);
+  const list = Array.isArray(parsed) ? parsed : (parsed as { fixtures?: unknown } | null)?.fixtures;
+  return z.array(Fixture).parse(list);
 }

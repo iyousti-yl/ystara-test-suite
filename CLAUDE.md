@@ -32,4 +32,5 @@ npm run account:create -- --name <ACCOUNT> --admin <email>   # create an account
 npm run operator:grant -- --email <email> [--revoke]         # make an existing user the operator (operator panel)
 npm run check:tenant-content -- [--base <branch>] [--head <commit>] [--file <path>]   # tenant names in what is about to be pushed
 npm run check:browser -- [--as <email>] [--tenant <NAME>] [--page /path] [--dark]   # the local web app in Chromium at 4 widths, every tenant, with screenshots
+npm run spike:simulate -- --output <OBJECT> [--from <scan folder>] [--run] [--oracle]   # phase 3 spike: compile a pipeline into fixture-only SELECTs; --run sends them
 ```

@@ -8,3 +8,4 @@ export * from "./discovery/scan.js";
 export * from "./discovery/mermaid.js";
 export * from "./mask.js";
 export * from "./sql.js";
+export * from "./simulate/index.js";

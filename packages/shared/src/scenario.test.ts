@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseScenarioYaml, toScenarioYaml } from "./scenario.js";
+import { parseFixturesYaml, parseScenarioYaml, toScenarioYaml } from "./scenario.js";
 
 const sample = `
 name: New hire with no manager
@@ -35,5 +35,18 @@ describe("scenario spec", () => {
   it("rejects an unknown assertion type", () => {
     const bad = sample.replace("type: row_count", "type: magic");
     expect(() => parseScenarioYaml(bad)).toThrow();
+  });
+});
+
+describe("fixtures YAML", () => {
+  it("reads a scenario's fixtures, or a plain list of tables and rows", () => {
+    expect(parseFixturesYaml(sample)).toEqual([
+      { table: "SF_EMPLOYEE_RAW", rows: [{ EMP_ID: "E1", MANAGER_ID: null, HIRE_DATE: "2026-01-15", STATUS: "A" }], truncate: true },
+    ]);
+    expect(parseFixturesYaml("- table: LT_A\n  rows: [{ ID: 1 }]\n- table: LT_B\n  rows: []\n").map((f) => [f.table, f.rows])).toEqual([
+      ["LT_A", [{ ID: 1 }]],
+      ["LT_B", []],
+    ]);
+    expect(() => parseFixturesYaml("name: no fixtures here")).toThrow();
   });
 });

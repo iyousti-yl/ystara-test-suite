@@ -37,43 +37,19 @@
  *     min and max hashed in the database with a salt, and a sum for numbers).
  */
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { metricsQuery, quoteIdentifier, SqlReader } from "@ystara/connector";
-import { databaseUserProblem } from "@ystara/shared";
-import { loadLocalEnv, unquotedHashKeys } from "@ystara/shared/env";
+import { loadLocalEnv } from "@ystara/shared/env";
+import { databaseUserFromEnv, requiredEnv } from "./database-user.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 loadLocalEnv(root);
 
-// Before anyone signs in: a value cut short by an unquoted # only fails, and repeated failures can lock the user.
-const appFile = path.join(root, ".env.local");
-const cut = existsSync(appFile) ? unquotedHashKeys(readFileSync(appFile, "utf8"), ["DSP_DB_USER", "DSP_DB_PASSWORD"]) : [];
-if (cut.length) {
-  console.error(
-    `${cut.join(" and ")} in .env.local ${cut.length === 1 ? "has" : "have"} an unquoted #, which starts a comment, so only the part before it is read. ` +
-      "Put the value in single quotes (double quotes if it has a ' in it), e.g. DSP_DB_USER='SPACE#SUFFIX'. Nothing was sent to the tenant.",
-  );
-  process.exit(1);
-}
-
-const env = (name: string) => {
-  const value = process.env[name]?.trim();
-  if (!value) {
-    console.error(`${name} is missing in .env.local. This spike needs DSP_DB_HOST, DSP_DB_USER, DSP_DB_PASSWORD and DSP_SPACE.`);
-    process.exit(1);
-  }
-  return value;
-};
-const db = { host: env("DSP_DB_HOST"), port: Number(process.env.DSP_DB_PORT?.trim() || 443), user: env("DSP_DB_USER"), password: env("DSP_DB_PASSWORD") };
-const userProblem = databaseUserProblem(db.user);
-if (userProblem) {
-  console.error(`DSP_DB_USER: ${userProblem}. In .env.local, quote the value (DSP_DB_USER='SPACE#SUFFIX'): an unquoted # starts a comment. Nothing was sent to the tenant.`);
-  process.exit(1);
-}
+const NEEDS = "This spike needs DSP_DB_HOST, DSP_DB_USER, DSP_DB_PASSWORD and DSP_SPACE.";
+const db = databaseUserFromEnv(root, NEEDS);
 // The space the user belongs to, when DSP_SPACE lists it; else the first one.
-const spaces = env("DSP_SPACE").split(",").map((s) => s.trim()).filter(Boolean);
+const spaces = requiredEnv("DSP_SPACE", NEEDS).split(",").map((s) => s.trim()).filter(Boolean);
 const own = db.user.split("#")[0];
 const space = spaces.includes(own) ? own : spaces[0];
 const target = process.env.DSP_SQL_OBJECT?.trim();

@@ -28,7 +28,6 @@
  *   lineage.md      Mermaid diagram (the pipeline if --output is given, otherwise the whole space)
  *   pipeline.json   steps, entry points, excluded and ambiguous writers, cycles (with --output)
  */
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -37,6 +36,7 @@ import { parseArgs } from "node:util";
 import { DatasphereCli, buildPipeline, graphFromRaw, maskSecrets, readSpaces, toMermaid, type RawObject } from "@ystara/connector";
 import type { LineageGraph, Pipeline } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
+import { excludeWritersFor, loadScanConfig } from "./config.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 loadLocalEnv(root);
@@ -94,9 +94,8 @@ let pipeline: Pipeline | undefined;
 let excludeWriters: string[] = [];
 if (values.output) {
   const [space, name] = values.output.includes(".") ? values.output.split(".", 2) : [spaces[0], values.output];
-  const config = await loadConfig(values.config ? path.resolve(values.config) : path.join(root, "tools", "scan", "scan.local.json"), Boolean(values.config));
-  const forOutput = config.pipelines?.[`${space}.${name}`] ?? config.pipelines?.[name];
-  excludeWriters = [...(config.excludeWriters ?? []), ...(forOutput?.excludeWriters ?? []), ...(values["exclude-writer"] ?? [])];
+  const config = await loadScanConfig(root, values.config);
+  excludeWriters = excludeWritersFor(config, space, name, values["exclude-writer"]);
   pipeline = buildPipeline(graph, { space, technicalName: name }, { excludeWriters });
 }
 
@@ -144,23 +143,4 @@ function printSummary(g: LineageGraph, p?: Pipeline) {
       console.log(`Cycle: ${c.map((s) => s.technicalName).join(", ")} depend on each other; their order above is by name.`);
     }
   }
-}
-
-interface ScanConfig {
-  excludeWriters?: string[];
-  pipelines?: Record<string, { excludeWriters?: string[] }>;
-}
-
-async function loadConfig(file: string, required: boolean): Promise<ScanConfig> {
-  if (!existsSync(file)) {
-    if (required) throw new Error(`Config file not found: ${file}`);
-    return {};
-  }
-  const config = JSON.parse(await readFile(file, "utf8")) as ScanConfig;
-  const lists = [config.excludeWriters, ...Object.values(config.pipelines ?? {}).map((p) => p.excludeWriters)];
-  if (!lists.every((l) => l === undefined || (Array.isArray(l) && l.every((x) => typeof x === "string")))) {
-    throw new Error(`${file}: excludeWriters must be a list of names or patterns.`);
-  }
-  console.log(`Using ${path.relative(root, file)}`);
-  return config;
 }

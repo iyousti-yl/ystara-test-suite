@@ -111,6 +111,8 @@ In Claude Code, `/datasphere-scan HR --output V_HEADCOUNT_OUT` hands the scan to
 
 `npm run spike:cli` lists and reads one object of each kind and reports what the installed CLI supports. Read-only.
 
+**Simulating a pipeline (phase 3 spike).** `npm run spike:simulate -- --output V_HEADCOUNT_OUT` takes the newest saved scan (or `--from tools/scan/output/<run>`) and turns each step of the pipeline into one SELECT that reads nothing but `DUMMY`: tables become fixtures inlined in the statement, SQL views and SQL transformation flows are compiled from their SQL, graphical views from their CSN query. It sends nothing until you add `--run`, which runs each step's SELECT through the database user of `.env.local` (as for `npm run spike:sql`) and reports rows or the database's first error line. `--oracle` (with `--run`) also compares each exposed view with the SQL it was deployed as, over the same fixtures. A table without a fixture gets made-up rows (`--rows`, 3 by default); `--fixtures file.yaml` gives real-looking ones, as a scenario's `fixtures` or a list of `{ table, rows }`. A step that can't be compiled says why, and so does every step that reads it: nothing ever falls back to reading the real object. Results land in `tools/spike/output/simulate-<time>/` (git-ignored).
+
 ## Read-only guarantee
 
 Ystara never creates, changes, deletes or runs anything in a Datasphere tenant. Every CLI call goes through `assertReadOnly` in `packages/connector/src/readonly.ts`, which allows only `list` and `read` (plus `config cache init`, which only downloads the CLI's list of commands) and throws on anything else. Changing that file is a product decision, not a code detail.
