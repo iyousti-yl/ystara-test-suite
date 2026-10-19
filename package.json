@@ -21,6 +21,7 @@
     "spike:technical-client": "tsc -b && tsx tools/spike/technical-client.ts",
     "spike:sql": "tsc -b && tsx tools/spike/sql-access.ts",
     "spike:simulate": "tsc -b && tsx tools/spike/simulate.ts",
+    "scenario:run": "tsc -b && tsx tools/scenario/run.ts",
     "scan": "tsc -b && tsx tools/scan/scan.ts",
     "db:migrate": "tsc -b && node packages/db/dist/run-migrations.js",
     "db:import": "tsc -b && tsx tools/db/import-scan.ts",

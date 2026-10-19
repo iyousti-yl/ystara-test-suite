@@ -26,15 +26,16 @@
  * compiled step's SQL with its values (queries/) and, with --run, up to 20
  * result rows per step (results/), which come from the fixtures.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { buildPipeline, graphFromRaw, SimulationStop, SqlReader, simulatePipeline, type Fragment, type RawObject, type SimulatedStep } from "@ystara/connector";
+import { buildPipeline, SimulationStop, SqlReader, simulatePipeline, type Fragment, type SimulatedStep } from "@ystara/connector";
 import { parseFixturesYaml } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 import { excludeWritersFor, loadScanConfig } from "../scan/config.js";
+import { loadSavedScan, objectIn } from "../scan/saved.js";
 import { databaseUserFromEnv } from "./database-user.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -57,10 +58,8 @@ if (!values.output) {
   process.exit(1);
 }
 
-const from = values.from ? path.resolve(values.from) : newestScan();
-const saved = JSON.parse(readFileSync(path.join(from, "raw.json"), "utf8")) as { spaces: string[]; raw: RawObject[]; warnings: string[] };
-const graph = graphFromRaw(saved.raw, saved.spaces, saved.warnings);
-const [space, name] = values.output.includes(".") ? values.output.split(".", 2) : [saved.spaces[0], values.output];
+const { from, spaces, graph } = loadSavedScan(root, values.from);
+const { space, technicalName: name } = objectIn(spaces, values.output);
 const config = await loadScanConfig(root, values.config);
 const pipeline = buildPipeline(graph, { space, technicalName: name }, { excludeWriters: excludeWritersFor(config, space, name, values["exclude-writer"]) });
 const fixtures = values.fixtures ? readFixtures(values.fixtures) : undefined;
@@ -190,17 +189,6 @@ function readFixtures(file: string) {
     process.exit(1);
   }
   return new Map(list.map((f) => [f.table, f.rows ?? []]));
-}
-
-/** The newest scan folder with a raw.json. */
-function newestScan(): string {
-  const dir = path.join(root, "tools", "scan", "output");
-  const runs = existsSync(dir) ? readdirSync(dir).filter((d) => existsSync(path.join(dir, d, "raw.json"))).sort() : [];
-  if (!runs.length) {
-    console.error("No saved scan in tools/scan/output. Run npm run scan -- --space <SPACE> first, or give --from.");
-    process.exit(1);
-  }
-  return path.join(dir, runs.at(-1)!);
 }
 
 function firstLine(e: unknown, password: string): string {

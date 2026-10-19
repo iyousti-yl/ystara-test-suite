@@ -11,6 +11,7 @@
     "scan/**/*.ts",
     "db/**/*.ts",
     "check/**/*.ts",
-    "spike/**/*.ts"
+    "spike/**/*.ts",
+    "scenario/**/*.ts"
   ]
 }

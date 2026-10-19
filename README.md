@@ -111,7 +111,38 @@ In Claude Code, `/datasphere-scan HR --output V_HEADCOUNT_OUT` hands the scan to
 
 `npm run spike:cli` lists and reads one object of each kind and reports what the installed CLI supports. Read-only.
 
-**Simulating a pipeline (phase 3 spike).** `npm run spike:simulate -- --output V_HEADCOUNT_OUT` takes the newest saved scan (or `--from tools/scan/output/<run>`) and turns each step of the pipeline into one SELECT that reads nothing but `DUMMY`: tables become fixtures inlined in the statement, SQL views and SQL transformation flows are compiled from their SQL, graphical views from their CSN query. It sends nothing until you add `--run`, which runs each step's SELECT through the database user of `.env.local` (as for `npm run spike:sql`) and reports rows or the database's first error line. `--oracle` (with `--run`) also compares each exposed view with the SQL it was deployed as, over the same fixtures; when the database user can't read that SQL, as with Datasphere's views, it compares only the view's column names and order and marks the line `cols`. A table without a fixture gets made-up rows (`--rows`, 3 by default); `--fixtures file.yaml` gives real-looking ones, as a scenario's `fixtures` or a list of `{ table, rows }`. A step that can't be compiled says why, and so does every step that reads it: nothing ever falls back to reading the real object. Results land in `tools/spike/output/simulate-<time>/` (git-ignored).
+**Simulating a pipeline (phase 3 spike).** `npm run spike:simulate -- --output V_HEADCOUNT_OUT` takes the newest saved scan (or `--from tools/scan/output/<run>`) and turns each step of the pipeline into one SELECT that reads nothing but `DUMMY`: tables become fixtures inlined in the statement, SQL views and SQL transformation flows are compiled from their SQL, graphical views from their CSN query. It sends nothing until you add `--run`, which runs each step's SELECT through the database user of `.env.local` (as for `npm run spike:sql`) and reports rows or the database's first error line. `--oracle` (with `--run`) also compares each exposed view with the SQL it was deployed as, over the same fixtures; when the database user can't read that SQL, as with Datasphere's views, it compares only the view's column names and order and marks the line `cols`. A table without a fixture gets made-up rows (`--rows`, 3 by default); `--fixtures file.yaml` gives real-looking ones, as a scenario's `fixtures` or a list of `{ table, rows }`. Rows given for a table stand in for it, also in place of a transformation flow that loads it. A step that can't be compiled says why, and so does every step that reads it: nothing ever falls back to reading the real object. Results land in `tools/spike/output/simulate-<time>/` (git-ignored).
+
+**Running a scenario (phase 3a).** A scenario is a YAML file: the pipeline's output, test rows for its tables, and what you expect at any of its steps (`packages/shared/src/scenario.ts`). This one is for the synthetic sales pipeline the tests run (`packages/connector/src/simulate/scenario.test.ts`):
+
+```yaml
+name: Region totals
+kind: golden
+pipeline: SALES.V_REGION_OUT
+fixtures:
+  - table: LT_ORDERS
+    rows:
+      - { ORDER_ID: "1", CUSTOMER_ID: C1, AMOUNT: 10.5, STATUS: OPEN }
+      - { ORDER_ID: "2", CUSTOMER_ID: C1, AMOUNT: 4.5, STATUS: OPEN }
+      - { ORDER_ID: "3", CUSTOMER_ID: C2, AMOUNT: 3, STATUS: OPEN }
+  - table: LT_CUSTOMERS
+    rows:
+      - { CUSTOMER_ID: C1, REGION: NORTH }
+      - { CUSTOMER_ID: C2, REGION: SOUTH }
+expect:
+  - checkpoint: V_REGION_OUT
+    assertions:
+      - { type: row_count, equals: 2 }
+      - { type: unique, columns: [REGION] }
+      - { type: no_nulls, columns: [REGION, TOTAL] }
+      - { type: aggregate, column: TOTAL, fn: sum, equals: 18 }
+      - type: rows_equal
+        key: [REGION]
+        rows: [{ REGION: NORTH, TOTAL: 15 }, { REGION: SOUTH, TOTAL: 3 }]
+      - { type: sql, query: "SELECT COUNT(*) FROM {{checkpoint}} WHERE TOTAL > 10", equals: 1 }
+```
+
+`npm run scenario:run -- --file tools/scenario/region-totals.local.yaml` compiles it over the newest saved scan, as the spike does, and runs each assertion as one SELECT over its step's result through the database user of `.env.local`, then prints pass or FAIL with what came back. `--compile-only` sends nothing. A table the scenario gives no rows for is empty, so a result depends only on what the scenario says; rows given for a table loaded by a transformation flow stand in for that flow, so a scenario can start in the middle of a pipeline. Write numbers as numbers (`TOTAL: 15` matches the decimal `15.00`), and put text that looks like a number in quotes (`"007"` stays `"007"`). A scenario that names a real tenant's objects belongs in a file ending in `.local.yaml`, which git ignores.
 
 ## Read-only guarantee
 

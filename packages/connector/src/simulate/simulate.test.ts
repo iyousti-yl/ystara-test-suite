@@ -1,4 +1,3 @@
-import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 import { refKey } from "@ystara/shared";
 import { HR_SPACE } from "../discovery/fixtures/hr-space.js";
@@ -9,6 +8,7 @@ import { compileCsnQuery } from "./csn.js";
 import { fixtureQuery, sampleRows, tableColumns } from "./fixtures.js";
 import { fragment, SimulationStop, type Fragment } from "./fragment.js";
 import { SALES_SPACE } from "./fixtures/sales-space.js";
+import { withPostgres } from "./postgres-testing.js";
 import { MAX_BOUND_VALUES, simulatePipeline } from "./simulate.js";
 import { assertReadsOnlyDummy, inlineReferences } from "./sql-text.js";
 
@@ -232,7 +232,7 @@ describe("a pipeline simulation", () => {
     const given = simulatePipeline(graph, buildPipeline(graph, { space: "HR", technicalName: "V_HEADCOUNT_OUT" }), {
       fixtures: new Map([["LT_EMPLOYEE_ENRICHED", [{ EMP_ID: "E1", ORG_ID: "O1", TENURE: "2" }]]]),
     });
-    expect(given.steps.find((s) => s.ref.technicalName === "LT_EMPLOYEE_ENRICHED")!.note).toMatch(/^fixture with 1 given row, because TF_EMPLOYEE_ENRICH, which loads it, can't be compiled/);
+    expect(given.steps.find((s) => s.ref.technicalName === "LT_EMPLOYEE_ENRICHED")!.note).toMatch(/^fixture with 1 given row, in place of TF_EMPLOYEE_ENRICH, which loads it/);
     expect(given.output).toBeDefined();
   });
 
@@ -294,10 +294,7 @@ describe("a pipeline simulation", () => {
       "compiled from its SQL step; its own target LT_REGION_TOTALS starts empty (full load)",
     );
 
-    const pg = new PGlite();
-    try {
-      await pg.exec('create table dummy ("DUMMY" varchar(1)); insert into dummy values (\'X\')');
-      const run = async (f: Fragment) => (await pg.query(toPostgres(f).sql, f.params)).rows;
+    await withPostgres(async (run) => {
       expect(await run(sim.output!)).toEqual([
         { REGION: "NORTH", TOTAL: "15.00" },
         { REGION: "SOUTH", TOTAL: "3.00" },
@@ -307,19 +304,11 @@ describe("a pipeline simulation", () => {
         { REGION: "NORTH", TOTAL: "15.00", SIZE: "MANY" },
         { REGION: "SOUTH", TOTAL: "3.00", SIZE: "ONE" },
       ]);
-    } finally {
-      await pg.close();
-    }
+    });
   });
 });
 
 /** The query sorted by its first column, for a stable comparison. */
 function concatOrdered(f: Fragment): Fragment {
   return { sql: `SELECT * FROM (${f.sql}) AS "_Q" ORDER BY 1`, params: f.params };
-}
-
-/** SAP HANA SQL of the synthetic pipeline as PostgreSQL reads it: numbered placeholders, VARCHAR for NVARCHAR. */
-function toPostgres(f: Fragment): Fragment {
-  let n = 0;
-  return { sql: f.sql.replace(/\?/g, () => `$${++n}`).replace(/NVARCHAR\(/g, "VARCHAR("), params: f.params };
 }
