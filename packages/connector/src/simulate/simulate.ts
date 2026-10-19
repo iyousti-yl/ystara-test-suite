@@ -60,6 +60,23 @@ export interface SimulationOptions {
 
 type Entity = Record<string, unknown>;
 
+/**
+ * The most values SAP HANA binds to one statement. Each step's SQL is pasted
+ * wherever a later step reads it (the read-only guard takes no WITH), so a
+ * pipeline that reads the same steps many times can go over it: such a step
+ * stops before anything is sent, and the steps before it still run.
+ */
+export const MAX_BOUND_VALUES = 32_767;
+
+/** Stops a query SAP HANA would refuse for its number of bound values. */
+function assertFits(query: Fragment): void {
+  if (query.params.length <= MAX_BOUND_VALUES) return;
+  const n = (v: number) => v.toLocaleString("en-US");
+  throw new SimulationStop(
+    `its query needs ${n(query.params.length)} values, more than the ${n(MAX_BOUND_VALUES)} SAP HANA takes in one statement, because each step it reads is repeated wherever it is read`,
+  );
+}
+
 export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: SimulationOptions = {}): Simulation {
   const nodes = new Map(graph.nodes.map((n) => [refKey(n), n]));
   const inPipeline = new Set(pipeline.steps.map(refKey));
@@ -84,7 +101,10 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
     try {
       const result = compile(node, step);
       // The last check before anything can be sent, whatever compiled the step.
-      if (result.query) assertReadsOnlyDummy(result.query.sql);
+      if (result.query) {
+        assertReadsOnlyDummy(result.query.sql);
+        assertFits(result.query);
+      }
       // standIn may have added a sentence while compiling (an own target that starts empty).
       step.note = `${result.note}${step.note}`;
       step.query = result.query;
@@ -173,6 +193,7 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
     if (!node) throw new SimulationStop(`${refKey(ref)} isn't in the scan`);
     const query = inlineFor(node, { ref, note: "", reads: [] }, sql);
     assertReadsOnlyDummy(query.sql);
+    assertFits(query);
     return query;
   };
   return { steps, output: built.get(refKey(pipeline.output))?.query, inline };

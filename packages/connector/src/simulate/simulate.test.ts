@@ -9,7 +9,7 @@ import { compileCsnQuery } from "./csn.js";
 import { fixtureQuery, sampleRows, tableColumns } from "./fixtures.js";
 import { fragment, SimulationStop, type Fragment } from "./fragment.js";
 import { SALES_SPACE } from "./fixtures/sales-space.js";
-import { simulatePipeline } from "./simulate.js";
+import { MAX_BOUND_VALUES, simulatePipeline } from "./simulate.js";
 import { assertReadsOnlyDummy, inlineReferences } from "./sql-text.js";
 
 /** A composed query must read nothing but DUMMY: every FROM and JOIN opens a subquery or names DUMMY. */
@@ -249,6 +249,21 @@ describe("a pipeline simulation", () => {
     const load = sim.steps.find((s) => s.ref.technicalName === "TF_REGION_LOAD")!;
     expect(load.note).toBe("compiled from its SQL step; its own target LT_REGION_TOTALS starts empty (full load)");
     expect(load.reads.map((r) => r.technicalName)).toEqual(["V_REGION_TOTALS", "LT_REGION_TOTALS"]);
+  });
+
+  it("stops a step whose query needs more values than SAP HANA binds to one statement, before anything is sent", () => {
+    const graph = graphFromRaw(SALES_SPACE, ["SALES"]);
+    // 4 columns: one row more than fits.
+    const rows = Array.from({ length: Math.floor(MAX_BOUND_VALUES / 4) + 1 }, (_, i) => ({ ORDER_ID: String(i), CUSTOMER_ID: "C1", AMOUNT: 1, STATUS: "OPEN" }));
+    const sim = simulatePipeline(graph, buildPipeline(graph, { space: "SALES", technicalName: "V_REGION_OUT" }), { fixtures: new Map([["LT_ORDERS", rows]]) });
+    const step = (name: string) => sim.steps.find((s) => s.ref.technicalName === name)!;
+    expect(step("LT_ORDERS").problem).toBe(
+      "its query needs 32,768 values, more than the 32,767 SAP HANA takes in one statement, because each step it reads is repeated wherever it is read",
+    );
+    expect(step("LT_ORDERS").query).toBeUndefined();
+    expect(step("V_OPEN_ORDERS").problem).toBe("it reads LT_ORDERS, which can't be simulated");
+    expect(step("LT_CUSTOMERS").query).toBeDefined();
+    expect(sim.output).toBeUndefined();
   });
 
   it("returns what the pipeline's logic gives over the fixtures (run on PostgreSQL)", async () => {
