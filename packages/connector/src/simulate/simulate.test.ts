@@ -259,6 +259,10 @@ describe("a pipeline simulation", () => {
     ]);
     const sim = simulatePipeline(graph, pipeline, { fixtures });
     expect(sim.steps.filter((s) => s.problem)).toEqual([]);
+    // Its flow's SQL step is a CSN entity holding the SQL text, as Datasphere stores it.
+    expect(sim.steps.find((s) => s.ref.technicalName === "TF_REGION_LOAD")!.note).toBe(
+      "compiled from its SQL step; its own target LT_REGION_TOTALS starts empty (full load)",
+    );
 
     const pg = new PGlite();
     try {

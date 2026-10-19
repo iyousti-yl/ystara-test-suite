@@ -95,12 +95,37 @@ WHERE o."STATUS" = 'OPEN';`,
           kind: "sap.dwc.transformationflow",
           contents: {
             processes: {
-              sql1: {
-                component: "com.sap.dwc.sqlscript",
+              sqltransform1: {
+                component: "com.sap.dwc.sqltransform",
                 metadata: {
                   config: {
-                    definition: `SELECT "REGION", "TOTAL" FROM "V_REGION_TOTALS"
-WHERE NOT EXISTS (SELECT 1 FROM "LT_REGION_TOTALS" t WHERE t."REGION" = "V_REGION_TOTALS"."REGION")`,
+                    // The SQL step as a CSN entity: its SQL text (with comments and a final semicolon), its CQN and its columns.
+                    definition: {
+                      kind: "entity",
+                      "@DataWarehouse.sqlEditor.query": `-- Regions not loaded yet
+-- (a delta check on the flow's own target)
+SELECT "REGION", "TOTAL" FROM "V_REGION_TOTALS"
+WHERE NOT EXISTS (SELECT 1 FROM "LT_REGION_TOTALS" t WHERE t."REGION" = "V_REGION_TOTALS"."REGION");
+`,
+                      query: {
+                        SELECT: {
+                          from: { ref: ["V_REGION_TOTALS"] },
+                          columns: [{ ref: ["REGION"] }, { ref: ["TOTAL"] }],
+                          where: [
+                            "not",
+                            "exists",
+                            {
+                              SELECT: {
+                                from: { ref: ["LT_REGION_TOTALS"], as: "t" },
+                                columns: [{ val: 1 }],
+                                where: [{ ref: ["t", "REGION"] }, "=", { ref: ["V_REGION_TOTALS", "REGION"] }],
+                              },
+                            },
+                          ],
+                        },
+                      },
+                      elements: { REGION: text(20), TOTAL: amount },
+                    },
                   },
                 },
               },

@@ -183,13 +183,18 @@ function entityOf(node: DspObject): Entity {
   return entity;
 }
 
-/** The SQL of a transformation flow's one SQL step (`contents.processes.<step>.metadata.config.definition`). */
+/**
+ * The SQL of a transformation flow's one SQL step: `contents.processes.<step>.metadata.config.definition`,
+ * either the SQL text itself or a CSN entity that holds it under `@DataWarehouse.sqlEditor.query`.
+ */
 function flowSql(node: DspObject): string {
   const flow = (node.definition as { transformationflows?: Record<string, { contents?: { processes?: Record<string, unknown> } }> } | undefined)?.transformationflows?.[
     node.technicalName
   ];
   const processes = Object.values(flow?.contents?.processes ?? {}) as { component?: string; metadata?: { config?: { definition?: unknown } } }[];
-  const sql = processes.map((p) => p.metadata?.config?.definition).filter((d): d is string => typeof d === "string");
+  const sqlOf = (definition: unknown) =>
+    typeof definition === "string" ? definition : (definition as Entity | undefined)?.["@DataWarehouse.sqlEditor.query"];
+  const sql = processes.map((p) => sqlOf(p.metadata?.config?.definition)).filter((d): d is string => typeof d === "string");
   if (sql.length === 1) return sql[0];
   if (sql.length > 1) throw new SimulationStop("it has several SQL steps, which the simulation can't chain yet");
   throw new SimulationStop("it has no SQL step (a graphical transformation can't be compiled yet)");
