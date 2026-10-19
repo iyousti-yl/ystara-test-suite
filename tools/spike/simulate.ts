@@ -31,7 +31,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { buildPipeline, graphFromRaw, SimulationStop, SqlReader, simulatePipeline, type Fragment, type RawObject } from "@ystara/connector";
+import { buildPipeline, graphFromRaw, SimulationStop, SqlReader, simulatePipeline, type Fragment, type RawObject, type SimulatedStep } from "@ystara/connector";
 import { parseFixturesYaml } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 import { excludeWritersFor, loadScanConfig } from "../scan/config.js";
@@ -107,6 +107,8 @@ if (values.run) {
   await mkdir(path.join(outDir, "results"), { recursive: true });
   console.log(`\nRunning each step's SELECT as ${db.user} on ${db.host} (reads DUMMY only):`);
   const sql = await SqlReader.connect(db);
+  /** Each step's result columns, in order, from its first row: what the oracle checks when it can't read the deployed SQL. */
+  const resultColumns = new Map<SimulatedStep, string[]>();
   try {
     for (const [i, step] of sim.steps.entries()) {
       if (!step.query) continue;
@@ -115,7 +117,10 @@ if (values.run) {
         const [{ rows }] = await sql.select<{ rows: number }>(`SELECT COUNT(*) AS "rows" FROM (${step.query.sql}) AS "_Q"`, step.query.params);
         const sample = await sql.select(`SELECT * FROM (${step.query.sql}) AS "_Q" LIMIT 20`, step.query.params);
         await writeFile(path.join(outDir, "results", `${fileOf(i)}.json`), `${JSON.stringify(sample, jsonSafe, 2)}\n`);
-        line(`  ok    ${step.ref.technicalName}: ${rows} row(s), ${Object.keys(sample[0] ?? {}).length || "?"} column(s), ${Date.now() - started} ms`);
+        // The columns are counted on the first row, so an empty result shows none.
+        if (sample.length) resultColumns.set(step, Object.keys(sample[0]));
+        const columns = sample.length ? `, ${Object.keys(sample[0]).length} column(s)` : "";
+        line(`  ok    ${step.ref.technicalName}: ${rows} row(s)${columns}, ${Date.now() - started} ms`);
       } catch (e) {
         failures++;
         line(`  FAIL  ${step.ref.technicalName}: ${firstLine(e, db.password)}`);
@@ -131,6 +136,14 @@ if (values.run) {
           const [view] = await sql.select<{ definition: unknown }>('SELECT DEFINITION AS "definition" FROM SYS.VIEWS WHERE SCHEMA_NAME = ? AND VIEW_NAME = ?', [step.ref.space, step.ref.technicalName]);
           if (!view) {
             line(`  -     ${step.ref.technicalName}: the database user doesn't see it (not exposed)`);
+            continue;
+          }
+          if (view.definition === null || view.definition === undefined) {
+            // SYS.VIEWS gives a space's database user no DEFINITION for Datasphere's views, so only their columns can be compared.
+            const verdict = await compareColumns(sql, step, resultColumns.get(step));
+            if (verdict.same === false) failures++;
+            const mark = verdict.same === undefined ? "-    " : verdict.same ? "same " : "DIFF ";
+            line(`  ${mark} ${step.ref.technicalName}: the database user can't read its deployed SQL (SYS.VIEWS gives no DEFINITION); columns: ${verdict.text}`);
             continue;
           }
           const deployedSql = Buffer.isBuffer(view.definition) ? view.definition.toString("utf8") : String(view.definition);
@@ -199,6 +212,23 @@ function jsonSafe(_key: string, value: unknown) {
 }
 
 /** Two results as sets of rows (order ignored): the same columns and the same rows. */
+/** The compiled step's result columns against the deployed view's, by name and order (SYS.VIEW_COLUMNS). */
+async function compareColumns(sql: SqlReader, step: SimulatedStep, ours: string[] | undefined): Promise<{ same?: boolean; text: string }> {
+  if (!ours) return { text: "not compared, the compiled step returned no row to read them from" };
+  const theirs = (
+    await sql.select<{ name: string }>('SELECT COLUMN_NAME AS "name" FROM SYS.VIEW_COLUMNS WHERE SCHEMA_NAME = ? AND VIEW_NAME = ? ORDER BY POSITION', [
+      step.ref.space,
+      step.ref.technicalName,
+    ])
+  ).map((c) => c.name);
+  if (!theirs.length) return { text: "not compared, SYS.VIEW_COLUMNS lists none" };
+  if (ours.join("\n") === theirs.join("\n")) return { same: true, text: `the same ${ours.length}, in the same order` };
+  const missing = theirs.filter((c) => !ours.includes(c));
+  const extra = ours.filter((c) => !theirs.includes(c));
+  const parts = [missing.length ? `missing ${missing.join(", ")}` : "", extra.length ? `extra ${extra.join(", ")}` : "", !missing.length && !extra.length ? "in another order" : ""];
+  return { same: false, text: `compiled ${ours.length}, deployed ${theirs.length}: ${parts.filter(Boolean).join("; ")}` };
+}
+
 function compareResults(ours: Record<string, unknown>[], theirs: Record<string, unknown>[]) {
   const columns = (rows: Record<string, unknown>[]) => Object.keys(rows[0] ?? {}).sort().join(", ");
   const canonical = (rows: Record<string, unknown>[]) =>
