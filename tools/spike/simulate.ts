@@ -128,7 +128,7 @@ if (values.run) {
     }
 
     if (values.oracle) {
-      console.log("\nComparing each visible view with the SQL it was deployed as (SYS.VIEWS), over the same fixtures:");
+      console.log("\nComparing each visible view with the SQL it was deployed as (SYS.VIEWS) over the same fixtures, or only its columns (SYS.VIEW_COLUMNS) when that SQL is hidden:");
       report.push("", "## Compared with the deployed SQL");
       for (const step of sim.steps) {
         if (!step.query || (step.ref.type !== "sql_view" && step.ref.type !== "graphical_view")) continue;
@@ -142,7 +142,8 @@ if (values.run) {
             // SYS.VIEWS gives a space's database user no DEFINITION for Datasphere's views, so only their columns can be compared.
             const verdict = await compareColumns(sql, step, resultColumns.get(step));
             if (verdict.same === false) failures++;
-            const mark = verdict.same === undefined ? "-    " : verdict.same ? "same " : "DIFF ";
+            // "cols", not "same": only the columns were compared, not the rows.
+            const mark = verdict.same === undefined ? "-    " : verdict.same ? "cols " : "DIFF ";
             line(`  ${mark} ${step.ref.technicalName}: the database user can't read its deployed SQL (SYS.VIEWS gives no DEFINITION); columns: ${verdict.text}`);
             continue;
           }
