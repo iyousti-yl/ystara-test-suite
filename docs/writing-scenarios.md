@@ -14,29 +14,33 @@ LT_CUSTOMERS ──────────────────────�
 
 1. **Have a saved scan that holds the pipeline.** `npm run scan -- --space SALES --output V_REGION_OUT` saves one in `tools/scan/output`. `scenario:run` reads the newest one, or the folder you give with `--from`. It reads the definitions from the scan, so scan again after a view changes.
 
-2. **Create the file** `tools/scenario/region-totals.local.yaml`. A scenario for a real tenant names its objects, so its name must end in `.local.yaml`: git ignores those files, and they never leave your PC.
-
-3. **Start with one table and one check**, to see the pipeline's steps:
+2. **Start the file** with `npm run scenario:new -- --output SALES.V_REGION_OUT --file tools/scenario/region-totals.local.yaml`. It writes every table that takes rows, with all its columns set to null and their types beside them, and a first check at the output:
 
    ```yaml
-   name: Region totals
-   kind: golden
-   pipeline: SALES.V_REGION_OUT
    fixtures:
-     - table: LT_ORDERS
+     # LT_CUSTOMERS: nothing in the pipeline loads it
+     - table: SALES.LT_CUSTOMERS
        rows:
-         - { ORDER_ID: "1", CUSTOMER_ID: C1, AMOUNT: 10.5, STATUS: OPEN }
-   expect:
-     - checkpoint: V_REGION_OUT
-       assertions:
-         - { type: row_count, equals: 1 }
+         - CUSTOMER_ID: null  # NVARCHAR(10)
+           REGION: null       # NVARCHAR(20)
+     # LT_ORDERS: DF_ORDERS loads it, and a data flow can't be expressed in SQL
+     - table: SALES.LT_ORDERS
+       rows:
+         - ORDER_ID: null     # NVARCHAR(10)
+           CUSTOMER_ID: null  # NVARCHAR(10)
+           AMOUNT: null       # DECIMAL(15, 2)
+           STATUS: null       # NVARCHAR(10)
    ```
 
-   Then run `npm run scenario:run -- --file tools/scenario/region-totals.local.yaml --compile-only`. This sends nothing. It prints one line per step saying what stands in for it:
+   Comments at the top of the file list the steps you can check, and the steps that can't be simulated. A scenario for a real tenant names its objects, so its file name must end in `.local.yaml`: git ignores those files, and they never leave your PC. `scenario:new` refuses any other name, and a file that exists already.
+
+3. **Read the logic.** Add `--logic` to the same command (it works without `--file` too) to print each step, upstream first: the SQL of SQL views and transformation flows, the CSN query of graphical views, and the columns of tables. LT_REGION_TOTALS isn't in the fixtures: its transformation flow loads it, so it is that flow's SELECT over the steps before it.
+
+   `npm run scenario:run -- --file tools/scenario/region-totals.local.yaml --compile-only` shows the same in one line per step, saying what stands in for it. This sends nothing:
 
    ```
    DF_ORDERS: not simulated: a data flow can't be expressed in SQL, so the table it loads gets a fixture
-   LT_CUSTOMERS: empty, because no rows are given for it (nothing in the pipeline loads it)
+   LT_CUSTOMERS: fixture with 1 given row
    LT_ORDERS: fixture with 1 given row
    V_OPEN_ORDERS: compiled from its SQL
    V_REGION_TOTALS: compiled from its CSN query
@@ -45,9 +49,9 @@ LT_CUSTOMERS ──────────────────────�
    V_REGION_OUT: compiled from its SQL
    ```
 
-   The lines that say "fixture" or "empty" are the tables you give rows for. Here LT_CUSTOMERS is empty, so the join finds nothing, the output has no rows, and the check would fail with `0 rows, 1 expected`.
+   A table you remove from the fixtures, or give `rows: []`, says "empty". The skeleton's rows are all null, so the join finds nothing and its check would fail with `0 rows, 1 expected` until you fill them in.
 
-4. **Give rows for each of those tables.** Three to five rows per table is usually enough. Choose them so they pass the pipeline's filters and joins: an order needs `STATUS: OPEN` to reach V_REGION_TOTALS, and a `CUSTOMER_ID` that LT_CUSTOMERS has. Read each view's SQL, or its graphical view in Datasphere, to see which values it keeps. Make the values up: never copy rows from the tenant.
+4. **Replace the nulls with the rows of your test**, and copy a row for more. Three to five rows per table is usually enough; a column no step uses can be left out. Choose them so they pass the pipeline's filters and joins: an order needs `STATUS: OPEN` to reach V_REGION_TOTALS, and a `CUSTOMER_ID` that LT_CUSTOMERS has. The logic from step 3 shows which values each step keeps. Make the values up: never copy rows from the tenant.
 
 5. **Work out by hand what the output should be**, and write it under `expect`. With orders 10.5 and 4.5 for C1 (NORTH) and 3 for C2 (SOUTH), all OPEN, V_REGION_OUT has two rows: NORTH 15 and SOUTH 3. A YAML comment (`# ...`) above an expectation, saying why that value is right, helps whoever reads the scenario later.
 
@@ -92,6 +96,8 @@ expect:
     assertions:
       - { type: sql, query: 'SELECT COUNT(*) FROM {{checkpoint}} AS c WHERE c."ORDER_ID" = ''4''', equals: 0 }
 ```
+
+**With Claude Code**, `/scenario-draft SALES.V_REGION_OUT` does steps 2 to 6: it reads the logic, makes up rows that pass the filters and joins, works out the expected results with a comment on each, and compiles the file. It never sends anything to the tenant. `/scenario-run tools/scenario/region-totals.local.yaml` runs a scenario and explains each check that didn't pass by the step that causes it. Check a drafted scenario's comments before you trust it: the expected values are only as right as the reasoning beside them.
 
 ## The file, key by key
 

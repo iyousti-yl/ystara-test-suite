@@ -1,6 +1,6 @@
 import { FLOW_TYPES, refKey, TABLE_TYPES, type DspObject, type DspObjectRef, type LineageGraph, type Pipeline } from "@ystara/shared";
 import { compileCsnQuery } from "./csn.js";
-import { fixtureQuery, sampleRows, tableColumns, type Cell } from "./fixtures.js";
+import { fixtureQuery, sampleRows, tableColumns, type Cell, type FixtureColumn } from "./fixtures.js";
 import { SimulationStop, type Fragment } from "./fragment.js";
 import { assertReadsOnlyDummy, inlineReferences } from "./sql-text.js";
 
@@ -37,6 +37,8 @@ export interface SimulatedStep {
   query?: Fragment;
   /** Steps whose query this one inlines (fixtures included). */
   reads: DspObjectRef[];
+  /** On a table a fixture stands in for (rows given, made up or none): its columns, and why a fixture stands in when no rows are given. */
+  fixture?: { columns: FixtureColumn[]; why?: string };
 }
 
 export interface Simulation {
@@ -182,6 +184,7 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
     const rowsOf = (n: number, kind: string) => `${n} ${kind} row${n === 1 ? "" : "s"}`;
     if (given) {
       const { columns, unknown } = fixture();
+      step.fixture = { columns };
       // Given rows win, also over the flow that loads the table, so a scenario can start in the middle of a pipeline.
       const instead = flow ? `, in place of ${flow.technicalName}, which loads it` : "";
       return { note: `fixture with ${rowsOf(given.length, "given")}${instead}${unknown}`, query: fixtureQuery(node.technicalName, columns, given) };
@@ -201,6 +204,7 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
       why = `${writers.length} flows load it`;
     }
     const { columns, unknown } = fixture();
+    step.fixture = { columns, why };
     if (opts.withoutFixture === "empty") return { note: `empty, because no rows are given for it (${why})${unknown}`, query: fixtureQuery(node.technicalName, columns, []) };
     const rows = sampleRows(columns, opts.sampleRows ?? 3);
     return { note: `fixture with ${rowsOf(rows.length, "made-up")}, because ${why}${unknown}`, query: fixtureQuery(node.technicalName, columns, rows) };
@@ -215,6 +219,37 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
     return query;
   };
   return { steps, output: built.get(refKey(pipeline.output))?.query, inline };
+}
+
+/**
+ * A step's logic as its definition writes it, for a person working out what it
+ * should return: the SQL of a SQL view or of a transformation flow's SQL step,
+ * the CSN query of a graphical view. Undefined for tables, other flows and a
+ * definition the simulation can't read.
+ */
+export function stepLogic(node: DspObject): { language: "sql" | "csn"; text: string } | undefined {
+  try {
+    if (node.type === "transformation_flow") return { language: "sql", text: flowSql(node) };
+    if (node.type !== "sql_view" && node.type !== "graphical_view") return undefined;
+    const entity = entityOf(node);
+    const sql = entity["@DataWarehouse.sqlEditor.query"];
+    if (typeof sql === "string") return { language: "sql", text: sql };
+    const query = entity.query ?? (entity.projection ? { SELECT: entity.projection } : undefined);
+    return query ? { language: "csn", text: compactJson(query) } : undefined;
+  } catch (e) {
+    if (e instanceof SimulationStop) return undefined;
+    throw e;
+  }
+}
+
+/** JSON indented by level, with each part that fits in 100 characters on one line, so a CSN query reads like a query. */
+function compactJson(value: unknown, indent = ""): string {
+  const flat = JSON.stringify(value);
+  if (flat === undefined || flat.length + indent.length <= 100 || value === null || typeof value !== "object") return flat ?? "null";
+  const inner = `${indent}  `;
+  if (Array.isArray(value)) return `[\n${value.map((v) => inner + compactJson(v, inner)).join(",\n")}\n${indent}]`;
+  const entries = Object.entries(value as Record<string, unknown>).map(([k, v]) => `${inner}${JSON.stringify(k)}: ${compactJson(v, inner)}`);
+  return `{\n${entries.join(",\n")}\n${indent}}`;
 }
 
 /** The object's own CSN entity: `definitions.<name>`. */

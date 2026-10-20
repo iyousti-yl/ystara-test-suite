@@ -9,7 +9,7 @@ Regression and scenario testing for SAP Datasphere pipelines. Read `docs/archite
 
 ## How we work
 
-- **Repeated, isolated jobs get their own agent and skill.** When a job is run again and again on its own (a scan, a report, a check), define a subagent in `.claude/agents/<name>.md` (narrow tools, its own rules and report format) and a skill in `.claude/skills/<name>/SKILL.md` with `context: fork` and `agent: <name>` that hands it the task. Example: `/datasphere-scan HR --output V_HEADCOUNT_OUT` runs the `datasphere-scanner` agent. Watch for new ones and suggest them without being asked.
+- **Repeated, isolated jobs get their own agent and skill.** When a job is run again and again on its own (a scan, a report, a check), define a subagent in `.claude/agents/<name>.md` (narrow tools, its own rules and report format) and a skill in `.claude/skills/<name>/SKILL.md` with `context: fork` and `agent: <name>` that hands it the task. Example: `/datasphere-scan HR --output V_HEADCOUNT_OUT` runs the `datasphere-scanner` agent. Scenarios have `/scenario-draft <OUTPUT>` (the `scenario-writer` agent) and `/scenario-run <file>` (`scenario-runner`). Watch for new ones and suggest them without being asked.
 - **Before every push, run `/tenant-content-check`** (`--base <branch>` for a stacked PR, `--file tools/check/drafts/<pr-body.md>` for a PR description: `--file` reads only files inside the repository, and that folder is git-ignored). A BLOCKED verdict stops the push until the names are replaced with synthetic ones. The git pre-push hook (`.githooks/pre-push`, turned on by `npm ci`) also runs `npm run check:tenant-content` on every push, and CI runs its generic checks on every PR; keep running `/tenant-content-check` anyway, because only it applies the rules the notes write in words and looks at images. Never skip the hook with `--no-verify` yourself.
 - **After a change to the web app, run `/browser-check`** before a PR is marked ready: every page at several widths, console, CSP, outside requests and the screenshots.
 - Every PR starts with the note in `docs/pr-note-template.md`: what changed in plain language, why, how, how to check, what it doesn't do yet.
@@ -33,5 +33,6 @@ npm run operator:grant -- --email <email> [--revoke]         # make an existing 
 npm run check:tenant-content -- [--base <branch>] [--head <commit>] [--file <path>]   # tenant names in what is about to be pushed
 npm run check:browser -- [--as <email>] [--tenant <NAME>] [--page /path] [--dark]   # the local web app in Chromium at 4 widths, every tenant, with screenshots
 npm run spike:simulate -- --output <OBJECT> [--from <scan folder>] [--run] [--oracle]   # phase 3 spike: compile a pipeline into fixture-only SELECTs; --run sends them
+npm run scenario:new -- --output <OBJECT> --file <scenario.local.yaml> [--logic]   # phase 3a: a scenario's skeleton (its tables and columns) from the saved scan; --logic prints each step's SQL
 npm run scenario:run -- --file <scenario.local.yaml> [--from <scan folder>] [--compile-only]   # phase 3a: check a scenario's assertions over its fixtures, read-only
 ```
