@@ -98,7 +98,7 @@ export function ScenariosSection({ pipelineId }: { pipelineId: string }) {
           </Button>
         )}
       </div>
-      <p className="muted page-intro">
+      <p className="muted section-intro">
         A scenario gives test rows to the pipeline&apos;s tables and says what to expect at its steps. It runs on those rows only, compiled from the
         definitions of the latest scan: nothing is written to the tenant and none of its data is read.
       </p>
@@ -427,6 +427,11 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
         }
       />
       <ErrorStrip error={save.error ?? run.error ?? remove.error} />
+      {saved && whyNoRun && can("runs.execute") && (
+        <MessageStrip design="Information" hideCloseButton>
+          {whyNoRun}
+        </MessageStrip>
+      )}
 
       <section className="block scenario-about">
         <div className="scenario-field">
@@ -545,7 +550,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
         <pre className="cli-output scenario-yaml">{toScenarioYaml(spec)}</pre>
       </Panel>
 
-      {saved && <RunsSection scenarioId={saved.id} whyNoRun={can("runs.execute") ? whyNoRun : undefined} />}
+      {saved && <RunsSection scenarioId={saved.id} />}
 
       {editing && checkpoints.length > 0 && (
         <CheckDialog
@@ -604,7 +609,7 @@ function StepsTable({ steps }: { steps: ScenarioStepNote[] }) {
             </span>
           </TableCell>
           <TableCell>
-            <span>
+            <span className="wrap-anywhere">
               {s.note}
               {s.problem && <span className="text-negative">: {s.problem}</span>}
             </span>
@@ -615,18 +620,13 @@ function StepsTable({ steps }: { steps: ScenarioStepNote[] }) {
   );
 }
 
-function RunsSection({ scenarioId, whyNoRun }: { scenarioId: string; whyNoRun: string | undefined }) {
+function RunsSection({ scenarioId }: { scenarioId: string }) {
   const navigate = useNavigate();
   const runs = useScenarioRuns(scenarioId);
   const time = formatDateTimesApart((runs.data ?? []).map((r) => r.requestedAt));
   return (
     <section className="block">
       <Title level="H4">{runs.data ? counted(runs.data.length, "run") : "Runs"}</Title>
-      {whyNoRun && (
-        <MessageStrip design="Information" hideCloseButton>
-          This scenario can&apos;t run yet. {whyNoRun}
-        </MessageStrip>
-      )}
       <ErrorStrip error={runs.error} />
       <Table
         loading={runs.isPending}

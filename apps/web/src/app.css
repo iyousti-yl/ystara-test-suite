@@ -641,9 +641,10 @@ ui5-table-cell.mono,
 .scenario-description {
   display: block;
 }
+/* Name and kind side by side when they fit, each as wide as half the page; the description below them. */
 .scenario-about {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(18rem, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
   gap: 0.75rem 1rem;
 }
 .scenario-field {
@@ -669,6 +670,14 @@ ui5-table-cell.mono,
   align-items: baseline;
   gap: 0.25rem 1rem;
   margin-bottom: 0.375rem;
+}
+/* "Takes rows: <a flow's name> loads it": the name has no spaces to break at on a phone. */
+.scenario-table-head > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.section-intro {
+  margin: 0 0 0.75rem;
 }
 .scenario-table-name {
   font-weight: bold;
