@@ -1,23 +1,40 @@
 import { createHash } from "node:crypto";
-import { buildPipeline, graphFromRaw, type RawObject } from "@ystara/connector";
+import { buildPipeline, graphFromRaw, planScenario, stepNotes, type RawObject } from "@ystara/connector";
 import {
   createPipeline,
   createScan,
+  createScenario,
+  createScenarioRun,
   createSnapshot,
   createTenant,
   deleteTenant,
+  finishScenarioRun,
   finishSnapshot,
   findTenantByName,
+  getScenarioRun,
   getSnapshot,
   saveScanResult,
   getSnapshotDetails,
   saveSnapshotAlert,
   saveSnapshotObject,
   setSchedule,
+  startScenarioRun,
   startSnapshot,
   type Db,
 } from "@ystara/db";
-import { alertReasons, DEFAULT_ROW_DROP_PERCENT, nextRun, refKey, type ColumnMeasures, type PipelineDefinition, type Scan, type Snapshot, type Tenant } from "@ystara/shared";
+import {
+  alertReasons,
+  DEFAULT_ROW_DROP_PERCENT,
+  nextRun,
+  refKey,
+  ScenarioSpec,
+  type ColumnMeasures,
+  type PipelineDefinition,
+  type Scan,
+  type ScenarioRun,
+  type Snapshot,
+  type Tenant,
+} from "@ystara/shared";
 
 /**
  * A synthetic tenant for looking at the web app without a real one: a scan
@@ -39,6 +56,11 @@ import { alertReasons, DEFAULT_ROW_DROP_PERCENT, nextRun, refKey, type ColumnMea
  * the pipeline's schedule (weekdays at 07:30, Brussels time), which the worker
  * never runs: the tenant has no database (see schedule-tick.ts). Its added
  * column raised an alert, which nobody got: nobody watches the demo.
+ *
+ * The pipeline also has a scenario (DEMO_SCENARIO) with one run that passed.
+ * The run is made up too, since the tenant has no database to send its checks
+ * to; what each check gave back is what a database gives for these rows
+ * (checked on PostgreSQL), and the steps are compiled for real.
  */
 /** "Synthetic" in the name keeps the tenant-content check from taking it for a real tenant's, as it does with the demo's object names. */
 export const DEMO_TENANT = "Synthetic demo";
@@ -134,6 +156,43 @@ export const DEMO_RAW: RawObject[] = [
   ),
 ];
 
+/** Three shipment events, two of them deliveries, on one route segment: the output has one row that counts two shipments. */
+export const DEMO_SCENARIO = ScenarioSpec.parse({
+  name: "Only delivered events count",
+  description: "An event still in transit is left out before the route segments are added.",
+  kind: "golden",
+  pipeline: `${DEMO_SPACE}.${n.output}`,
+  fixtures: [
+    {
+      table: `${DEMO_SPACE}.${n.rawTable}`,
+      rows: [
+        { shipmentId: "S1", [c.tracking]: "TRK-0001", eventType: "DELIVERED" },
+        { shipmentId: "S2", [c.tracking]: "TRK-0002", eventType: "DELIVERED" },
+        { shipmentId: "S3", [c.tracking]: "TRK-0003", eventType: "IN_TRANSIT" },
+      ],
+    },
+    { table: `${DEMO_SPACE}.${n.configTable}`, rows: [{ PARAM: "ROUTE", VALUE: "R1" }] },
+  ],
+  expect: [
+    {
+      checkpoint: `${DEMO_SPACE}.${n.cleansedView}`,
+      assertions: [
+        { type: "row_count", equals: 2 },
+        { type: "unique", columns: ["shipmentId"] },
+      ],
+    },
+    {
+      checkpoint: `${DEMO_SPACE}.${n.output}`,
+      assertions: [
+        { type: "row_count", equals: 1 },
+        { type: "rows_equal", key: ["routeSegmentId"], rows: [{ routeSegmentId: "R1", deliveredShipments: 2 }] },
+      ],
+    },
+  ],
+});
+/** What each check of DEMO_SCENARIO gives back, in order. */
+const DEMO_SCENARIO_DETAILS = ["2 rows", "every value appears once", "1 row", "the 1 row expected"];
+
 /** A made-up value hash: the snapshot stores min and max only as hashes. */
 const hash = (...parts: (string | number)[]) => createHash("sha256").update(parts.join("|")).digest("hex");
 
@@ -213,7 +272,10 @@ function measures(technicalName: string, version: 1 | 2): { rows: number; column
  * like an imported scan: nothing is ever sent to a tenant. Refuses when the
  * account already has it. On a failure, removes what it added.
  */
-export async function loadDemo(db: Db, accountId: string): Promise<{ tenant: Tenant; scan: Scan; pipeline: PipelineDefinition; snapshots: Snapshot[] }> {
+export async function loadDemo(
+  db: Db,
+  accountId: string,
+): Promise<{ tenant: Tenant; scan: Scan; pipeline: PipelineDefinition; snapshots: Snapshot[]; scenarioRun: ScenarioRun }> {
   if (await findTenantByName(db, accountId, DEMO_TENANT)) throw new Error(`The account already has the tenant "${DEMO_TENANT}". To load it again, delete it from its Home first.`);
   const tenant = await createTenant(db, { accountId, name: DEMO_TENANT, host: null });
   try {
@@ -251,7 +313,18 @@ export async function loadDemo(db: Db, accountId: string): Promise<{ tenant: Ten
     const reasons = alertReasons({ previous, current: current!, output, rowDropPercent: DEFAULT_ROW_DROP_PERCENT });
     await saveSnapshotAlert(db, current!.id, { reasons, comparedWith: previous!.id, status: "no_watchers" });
     snapshots[1] = (await getSnapshot(db, current!.id))!;
-    return { tenant, scan, pipeline, snapshots };
+
+    const scenario = await createScenario(db, { tenantId: tenant.id, pipelineId: pipeline.id, spec: DEMO_SCENARIO, createdBy: null });
+    const plan = planScenario(graph, buildPipeline(graph, output), DEMO_SCENARIO); // compiles only: nothing is sent anywhere
+    const run = await createScenarioRun(db, scenario, null);
+    await startScenarioRun(db, run.id, scan.id);
+    await finishScenarioRun(db, run.id, {
+      status: "passed",
+      steps: stepNotes(plan.simulation),
+      checks: plan.checks.map((check, i) => ({ checkpoint: check.checkpoint, label: check.label, status: "pass", detail: DEMO_SCENARIO_DETAILS[i] })),
+    });
+    const scenarioRun = (await getScenarioRun(db, run.id))!;
+    return { tenant, scan, pipeline, snapshots, scenarioRun };
   } catch (e) {
     await deleteTenant(db, tenant.id);
     throw e;

@@ -50,7 +50,7 @@ export function ComparePage() {
           { label: definition.name, to: `/pipelines/${pipelineId}/snapshots` },
         ]}
         title="Compare snapshots"
-        subtitle={<span className="mono">{`${definition.output.space}.${definition.output.technicalName}`}</span>}
+        subtitle={<span className="mono wrap-anywhere">{`${definition.output.space}.${definition.output.technicalName}`}</span>}
       />
       {c && (
         <div className="compare-pickers">

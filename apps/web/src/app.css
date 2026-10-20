@@ -636,3 +636,180 @@ ui5-table-cell.mono,
   border: 1px solid var(--sapGroup_ContentBorderColor);
   border-radius: var(--sapElement_BorderCornerRadius);
 }
+
+/* --- Scenarios (pages/Scenarios.tsx, scenario/) */
+.scenario-description {
+  display: block;
+}
+/* Name and kind side by side when they fit, each as wide as half the page; the description below them. */
+.scenario-about {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
+  gap: 0.75rem 1rem;
+}
+.scenario-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.scenario-field ui5-input,
+.scenario-field ui5-select,
+.scenario-field ui5-textarea {
+  width: 100%;
+}
+.scenario-field-wide {
+  grid-column: 1 / -1;
+}
+.scenario-table,
+.scenario-checks {
+  margin: 0.75rem 0 1.25rem;
+}
+.scenario-table-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+  margin-bottom: 0.375rem;
+}
+/* "Takes rows: <a flow's name> loads it": the name has no spaces to break at on a phone. */
+.scenario-table-head > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.section-intro {
+  margin: 0 0 0.75rem;
+}
+.scenario-table-name {
+  font-weight: bold;
+  overflow-wrap: anywhere;
+}
+.check-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
+  padding: 0.25rem 0.5rem 0.25rem 1rem;
+}
+.check-list > li > .mono {
+  overflow-wrap: anywhere;
+}
+.check-actions {
+  margin-left: auto;
+  display: flex;
+}
+.cli-output.scenario-yaml {
+  margin-top: 0.5rem;
+  max-height: 30rem;
+}
+
+/* Test rows: a table of plain inputs that scrolls sideways inside its own box when it is wider than the page. */
+.rows-grid-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--sapList_BorderColor);
+  border-radius: var(--sapElement_BorderCornerRadius);
+  background: var(--sapList_Background);
+}
+.rows-grid table {
+  border-collapse: collapse;
+  min-width: 100%;
+}
+.rows-grid th,
+.rows-grid td {
+  padding: 0.25rem;
+  border-bottom: 1px solid var(--sapList_BorderColor);
+  text-align: left;
+  vertical-align: middle;
+}
+.rows-grid thead th {
+  padding: 0.375rem 0.5rem;
+  background: var(--sapList_HeaderBackground);
+  color: var(--sapList_HeaderTextColor);
+  font-weight: normal;
+  white-space: nowrap;
+}
+.rows-grid thead th .mono {
+  display: block;
+  font-weight: bold;
+}
+.rows-grid-type {
+  display: block;
+  font-size: var(--sapFontSmallSize);
+  color: var(--sapContent_LabelColor);
+}
+.rows-grid-number {
+  width: 2rem;
+  color: var(--sapContent_LabelColor);
+  font-weight: normal;
+  text-align: right;
+}
+.rows-grid-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+.rows-grid tbody tr:last-child > * {
+  border-bottom: none;
+}
+/* Looks like a ui5-input, as .auth-input does. */
+.rows-grid-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 7rem;
+  height: 2rem;
+  padding: 0 0.5rem;
+  font-size: var(--sapFontSize);
+  color: var(--sapField_TextColor);
+  background: var(--sapField_Background);
+  border: var(--sapField_BorderWidth, 1px) solid var(--sapField_BorderColor);
+  border-bottom-color: var(--sapField_BottomBorderColor, var(--sapField_BorderColor));
+  border-radius: var(--sapField_BorderCornerRadius);
+}
+.rows-grid-input.is-number {
+  text-align: right;
+}
+.rows-grid-input:hover {
+  background: var(--sapField_Hover_Background);
+  border-color: var(--sapField_Hover_BorderColor);
+}
+.rows-grid-input:focus {
+  outline: var(--sapContent_FocusWidth) var(--sapContent_FocusStyle) var(--sapContent_FocusColor);
+  outline-offset: 1px;
+}
+.rows-grid-input[readonly] {
+  background: var(--sapField_ReadOnly_Background);
+  border-color: var(--sapField_ReadOnly_BorderColor);
+}
+.rows-grid-input[aria-invalid="true"] {
+  background: var(--sapField_InvalidBackground);
+  border-color: var(--sapField_InvalidColor);
+}
+.rows-grid-input::placeholder {
+  color: var(--sapField_PlaceholderTextColor);
+  font-style: italic;
+}
+.rows-grid-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
+  margin-top: 0.5rem;
+}
+
+/* The check dialog grows for a grid of expected rows, within the window. */
+.check-dialog::part(content) {
+  max-width: min(60rem, 90vw);
+}
+.check-dialog-body {
+  max-width: none;
+  min-width: min(28rem, 80vw);
+}
+.check-dialog-body ui5-select,
+.check-dialog-body ui5-input,
+.check-dialog-body ui5-combobox,
+.check-dialog-body ui5-multi-combobox,
+.check-dialog-body ui5-textarea {
+  width: 100%;
+}
+.check-dialog-body > p {
+  margin: 0;
+}

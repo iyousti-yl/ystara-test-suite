@@ -69,19 +69,19 @@ In place (`packages/db/migrations/`):
 - `sign_in_resets` (user, operator who made it, token hash, sealed authenticator secret, expiry, used at): one-time links from the operator panel to choose a new password and authenticator, kept on record
 - `tenants` (account, name unique per account, host) → `tenant_connections` (the technical OAuth client: client ID, secret encrypted with `MASTER_KEY`, token URL, status checking/connected/failed, the spaces to scan as the admin named them, each with its last check: readable, not readable with the CLI's error, or not checked yet, who changed it)
 - `scans` (tenant, spaces, source tenant/import, status queued/running/succeeded/failed, counts, warnings, error) → `scan_objects` (space, name, type, CLI kind, definition hash) and `scan_edges` (from, to, kind)
-- `object_definitions` (tenant, hash, definition JSONB): each distinct definition once per tenant
+- `object_definitions` (tenant, hash, definition JSON): each distinct definition once per tenant, as it was read (`json`, not `jsonb`, keeps the order of a table's columns)
 - `pipelines` (tenant, name, output, writer exclusions)
 - `space_database_users` (tenant, space, host, user name, password encrypted with `MASTER_KEY`, status checking/connected/failed, the views and tables it saw at its last check, who changed it): one per space, for snapshots
 - `tenant_snapshot_salts` (tenant, salt encrypted with `MASTER_KEY`): the salt of every snapshot hash of a tenant, made once
 - `snapshots` (tenant, pipeline, the scan whose steps were measured, status queued/running/succeeded/failed, who asked, when, error) → `snapshot_objects` (each step in order: definition hash, measured/not measurable/failed with the reason, row count, per-column measures JSONB, time taken)
+- `scenarios` (tenant, pipeline, name unique per pipeline, the ScenarioSpec as JSONB, who saved it and when) → `scenario_runs` (the spec as it was asked for, the scan compiled, status queued/running/passed/failed/error, what stood in for each step, each check's result, passed and total, error)
 
 Planned:
 
 - a space scope on `memberships` (a role limited to some spaces)
 - `pipeline_steps` if tests need stored step lists
 - scheduled snapshots, and tests with alerts built on their comparisons
-- `scenarios` (pipeline, YAML text, version) → `fixtures`
-- `runs` → `run_steps` → `assertion_results`
+- scheduled scenario runs, and scenario fixtures from an uploaded CSV
 - `alert_channels`, `audit_log`
 
 Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `packages/shared/src/secrets.ts`: authenticator secrets, tenant client secrets, database user passwords and snapshot salts). The key lives alone in the git-ignored file `.master-key`, which Docker Compose passes as a secret to the API and the worker; a hosting platform can set `MASTER_KEY` instead. The API seals a client secret for its tenant (the tenant ID is the additional authenticated data), a database password for its tenant and space, and the worker seals a tenant's snapshot salt for that tenant; only the worker opens them, for one job at a time. Rotating the master key re-encrypts rows in a migration.
@@ -141,8 +141,20 @@ Nothing is written to the tenant and no flow or task chain is run. Instead the p
 1. Load the scenario YAML and the pipeline.
 2. Turn each table's fixture rows into an inline data set (`SELECT ... FROM DUMMY UNION ALL ...`). A table the scenario gives no rows for is empty, and rows given for a table that a transformation flow loads stand in for that flow, so a scenario can start in the middle of a pipeline.
 3. Walk the pipeline from the entry points to each checkpoint and compose one query: every view and SQL-based transformation flow is compiled from its definition (the SQL of a SQL view; the CSN `query` of a graphical view) into a nested subquery, with its references to upstream objects rewritten to the parts that replace them. A table loaded by a transformation flow is represented by that flow's `SELECT` (full-load semantics). **Any reference that resolves to neither a fixture nor a compiled step stops the run** before anything is sent (a lookup or dimension outside the pipeline needs a fixture too), so the composed query can never fall back to reading a real object. Issam kept `assertSelectOnly` without `WITH` (2026-10-19), so each step's query is nested wherever it is read, and a step whose query would bind more than 32,767 values (SAP HANA's limit for one statement) stops before anything is sent.
-4. Turn each assertion into one SELECT over its checkpoint's composed query (a count, the rows with an empty value, the duplicated keys, an aggregate, the rows themselves, or the scenario's own SELECT over `{{checkpoint}}`), run it through the read-only database user, and judge what comes back (`planScenario` and `runScenario` in `packages/connector/src/simulate/scenario.ts`). Phase 3a runs a scenario file from the command line (`npm run scenario:run`); storing scenarios in the app, scheduled runs and their pages come next.
+4. Turn each assertion into one SELECT over its checkpoint's composed query (a count, the rows with an empty value, the duplicated keys, an aggregate, the rows themselves, or the scenario's own SELECT over `{{checkpoint}}`), run it through the read-only database user, and judge what comes back (`planScenario` and `runScenario` in `packages/connector/src/simulate/scenario.ts`). Phase 3a runs a scenario file from the command line (`npm run scenario:run`). Phase 3b stores scenarios in the app, where the builder makes them (below) and the worker runs them (`apps/worker/src/jobs/scenario-run.ts`) through any connected database user of the tenant, since the checks read nothing but `DUMMY`; scheduled runs come next.
 5. Steps that cannot be expressed as SQL (data flows with script operators, replication flows, remote sources) stop the simulation at that point with a clear message; those parts of the chain are covered by snapshot tests instead.
+
+### The scenario builder (phase 3b)
+
+A saved pipeline's Scenarios tab lists its scenarios with their latest run. The builder (`apps/web/src/pages/Scenarios.tsx`, `apps/web/src/scenario/`) edits one ScenarioSpec, the same shape as a file:
+
+- **Test rows:** one grid per table that takes rows (`GET /api/pipelines/:id/scenario-inputs`, from the latest scan's definitions), with the table's columns and types. Each cell is typed text, turned into a value by its column's type (`cellFromText`); an empty cell is NULL. Rows pasted from a spreadsheet fill the grid from the cell, by column name when the first line is a header. A table given no rows gets no fixture and is empty.
+- **Checks:** added per step in a dialog (row count, no empty values, unique, an aggregate, exact rows, SQL), with the step's columns to pick from.
+- **Compile as you go:** the draft is sent, unsaved, to `POST /api/pipelines/:id/scenario-check`, which compiles it on the latest scan and says what stops it or a check. Nothing is sent to the tenant.
+- **Run:** `POST /api/scenarios/:id/runs` refuses (409, with the reason) a scenario that can't run, and otherwise queues a `scenario-run` job. The run keeps the scenario as it was, and its page shows each check's result and what stood in for each step.
+- **As a file:** the builder shows the scenario as YAML to copy into a `.local.yaml` file for the CLI or Git.
+
+Who may do what: everyone in the account reads scenarios and runs (`scenarios.read`, `runs.read`); developers, test coordinators and admins save them (`scenarios.write_visual`) and run them (`runs.execute`).
 
 Open questions for phase 3: how delta loads and upserts in transformation flows should be simulated; how far a compiler from the CSN `query` of graphical views to HANA SQL can go (joins, unions, calculated columns, aggregation, parameters), which can't be tested against the deployed SQL of exposed views, because `SYS.VIEWS` gives the database user no definition (the spike's run, 2026-10-19), so only a view's columns are checked against `SYS.VIEW_COLUMNS`; which steps can't be inlined into one SELECT (SQLScript views and table functions, currency conversion that reads TCUR tables, `CURRENT_DATE` and session values, which need fixed fixture values). A phase-3 spike should compile one SQL view and one graphical view of a real pipeline into a fixture-only SELECT and run it through the database user before the engine is built. That compiler is in `packages/connector/src/simulate` (`simulatePipeline`), and `npm run spike:simulate` runs it on a saved scan, with `--run` through the database user and `--oracle` against the deployed SQL of exposed views (README, "Simulating a pipeline"). It uses nested subqueries, so `assertSelectOnly` is unchanged.
 

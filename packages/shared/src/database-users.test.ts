@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { databaseUserProblem, databaseUserSpace, isDatabaseHost, measurability, whyNothingMeasurable, type DatabaseUserReach, type Measurability } from "./database-users.js";
+import {
+  databaseUserProblem,
+  databaseUserSpace,
+  isDatabaseHost,
+  measurability,
+  scenarioDatabaseUser,
+  whyNoScenarioRun,
+  whyNothingMeasurable,
+  type DatabaseUserReach,
+  type Measurability,
+} from "./database-users.js";
 import type { DspObjectRef } from "./objects.js";
 
 describe("a database user's name", () => {
@@ -90,5 +100,25 @@ describe("why a pipeline can't be snapshotted", () => {
 
   it("says plainly that a tenant with only imported scans can't have a database user", () => {
     expect(why(no("no-database-user"), no("no-database-user"), false)).toMatch(/^This tenant only has imported scans, so it has no Datasphere URL and no database user/);
+  });
+});
+
+describe("the database user of a scenario run", () => {
+  const users = [
+    { space: "HR", status: "connected" as const },
+    { space: "SALES", status: "failed" as const },
+    { space: "STAGE", status: "connected" as const },
+  ];
+  it("is the output space's when it is connected, else the first connected one", () => {
+    expect(scenarioDatabaseUser(users, "STAGE")?.space).toBe("STAGE");
+    expect(scenarioDatabaseUser(users, "SALES")?.space).toBe("HR");
+    expect(scenarioDatabaseUser([{ space: "SALES", status: "checking" }], "SALES")).toBeUndefined();
+  });
+  it("says why a tenant can't run scenarios", () => {
+    expect(whyNoScenarioRun(users, true)).toBeUndefined();
+    expect(whyNoScenarioRun(users, false)).toMatch(/only has imported scans/);
+    expect(whyNoScenarioRun([], true)).toMatch(/has none yet/);
+    expect(whyNoScenarioRun([{ space: "HR", status: "checking" }], true)).toMatch(/haven't been checked yet/);
+    expect(whyNoScenarioRun([{ space: "HR", status: "failed" }], true)).toMatch(/passed its last check/);
   });
 });

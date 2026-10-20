@@ -2,6 +2,8 @@
 
 A scenario tests a pipeline's logic on rows you choose. You give a few rows for the pipeline's tables and say what you expect at its steps. `npm run scenario:run` compiles every view and transformation flow of the pipeline over your rows and checks each expectation. Nothing is loaded into or run in the tenant: each check is one SELECT that reads only your rows (`FROM DUMMY`), sent through the space's database user.
 
+In the app, a saved pipeline's **Scenarios** tab does the same without a file: a grid of rows for each table, checks added per step, a compile check as you type, and Run. This guide is for files, which the builder can also show; the fields are the same.
+
 The examples use the synthetic sales pipeline the tests run (`packages/connector/src/simulate/fixtures/sales-space.ts`):
 
 ```
@@ -154,6 +156,6 @@ A key the format doesn't know, or a misspelt one, makes the file invalid, so a t
 
 ## What it doesn't do yet
 
-- Scenarios aren't stored in the app, run on a schedule or written in a visual builder.
+- Scenarios don't run on a schedule, and a file can't be loaded into the app's builder yet (the builder shows its scenario as a file to copy).
 - Transformation flows run as a full load: a flow that reads its own target sees it empty.
 - `CURRENT_DATE` and other session values aren't fixed, so a step that uses them gives a result that depends on the day.

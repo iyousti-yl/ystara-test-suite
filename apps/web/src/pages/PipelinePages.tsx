@@ -20,6 +20,7 @@ import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTime } from "../format";
 import { PipelineView } from "../lineage/PipelineView";
 import { useInTenant } from "../tenantScope";
+import { ScenariosSection } from "./Scenarios";
 import { ScheduleSection } from "./Schedule";
 import { SnapshotsSection } from "./Snapshots";
 
@@ -88,12 +89,13 @@ export function PipelineOnScanPage() {
   );
 }
 
-type PipelineTab = "lineage" | "snapshots";
+type PipelineTab = "lineage" | "snapshots" | "scenarios";
 
 /**
- * A saved pipeline, computed on the tenant's latest successful scan, in two
- * tabs with their own addresses: its lineage (/pipelines/:id) and its
- * snapshots (/pipelines/:id/snapshots). Taking a snapshot opens the second.
+ * A saved pipeline, computed on the tenant's latest successful scan, in three
+ * tabs with their own addresses: its lineage (/pipelines/:id), its snapshots
+ * (/pipelines/:id/snapshots) and its scenarios (/pipelines/:id/scenarios).
+ * Taking a snapshot opens the second.
  */
 export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
   const { pipelineId = "" } = useParams();
@@ -105,7 +107,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
   const definition = result.data?.definition;
   const tenant = useTenant(definition?.tenantId ?? "");
   useInTenant(definition?.tenantId);
-  const tabPath = (t: PipelineTab) => (t === "lineage" ? `/pipelines/${pipelineId}` : `/pipelines/${pipelineId}/snapshots`);
+  const tabPath = (t: PipelineTab) => (t === "lineage" ? `/pipelines/${pipelineId}` : `/pipelines/${pipelineId}/${t}`);
 
   if (result.isPending) return <Loading />;
   if (!result.data || !definition) return <ErrorStrip error={result.error} />;
@@ -173,6 +175,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
       >
         <Tab text="Lineage" data-tab="lineage" selected={tab === "lineage"} />
         <Tab text="Snapshots" data-tab="snapshots" selected={tab === "snapshots"} />
+        <Tab text="Scenarios" data-tab="scenarios" selected={tab === "scenarios"} />
       </TabContainer>
       <ErrorStrip error={remove.error ?? takeSnapshot.error} />
       {tab === "lineage" ? (
@@ -180,6 +183,8 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
           <Exclusions patterns={definition.excludeWriters} />
           <PipelineView result={result.data} />
         </>
+      ) : tab === "scenarios" ? (
+        <ScenariosSection pipelineId={definition.id} />
       ) : (
         <>
           {whyNot && can("runs.execute") && (

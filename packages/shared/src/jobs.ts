@@ -15,6 +15,8 @@ export const JOBS = {
   scheduleTick: "snapshot-schedule-tick",
   /** After a scheduled snapshot: compare it with the previous one and email the watchers when it calls for an alert. */
   snapshotAlert: "snapshot-alert",
+  /** Compile a pipeline over a scenario's rows and send each check as one SELECT that reads only those rows. */
+  scenarioRun: "scenario-run",
 } as const;
 
 export interface ScanJobData {
@@ -67,3 +69,10 @@ export interface SnapshotAlertJobData {
  * apart and then longer. An alert already sent is never sent twice.
  */
 export const SNAPSHOT_ALERT_QUEUE_OPTIONS = { retryLimit: 3, retryDelay: 60, retryBackoff: true, expireInSeconds: 5 * 60 };
+
+export interface ScenarioRunJobData {
+  runId: string;
+}
+
+/** A run is a sign-in and one SELECT per check over the scenario's own rows. No retries: a person runs it again. */
+export const SCENARIO_RUN_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 30 * 60 };

@@ -7,8 +7,7 @@
  *   snapshot-capture  (phase 2) measure a pipeline's steps with SQL (counts, hashes, sums; never rows)
  *   snapshot-schedule-tick (phase 2) every minute: queue the snapshots whose pipeline schedule has come
  *   snapshot-alert    (phase 2) after a scheduled snapshot: compare it with the one before, email the watchers if needed
- *   snapshot.compare  (phase 2)
- *   scenario.run      (phase 3) read-only simulation of a pipeline on fixtures
+ *   scenario-run      (phase 3) send a scenario's checks as SELECTs that read only its own rows (and DUMMY)
  *
  * Datasphere access: each tenant's technical client for the CLI, and each
  * space's database user for SQL. The worker opens their secrets with
@@ -26,12 +25,21 @@ import { createTransport } from "nodemailer";
 import PgBoss from "pg-boss";
 import { checkDatabaseUser } from "@ystara/connector";
 import { assertYstaraDatabase, connect, databaseUrl } from "@ystara/db";
-import { JOBS, type ConnectionCheckJobData, type DatabaseCheckJobData, type ScanJobData, type SnapshotAlertJobData, type SnapshotJobData } from "@ystara/shared";
+import {
+  JOBS,
+  type ConnectionCheckJobData,
+  type DatabaseCheckJobData,
+  type ScanJobData,
+  type ScenarioRunJobData,
+  type SnapshotAlertJobData,
+  type SnapshotJobData,
+} from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 import { masterKeyFromEnv, secretBox } from "@ystara/shared/secrets";
 import { runConnectionCheck } from "./jobs/connection-check.js";
 import { runDatabaseCheck } from "./jobs/database-check.js";
 import { runScan } from "./jobs/scan.js";
+import { runScenarioRun } from "./jobs/scenario-run.js";
 import { runScheduleTick } from "./jobs/schedule-tick.js";
 import { runSnapshotAlert, type SendMail } from "./jobs/snapshot-alert.js";
 import { runSnapshot } from "./jobs/snapshot.js";
@@ -77,6 +85,10 @@ await boss.work<SnapshotJobData>(JOBS.snapshot, async ([job]) => {
 await boss.work<SnapshotAlertJobData>(JOBS.snapshotAlert, async ([job]) => {
   const alert = await runSnapshotAlert(db, job.data.snapshotId, { send, appUrl });
   if (alert) console.log(`[worker] alert for snapshot ${job.data.snapshotId}: ${alert.status}${alert.recipients ? ` to ${alert.recipients} watcher(s)` : ""}`);
+});
+await boss.work<ScenarioRunJobData>(JOBS.scenarioRun, async ([job]) => {
+  const run = await runScenarioRun(db, job.data.runId, secrets);
+  console.log(`[worker] scenario run ${job.data.runId}: ${run?.status ?? "gone"}${run?.error ? ` (${run.error})` : ""}`);
 });
 // pg-boss's own cron sends one tick a minute, whichever worker sends it; the tick reads our schedules (pipeline_schedules).
 await boss.schedule(JOBS.scheduleTick, "* * * * *");

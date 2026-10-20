@@ -2,6 +2,7 @@ import type { SnapshotAlert } from "./alerts.js";
 import type { Measurability } from "./database-users.js";
 import type { DspEdge, DspObject, DspObjectRef, Pipeline } from "./objects.js";
 import type { Permission, Role } from "./roles.js";
+import type { ScenarioSpec } from "./scenario.js";
 
 /**
  * What the API stores and sends, shared by the API (which sends it) and the web
@@ -251,6 +252,109 @@ export interface WatchState {
 /** GET /api/snapshots/:id */
 export interface SnapshotDetails extends Snapshot {
   objects: SnapshotObject[];
+}
+
+/**
+ * Scenarios (phase 3b): a saved pipeline's test cases, made in the app's
+ * builder and stored as the ScenarioSpec of scenario.ts. A run compiles the
+ * pipeline from the tenant's latest successful scan over the scenario's rows
+ * and sends each check as one SELECT that reads only those rows, through a
+ * database user of the tenant (packages/connector/src/simulate). Rows are the
+ * scenario's own, typed in by a person, never read from the tenant; a run
+ * stores what each check gave back, which comes from those rows only.
+ *
+ * Run lifecycle: queued (API) -> running (worker) -> passed (every check
+ * passed) | failed (a check failed or couldn't run) | error (the run couldn't
+ * start: no scan, the pipeline isn't in it, the scenario has problems, no
+ * database user, a failed sign-in).
+ */
+export type ScenarioRunStatus = "queued" | "running" | "passed" | "failed" | "error";
+export type ScenarioCheckStatus = "pass" | "fail" | "error" | "not_run";
+
+/** A run in a list: its status and how many checks passed. */
+export interface ScenarioRunSummary {
+  id: string;
+  status: ScenarioRunStatus;
+  requestedAt: Date;
+  finishedAt: Date | null;
+  /** Set once the run has judged its checks. */
+  passed: number | null;
+  total: number | null;
+}
+
+export interface StoredScenario {
+  id: string;
+  tenantId: string;
+  pipelineId: string;
+  /** The same as spec.name, unique per pipeline. */
+  name: string;
+  spec: ScenarioSpec;
+  createdAt: Date;
+  updatedAt: Date;
+  /** Who last saved it, by email, when they are still a user. */
+  updatedBy: string | null;
+  lastRun: ScenarioRunSummary | null;
+}
+
+/** What stood in for one step in a run or a check: as SimulatedStep in the connector says it. */
+export interface ScenarioStepNote extends DspObjectRef {
+  note: string;
+  problem?: string;
+}
+
+/** One check's result: `label` as the run prints it (e.g. "row_count = 2"), `detail` what came back. */
+export interface ScenarioCheckResult {
+  checkpoint: string;
+  label: string;
+  status: ScenarioCheckStatus;
+  detail: string;
+}
+
+/** GET /api/scenario-runs/:id */
+export interface ScenarioRun extends ScenarioRunSummary {
+  scenarioId: string;
+  scenarioName: string;
+  tenantId: string;
+  pipelineId: string;
+  pipelineName: string;
+  /** The scan whose definitions were compiled. */
+  scanId: string | null;
+  /** The scenario as it was when the run was asked for. */
+  spec: ScenarioSpec;
+  startedAt: Date | null;
+  error: string | null;
+  steps: ScenarioStepNote[] | null;
+  checks: ScenarioCheckResult[] | null;
+  requestedBy: string | null;
+}
+
+/** A column as a scenario fills or checks it: its technical name and SAP HANA type. */
+export interface ScenarioColumn {
+  name: string;
+  type: string;
+}
+
+/**
+ * GET /api/pipelines/:id/scenario-inputs: what the builder offers for a
+ * pipeline on the tenant's latest successful scan. `tables` take rows (every
+ * table no compiled transformation flow loads), with why; `checkpoints` are
+ * the views and tables a check can be on, with their columns when the
+ * definition lists them.
+ */
+export interface ScenarioInputs {
+  scanId: string;
+  tables: (DspObjectRef & { why: string; columns: ScenarioColumn[] })[];
+  checkpoints: (DspObjectRef & { columns: ScenarioColumn[] | null })[];
+  steps: ScenarioStepNote[];
+}
+
+/** POST /api/pipelines/:id/scenario-check: a scenario compiled on the latest scan, nothing sent. */
+export interface ScenarioCompile {
+  /** Problems that stop the whole scenario (a fixture that can't be placed). */
+  problems: string[];
+  /** Each check in order, with why it can't run when it can't. */
+  checks: { checkpoint: string; label: string; problem: string | null }[];
+  steps: ScenarioStepNote[];
 }
 
 /**

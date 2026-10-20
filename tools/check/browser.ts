@@ -17,8 +17,9 @@
  * Without --page it opens every kind of page that has data: sign-in (signed
  * out), Tenants, each tenant's apps (Home, Discovery, Pipelines, Technical
  * client, Database users), its newest successful scan, its first saved
- * pipeline in both tabs with its newest snapshot and the comparison of its
- * latest two, Users and roles for admins and Operator for operators. --tenant
+ * pipeline in its three tabs with its newest snapshot and the comparison of its
+ * latest two, a new scenario's builder, its first scenario with that scenario's
+ * newest run, Users and roles for admins and Operator for operators. --tenant
  * (once or more) keeps to those tenants. --page takes a path on this app that
  * starts with one "/", so it never opens another site. Without a tenant of your
  * own, `npm run db:demo` adds a synthetic one whose names are as long as
@@ -42,7 +43,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { connect, createSession, databaseUrl, deleteSession, findUserByEmail, listUserOverviews, membershipsOf } from "@ystara/db";
-import type { PipelineDefinition, Scan, Snapshot, Tenant } from "@ystara/shared";
+import type { PipelineDefinition, Scan, ScenarioRunSummary, Snapshot, StoredScenario, Tenant } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -343,6 +344,14 @@ async function discoverPages(cookie: string, who: { role: string; operator: bool
       const snapshots = await get<Snapshot[]>(`/pipelines/${pipeline.id}/snapshots`);
       if (snapshots[0]) add("snapshot", `/snapshots/${snapshots[0].id}`);
       if (snapshots.filter((s) => s.status === "succeeded").length >= 2) add("compare", `/pipelines/${pipeline.id}/compare`);
+      add("pipeline-scenarios", `/pipelines/${pipeline.id}/scenarios`);
+      add("scenario-new", `/pipelines/${pipeline.id}/scenarios/new`);
+      const [scenario] = await get<StoredScenario[]>(`/pipelines/${pipeline.id}/scenarios`);
+      if (scenario) {
+        add("scenario", `/scenarios/${scenario.id}`);
+        const [run] = await get<ScenarioRunSummary[]>(`/scenarios/${scenario.id}/runs`);
+        if (run) add("scenario-run", `/scenario-runs/${run.id}`);
+      }
     }
   }
   if (who.role === "admin") pages.push({ label: "users", path: "/users", signedIn: true });
