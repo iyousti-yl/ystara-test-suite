@@ -11,6 +11,7 @@ import { PipelineOnScanPage, SavedPipelinePage } from "./pages/PipelinePages";
 import { PipelinesPage } from "./pages/PipelinesPage";
 import { ResetPage } from "./pages/ResetPage";
 import { ScanPage } from "./pages/ScanPage";
+import { ScenarioPage, ScenarioRunPage } from "./pages/Scenarios";
 import { SignInPage } from "./pages/SignInPage";
 import { SnapshotPage } from "./pages/Snapshots";
 import { DatabaseUsersPage } from "./pages/DatabaseUsers";
@@ -25,8 +26,8 @@ import { TenantScopeProvider, useTenantScope } from "./tenantScope";
  * answers these paths with index.html and the router picks the page.
  * Everything under Layout needs a signed-in user; sign-in, invitation and
  * reset links work without one. The tenant apps live under /tenants/:tenantId,
- * so a link opens on its tenant; scans, pipelines and snapshots keep their own
- * addresses and pick their tenant themselves.
+ * so a link opens on its tenant; scans, pipelines, snapshots, scenarios and
+ * their runs keep their own addresses and pick their tenant themselves.
  */
 export const router = createBrowserRouter([
   { path: "/sign-in", element: <SignInPage /> },
@@ -48,7 +49,11 @@ export const router = createBrowserRouter([
       { path: "scans/:scanId/pipeline", element: <PipelineOnScanPage /> },
       { path: "pipelines/:pipelineId", element: <SavedPipelinePage tab="lineage" /> },
       { path: "pipelines/:pipelineId/snapshots", element: <SavedPipelinePage tab="snapshots" /> },
+      { path: "pipelines/:pipelineId/scenarios", element: <SavedPipelinePage tab="scenarios" /> },
+      { path: "pipelines/:pipelineId/scenarios/new", element: <ScenarioPage /> },
       { path: "pipelines/:pipelineId/compare", element: <ComparePage /> },
+      { path: "scenarios/:scenarioId", element: <ScenarioPage /> },
+      { path: "scenario-runs/:runId", element: <ScenarioRunPage /> },
       { path: "snapshots/:snapshotId", element: <SnapshotPage /> },
       { path: "users", element: <UsersPage /> },
       { path: "operator", element: <OperatorPage /> },

@@ -5,7 +5,7 @@ import { graphFromRaw } from "../discovery/scan.js";
 import { SALES_SPACE } from "./fixtures/sales-space.js";
 import { planScenario } from "./scenario.js";
 import { stepLogic } from "./simulate.js";
-import { scenarioSkeleton } from "./skeleton.js";
+import { scenarioInputs, scenarioSkeleton } from "./skeleton.js";
 
 const graph = graphFromRaw(SALES_SPACE, ["SALES"]);
 const pipeline = buildPipeline(graph, { space: "SALES", technicalName: "V_REGION_OUT" });
@@ -60,5 +60,25 @@ describe("a step's logic", () => {
     expect(csn.text).toContain('"groupBy": [{"ref":["c","REGION"]}]');
     expect(stepLogic(node("LT_ORDERS"))).toBeUndefined();
     expect(stepLogic(node("DF_ORDERS"))).toBeUndefined();
+  });
+});
+
+describe("a scenario's inputs", () => {
+  it("are the tables that take rows with their columns, and the steps a check can be on", () => {
+    const inputs = scenarioInputs(graph, pipeline);
+    expect(inputs.tables.map((t) => [t.technicalName, t.why, t.columns.map((c) => c.name)])).toEqual([
+      ["LT_CUSTOMERS", "nothing in the pipeline loads it", ["CUSTOMER_ID", "REGION"]],
+      ["LT_ORDERS", "DF_ORDERS loads it, and a data flow can't be expressed in SQL", ["ORDER_ID", "CUSTOMER_ID", "AMOUNT", "STATUS"]],
+    ]);
+    // A view's columns when its definition lists them (V_REGION_OUT's does, the synthetic V_OPEN_ORDERS' doesn't).
+    expect(inputs.checkpoints.map((c) => [c.technicalName, c.columns?.map((col) => col.name) ?? null])).toEqual([
+      ["LT_CUSTOMERS", ["CUSTOMER_ID", "REGION"]],
+      ["LT_ORDERS", ["ORDER_ID", "CUSTOMER_ID", "AMOUNT", "STATUS"]],
+      ["V_OPEN_ORDERS", null],
+      ["V_REGION_TOTALS", null],
+      ["LT_REGION_TOTALS", ["REGION", "TOTAL"]],
+      ["V_REGION_OUT", ["REGION", "TOTAL"]],
+    ]);
+    expect(inputs.steps.find((s) => s.technicalName === "DF_ORDERS")?.note).toMatch(/^not simulated/);
   });
 });

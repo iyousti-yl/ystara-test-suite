@@ -117,6 +117,19 @@ describe("scans", () => {
     expect(rows[0].n).toBe(4); // DF_LOAD, LT_DATA and two versions of V_OUT
   });
 
+  it("keep each definition's keys in the order they were read, so columns keep the table's order", async () => {
+    const tenant = await createTenant(db, { accountId: account.id, name: "Ordered", host: null });
+    const elements = { ZONE: { type: "cds.String" }, ID: { type: "cds.String" }, AMOUNT: { type: "cds.Decimal" } };
+    const g = graph({});
+    g.nodes[1] = { ...g.nodes[1], definition: { definitions: { LT_DATA: { kind: "entity", elements } } } };
+    // A definition stored before migration 011 has jsonb's order; storing it again puts the order back.
+    await db.query("insert into object_definitions (tenant_id, hash, definition) values ($1, 'h-lt', $2::jsonb::json)", [tenant.id, JSON.stringify(g.nodes[1].definition)]);
+    const scan = await createScan(db, tenant.id, ["S"]);
+    await saveScanResult(db, scan.id, raw, g);
+    const lt = (await loadGraph(db, scan.id, { definitions: true })).nodes[1].definition as { definitions: { LT_DATA: { elements: object } } };
+    expect(Object.keys(lt.definitions.LT_DATA.elements)).toEqual(["ZONE", "ID", "AMOUNT"]);
+  });
+
   it("can be saved again without duplicating rows", async () => {
     const tenant = await createTenant(db, { accountId: account.id, name: "Retried", host: null });
     const scan = await createScan(db, tenant.id, ["S"]);

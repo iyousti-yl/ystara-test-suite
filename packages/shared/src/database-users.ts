@@ -98,3 +98,23 @@ export function whyNothingMeasurable(steps: DspObjectRef[], measurement: Record<
   }
   return "None of this pipeline's steps can be measured with SQL. Select a step to see why.";
 }
+
+/**
+ * The database user a scenario run signs in with: the connected one of the
+ * output's space, else the first connected one of the tenant. Any connected
+ * user will do, because a run's SELECTs read only the scenario's rows and
+ * DUMMY, never an object of a space.
+ */
+export function scenarioDatabaseUser<U extends { space: string; status: DatabaseUserReach["status"] }>(users: U[], outputSpace: string): U | undefined {
+  const connected = users.filter((u) => u.status === "connected");
+  return connected.find((u) => u.space === outputSpace) ?? connected[0];
+}
+
+/** Why no scenario of the tenant can run, as one sentence that says what would change it; undefined when one can. */
+export function whyNoScenarioRun(users: { space: string; status: DatabaseUserReach["status"] }[], tenantHasUrl: boolean): string | undefined {
+  if (!tenantHasUrl) return "This tenant only has imported scans, so it has no database to run a scenario's checks in. Its scenarios can be built and checked, not run.";
+  if (scenarioDatabaseUser(users, "")) return undefined;
+  if (!users.length) return "A scenario runs its checks through a database user of the tenant, and it has none yet. An admin adds one under Connection › Database users.";
+  if (users.some((u) => u.status === "checking")) return "The tenant's database users haven't been checked yet. Try again once Connection › Database users shows one as connected.";
+  return "None of the tenant's database users passed its last check. Connection › Database users says why.";
+}

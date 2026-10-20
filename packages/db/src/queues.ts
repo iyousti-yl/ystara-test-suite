@@ -4,6 +4,7 @@ import {
   DATABASE_CHECK_QUEUE_OPTIONS,
   JOBS,
   SCAN_QUEUE_OPTIONS,
+  SCENARIO_RUN_QUEUE_OPTIONS,
   SCHEDULE_TICK_QUEUE_OPTIONS,
   SNAPSHOT_ALERT_QUEUE_OPTIONS,
   SNAPSHOT_QUEUE_OPTIONS,
@@ -23,5 +24,6 @@ export async function prepareQueues(connectionString: string): Promise<void> {
   await boss.createQueue(JOBS.snapshot, { name: JOBS.snapshot, ...SNAPSHOT_QUEUE_OPTIONS });
   await boss.createQueue(JOBS.scheduleTick, { name: JOBS.scheduleTick, ...SCHEDULE_TICK_QUEUE_OPTIONS });
   await boss.createQueue(JOBS.snapshotAlert, { name: JOBS.snapshotAlert, ...SNAPSHOT_ALERT_QUEUE_OPTIONS });
+  await boss.createQueue(JOBS.scenarioRun, { name: JOBS.scenarioRun, ...SCENARIO_RUN_QUEUE_OPTIONS });
   await boss.stop({ graceful: false, wait: true });
 }

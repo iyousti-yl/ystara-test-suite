@@ -1,0 +1,169 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { FastifyInstance } from "fastify";
+import { graphFromRaw, type RawObject } from "@ystara/connector";
+import { createPipeline, createScan, createTenant, finishScenarioRun, getDatabaseUserLogin, recordDatabaseCheck, saveScanResult, setDatabaseUser, startScenarioRun, type Db } from "@ystara/db";
+import { createTestDb } from "@ystara/db/testing";
+import { JOBS } from "@ystara/shared";
+import { testUser, testSecrets, type TestUser } from "../auth/testing.js";
+import { buildServer } from "../server.js";
+
+// Synthetic space: V_OUT keeps the open rows of LT_DATA.
+const elements = { ID: { type: "cds.String", length: 10 }, STATUS: { type: "cds.String", length: 10 }, AMOUNT: { type: "cds.Decimal", precision: 15, scale: 2 } };
+const RAW: RawObject[] = [
+  { space: "S", kind: "local-tables", technicalName: "LT_DATA", definition: { definitions: { LT_DATA: { kind: "entity", elements } } } },
+  {
+    space: "S",
+    kind: "views",
+    technicalName: "V_OUT",
+    definition: { definitions: { V_OUT: { kind: "entity", "@DataWarehouse.sqlEditor.query": `SELECT "ID", "AMOUNT" FROM "LT_DATA" WHERE "STATUS" = 'OPEN'`, elements } } },
+  },
+];
+const host = "synthetic.hana.prod-eu10.hanacloud.ondemand.com";
+
+let db: Db;
+let app: FastifyInstance;
+let admin: TestUser;
+let coordinator: TestUser;
+let viewer: TestUser;
+let stranger: TestUser;
+const sent: { name: string; data: object }[] = [];
+
+beforeAll(async () => {
+  db = await createTestDb();
+  app = await buildServer({ db, queue: { send: async (name, data) => sent.push({ name, data }) }, secrets: testSecrets }, { logger: false });
+  admin = await testUser(db, { account: "Customer", email: "admin@customer.example.com", role: "admin" });
+  coordinator = await testUser(db, { account: "Customer", email: "coordinator@customer.example.com", role: "test_coordinator" });
+  viewer = await testUser(db, { account: "Customer", email: "viewer@customer.example.com", role: "viewer" });
+  stranger = await testUser(db, { account: "Elsewhere", email: "admin@elsewhere.example.com", role: "admin" });
+});
+afterAll(async () => {
+  await app.close();
+  await db.close();
+});
+
+const call = (method: "GET" | "POST" | "PUT" | "DELETE", url: string, as: TestUser, payload?: object) =>
+  app.inject({ method, url: `/api${url}`, headers: { cookie: as.cookie }, payload });
+
+/** A scanned tenant with a saved pipeline for V_OUT; with `databaseUser`, a connected database user of S. */
+async function pipelineOf(name: string, databaseUser = false) {
+  const tenant = await createTenant(db, { accountId: admin.accountId, name, host: "https://synthetic.eu10.hcs.cloud.sap" });
+  const scan = await createScan(db, tenant.id, ["S"], "import");
+  await saveScanResult(db, scan.id, RAW, graphFromRaw(RAW, ["S"]));
+  if (databaseUser) {
+    await setDatabaseUser(db, { tenantId: tenant.id, space: "S", host, user: "S#SYNTH", sealedPassword: "v1.sealed", updatedBy: null });
+    await recordDatabaseCheck(db, (await getDatabaseUserLogin(db, tenant.id, "S"))!, { visible: [{ name: "V_OUT", type: "VIEW" }] });
+  }
+  return createPipeline(db, { tenantId: tenant.id, name, output: { space: "S", technicalName: "V_OUT" }, excludeWriters: [] });
+}
+
+const draft = (name: string, extra: object = {}) => ({
+  name,
+  kind: "golden",
+  fixtures: [{ table: "S.LT_DATA", rows: [{ ID: "1", STATUS: "OPEN", AMOUNT: 10.5 }, { ID: "2", STATUS: "CLOSED", AMOUNT: 3 }] }],
+  expect: [{ checkpoint: "S.V_OUT", assertions: [{ type: "row_count", equals: 1 }] }],
+  ...extra,
+});
+
+describe("building a scenario", () => {
+  it("offers the tables that take rows, with their columns, and the steps a check can be on", async () => {
+    const pipeline = await pipelineOf("Inputs");
+    const res = await call("GET", `/pipelines/${pipeline.id}/scenario-inputs`, viewer);
+    expect(res.statusCode).toBe(200);
+    const inputs = res.json();
+    expect(inputs.tables).toEqual([
+      {
+        space: "S",
+        technicalName: "LT_DATA",
+        type: "local_table",
+        why: "nothing in the pipeline loads it",
+        columns: [
+          { name: "ID", type: "NVARCHAR(10)" },
+          { name: "STATUS", type: "NVARCHAR(10)" },
+          { name: "AMOUNT", type: "DECIMAL(15, 2)" },
+        ],
+      },
+    ]);
+    expect(inputs.checkpoints.map((c: { technicalName: string }) => c.technicalName)).toEqual(["LT_DATA", "V_OUT"]);
+    expect((await call("GET", `/pipelines/${pipeline.id}/scenario-inputs`, stranger)).statusCode).toBe(404);
+  });
+
+  it("compiles a draft as it is, without saving it, and says what is wrong with it", async () => {
+    const pipeline = await pipelineOf("Check");
+    const ok = await call("POST", `/pipelines/${pipeline.id}/scenario-check`, viewer, draft("Open rows"));
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({ problems: [], checks: [{ checkpoint: "S.V_OUT", label: "row_count = 1", problem: null }] });
+
+    const misplaced = await call("POST", `/pipelines/${pipeline.id}/scenario-check`, viewer, {
+      ...draft("Misplaced"),
+      fixtures: [{ table: "S.V_OUT", rows: [] }],
+      expect: [{ checkpoint: "S.V_NOPE", assertions: [{ type: "row_count", equals: 0 }] }],
+    });
+    expect(misplaced.json()).toMatchObject({
+      problems: ["S.V_OUT is a sql view: fixtures stand in for tables, so give rows to the tables it reads."],
+      checks: [{ problem: "S.V_NOPE isn't a step of the pipeline." }],
+    });
+
+    const invalid = await call("POST", `/pipelines/${pipeline.id}/scenario-check`, viewer, { ...draft("Invalid"), expect: [], run: [] });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().issues.map((i: { message: string }) => i.message)).toEqual(["expect: Array must contain at least 1 element(s)", "the file: Unrecognized key(s) in object: 'run'"]);
+  });
+});
+
+describe("scenarios", () => {
+  it("are saved by those who build tests, with a name unique per pipeline, and read by everyone in the account", async () => {
+    const pipeline = await pipelineOf("Saved");
+    expect((await call("POST", `/pipelines/${pipeline.id}/scenarios`, viewer, draft("Open rows"))).statusCode).toBe(403);
+    const created = await call("POST", `/pipelines/${pipeline.id}/scenarios`, coordinator, draft("Open rows"));
+    expect(created.statusCode).toBe(201);
+    const scenario = created.json();
+    // The pipeline comes from the saved pipeline, whatever the body says.
+    expect(scenario).toMatchObject({ name: "Open rows", updatedBy: "coordinator@customer.example.com", spec: { pipeline: "S.V_OUT", version: 1 }, lastRun: null });
+    expect((await call("POST", `/pipelines/${pipeline.id}/scenarios`, admin, draft("Open rows"))).json().error).toBe('This pipeline already has a scenario named "Open rows"');
+
+    const updated = await call("PUT", `/scenarios/${scenario.id}`, admin, draft("Open rows only", { description: "Closed rows are left out." }));
+    expect(updated.json()).toMatchObject({ name: "Open rows only", updatedBy: "admin@customer.example.com", spec: { description: "Closed rows are left out." } });
+    expect((await call("GET", `/pipelines/${pipeline.id}/scenarios`, viewer)).json().map((s: { name: string }) => s.name)).toEqual(["Open rows only"]);
+    expect((await call("GET", `/scenarios/${scenario.id}`, stranger)).statusCode).toBe(404);
+    expect((await call("PUT", `/scenarios/${scenario.id}`, stranger, draft("Taken over"))).statusCode).toBe(404);
+
+    expect((await call("DELETE", `/scenarios/${scenario.id}`, viewer)).statusCode).toBe(403);
+    expect((await call("DELETE", `/scenarios/${scenario.id}`, coordinator)).statusCode).toBe(204);
+    expect((await call("GET", `/scenarios/${scenario.id}`, admin)).statusCode).toBe(404);
+  });
+
+  it("are run by those who run tests, through the worker, once the tenant has a connected database user", async () => {
+    const without = await pipelineOf("No database user");
+    const lonely = (await call("POST", `/pipelines/${without.id}/scenarios`, admin, draft("Open rows"))).json();
+    const refused = await call("POST", `/scenarios/${lonely.id}/runs`, admin);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error).toMatch(/^A scenario runs its checks through a database user of the tenant/);
+
+    const pipeline = await pipelineOf("Runs", true);
+    const scenario = (await call("POST", `/pipelines/${pipeline.id}/scenarios`, admin, draft("Open rows"))).json();
+    sent.length = 0;
+    expect((await call("POST", `/scenarios/${scenario.id}/runs`, viewer)).statusCode).toBe(403);
+    const res = await call("POST", `/scenarios/${scenario.id}/runs`, coordinator);
+    expect(res.statusCode).toBe(202);
+    const run = res.json();
+    expect(run).toMatchObject({ scenarioId: scenario.id, status: "queued", spec: { name: "Open rows" }, requestedBy: "coordinator@customer.example.com" });
+    expect(sent).toEqual([{ name: JOBS.scenarioRun, data: { runId: run.id } }]);
+
+    // As the worker leaves it.
+    await startScenarioRun(db, run.id, null);
+    await finishScenarioRun(db, run.id, { status: "passed", steps: [], checks: [{ checkpoint: "S.V_OUT", label: "row_count = 1", status: "pass", detail: "1 row" }] });
+    expect((await call("GET", `/scenarios/${scenario.id}/runs`, viewer)).json()).toMatchObject([{ id: run.id, status: "passed", passed: 1, total: 1 }]);
+    expect((await call("GET", `/scenario-runs/${run.id}`, viewer)).json()).toMatchObject({ status: "passed", checks: [{ detail: "1 row" }] });
+    expect((await call("GET", `/scenario-runs/${run.id}`, stranger)).statusCode).toBe(404);
+    expect((await call("GET", `/pipelines/${pipeline.id}/scenarios`, viewer)).json()[0].lastRun).toMatchObject({ id: run.id, status: "passed" });
+  });
+
+  it("aren't run while a problem stops them, and say which", async () => {
+    const pipeline = await pipelineOf("Problems", true);
+    const scenario = (await call("POST", `/pipelines/${pipeline.id}/scenarios`, admin, { ...draft("Misplaced"), fixtures: [{ table: "S.LT_NOPE", rows: [] }] })).json();
+    sent.length = 0;
+    const res = await call("POST", `/scenarios/${scenario.id}/runs`, admin);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("The scenario can't run: The fixture for S.LT_NOPE names no table of the pipeline.");
+    expect(sent).toEqual([]);
+  });
+});

@@ -17,6 +17,7 @@ import "@ui5/webcomponents-icons/dist/hide.js";
 import "@ui5/webcomponents-icons/dist/home.js";
 import "@ui5/webcomponents-icons/dist/it-system.js";
 import "@ui5/webcomponents-icons/dist/list.js";
+import "@ui5/webcomponents-icons/dist/media-play.js";
 import "@ui5/webcomponents-icons/dist/menu2.js";
 import "@ui5/webcomponents-icons/dist/process.js";
 import "@ui5/webcomponents-icons/dist/refresh.js";

@@ -17,6 +17,7 @@ import { connectionRoutes } from "./routes/connections.js";
 import { databaseUserRoutes } from "./routes/database-users.js";
 import { discoveryRoutes } from "./routes/discovery.js";
 import { operatorRoutes } from "./routes/operator.js";
+import { scenarioRoutes } from "./routes/scenarios.js";
 import { snapshotRoutes } from "./routes/snapshots.js";
 import { teamRoutes } from "./routes/team.js";
 
@@ -134,6 +135,7 @@ export async function buildServer(deps: { db: Db; queue: JobQueue; secrets: Secr
       await api.register(connectionRoutes(deps.db, deps.queue, deps.secrets));
       await api.register(databaseUserRoutes(deps.db, deps.queue, deps.secrets));
       await api.register(snapshotRoutes(deps.db, deps.queue));
+      await api.register(scenarioRoutes(deps.db, deps.queue));
     },
     { prefix: "/api" },
   );

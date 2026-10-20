@@ -1,6 +1,6 @@
 /**
  * Adds the synthetic demo tenant (tools/db/demo.ts) to an account: a scan,
- * a saved pipeline and two snapshots, with technical names as long as
+ * a saved pipeline, two snapshots and a scenario, with technical names as long as
  * Datasphere allows. For looking at the web app, and for `npm run
  * check:browser`, without a real tenant. No tenant calls.
  *
@@ -42,7 +42,7 @@ try {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(1);
   });
-  console.log(`Added the demo tenant "${tenant.name}" to account "${account.name}", with a scan, a scheduled pipeline and two snapshots.`);
+  console.log(`Added the demo tenant "${tenant.name}" to account "${account.name}", with a scan, a scheduled pipeline, two snapshots and a scenario.`);
   console.log(`Open it in the web app: http://127.0.0.1:${process.env.YSTARA_API_PORT ?? 4000}/pipelines/${pipeline.id}/snapshots`);
 } finally {
   await db.close();

@@ -98,8 +98,9 @@ export async function saveScanResult(db: Db, scanId: string, raw: StoredObject[]
       tx,
       "object_definitions (tenant_id, hash, definition)",
       [...definitions].map(([hash, definition]) => [scan.tenantId, hash, JSON.stringify(definition ?? null)]),
-      ["", "", "::jsonb"],
-      "on conflict do nothing",
+      ["", "", "::json"],
+      // The same hash is the same definition, but one stored before migration 011 lost its key order.
+      "on conflict (tenant_id, hash) do update set definition = excluded.definition",
     );
     await insertRows(
       tx,

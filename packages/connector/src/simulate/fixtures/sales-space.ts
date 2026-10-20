@@ -142,7 +142,12 @@ WHERE NOT EXISTS (SELECT 1 FROM "LT_REGION_TOTALS" t WHERE t."REGION" = "V_REGIO
     technicalName: "V_REGION_OUT",
     definition: {
       definitions: {
-        V_REGION_OUT: { kind: "entity", "@DataWarehouse.sqlEditor.query": 'select "REGION", "TOTAL" from LT_REGION_TOTALS order by "REGION"' },
+        // Its columns as Datasphere lists them with the SQL, which a scenario's checks offer.
+        V_REGION_OUT: {
+          kind: "entity",
+          "@DataWarehouse.sqlEditor.query": 'select "REGION", "TOTAL" from LT_REGION_TOTALS order by "REGION"',
+          elements: { REGION: text(20), TOTAL: amount },
+        },
       },
     },
   },

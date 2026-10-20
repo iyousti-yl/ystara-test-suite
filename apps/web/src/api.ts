@@ -18,11 +18,17 @@ import type {
   Role,
   SavedPipelineResult,
   Scan,
+  ScenarioCompile,
+  ScenarioInputs,
+  ScenarioRun,
+  ScenarioRunSummary,
+  ScenarioSpec,
   Snapshot,
   SnapshotComparison,
   SnapshotDetails,
   ScanGraph,
   SpaceDatabaseUser,
+  StoredScenario,
   Team,
   Tenant,
   TenantConnection,
@@ -53,6 +59,11 @@ export type SnapshotJson = Json<Snapshot>;
 export type SnapshotDetailsJson = Json<SnapshotDetails>;
 export type SnapshotComparisonJson = Json<SnapshotComparison>;
 export type ScheduleJson = Json<PipelineSchedule>;
+export type ScenarioJson = Json<StoredScenario>;
+export type ScenarioRunJson = Json<ScenarioRun>;
+export type ScenarioRunSummaryJson = Json<ScenarioRunSummary>;
+/** A scenario as the builder sends it: the API adds the pipeline and the version. */
+export type ScenarioDraft = Omit<ScenarioSpec, "pipeline" | "version">;
 
 export class ApiError extends Error {
   constructor(
@@ -355,7 +366,7 @@ export const usePipelines = (tenantId: string) =>
   useQuery({ queryKey: ["tenants", tenantId, "pipelines"], queryFn: () => request<PipelineDefinitionJson[]>("GET", `/tenants/${tenantId}/pipelines`) });
 
 export const useSavedPipeline = (id: string) =>
-  useQuery({ queryKey: ["pipelines", id], queryFn: () => request<Json<SavedPipelineResult>>("GET", `/pipelines/${id}`), retry: false });
+  useQuery({ queryKey: ["pipelines", id], queryFn: () => request<Json<SavedPipelineResult>>("GET", `/pipelines/${id}`), enabled: id !== "", retry: false });
 
 export function useSavePipeline(tenantId: string) {
   const client = useQueryClient();
@@ -456,3 +467,85 @@ export function useSetWatching(pipelineId: string) {
     onSuccess: (state) => client.setQueryData(watchKey(pipelineId), state),
   });
 }
+
+// --- Scenarios (the builder)
+
+const scenariosKey = (pipelineId: string) => ["pipelines", pipelineId, "scenarios"];
+const runActive = (status: ScenarioRunSummary["status"]) => status === "queued" || status === "running";
+
+/** A pipeline's scenarios, by name. Refetches every few seconds while one of their latest runs is queued or running. */
+export const useScenarios = (pipelineId: string) =>
+  useQuery({
+    queryKey: scenariosKey(pipelineId),
+    queryFn: () => request<ScenarioJson[]>("GET", `/pipelines/${pipelineId}/scenarios`),
+    refetchInterval: (q) => pollWhile(q.state.data?.some((s) => s.lastRun && runActive(s.lastRun.status)) ?? false),
+  });
+
+/** What the builder offers for the pipeline on the latest scan: tables that take rows and steps a check can be on. */
+export const useScenarioInputs = (pipelineId: string) =>
+  useQuery({
+    queryKey: ["pipelines", pipelineId, "scenario-inputs"],
+    queryFn: () => request<ScenarioInputs>("GET", `/pipelines/${pipelineId}/scenario-inputs`),
+    enabled: pipelineId !== "",
+    retry: false,
+  });
+
+/** The draft compiled as it is now, unsaved; `draft` is undefined while there is nothing to compile. Nothing is sent to the tenant. */
+export const useScenarioCompile = (pipelineId: string, draft: ScenarioDraft | undefined) =>
+  useQuery({
+    queryKey: ["pipelines", pipelineId, "scenario-check", draft],
+    queryFn: () => request<ScenarioCompile>("POST", `/pipelines/${pipelineId}/scenario-check`, draft),
+    enabled: draft !== undefined,
+    retry: false,
+    staleTime: Infinity,
+    // While the next draft compiles, keep showing what the last one gave.
+    placeholderData: (previous) => previous,
+  });
+
+export const useScenario = (id: string) =>
+  useQuery({ queryKey: ["scenarios", id], queryFn: () => request<ScenarioJson>("GET", `/scenarios/${id}`), enabled: id !== "", retry: false });
+
+export function useSaveScenario(pipelineId: string, scenarioId: string | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (draft: ScenarioDraft) =>
+      scenarioId ? request<ScenarioJson>("PUT", `/scenarios/${scenarioId}`, draft) : request<ScenarioJson>("POST", `/pipelines/${pipelineId}/scenarios`, draft),
+    onSuccess: (saved) => {
+      client.setQueryData(["scenarios", saved.id], saved);
+      return client.invalidateQueries({ queryKey: scenariosKey(pipelineId) });
+    },
+  });
+}
+
+export function useDeleteScenario(pipelineId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (scenarioId: string) => request<void>("DELETE", `/scenarios/${scenarioId}`),
+    onSuccess: () => client.invalidateQueries({ queryKey: scenariosKey(pipelineId) }),
+  });
+}
+
+/** A scenario's runs, newest first. Refetches every few seconds while one is queued or running. */
+export const useScenarioRuns = (scenarioId: string) =>
+  useQuery({
+    queryKey: ["scenarios", scenarioId, "runs"],
+    queryFn: () => request<ScenarioRunSummaryJson[]>("GET", `/scenarios/${scenarioId}/runs`),
+    enabled: scenarioId !== "",
+    refetchInterval: (q) => pollWhile(q.state.data?.some((r) => runActive(r.status)) ?? false),
+  });
+
+export function useRunScenario(pipelineId: string, scenarioId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => request<ScenarioRunJson>("POST", `/scenarios/${scenarioId}/runs`),
+    onSuccess: () =>
+      Promise.all([client.invalidateQueries({ queryKey: ["scenarios", scenarioId] }), client.invalidateQueries({ queryKey: scenariosKey(pipelineId) })]),
+  });
+}
+
+export const useScenarioRun = (id: string) =>
+  useQuery({
+    queryKey: ["scenario-runs", id],
+    queryFn: () => request<ScenarioRunJson>("GET", `/scenario-runs/${id}`),
+    refetchInterval: (q) => pollWhile(q.state.data ? runActive(q.state.data.status) : false),
+  });

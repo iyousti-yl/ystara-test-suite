@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createAccount, getSchedule, getSnapshotDetails, listPipelines, listTenants, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import { compareSnapshots } from "@ystara/shared";
-import { DEMO_COLUMNS, DEMO_NAMES, DEMO_SPACE, DEMO_TENANT, loadDemo } from "./demo.js";
+import { DEMO_COLUMNS, DEMO_NAMES, DEMO_SCENARIO, DEMO_SPACE, DEMO_TENANT, loadDemo } from "./demo.js";
 
 let db: Db;
 let accountId: string;
@@ -25,8 +25,8 @@ describe("the demo tenant", () => {
     for (const name of Object.values(DEMO_COLUMNS)) expect(name).toMatch(/^[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*$/);
   });
 
-  it("loads a scan, a pipeline over the output and two snapshots that differ", async () => {
-    const { tenant, pipeline, snapshots } = await loadDemo(db, accountId);
+  it("loads a scan, a pipeline over the output, two snapshots that differ and a scenario with a run", async () => {
+    const { tenant, pipeline, snapshots, scenarioRun } = await loadDemo(db, accountId);
     expect(tenant).toMatchObject({ name: DEMO_TENANT, host: null });
     expect(pipeline.output).toEqual({ space: DEMO_SPACE, technicalName: DEMO_NAMES.output });
     expect(snapshots.map((s) => [s.status, s.scheduled])).toEqual([
@@ -48,6 +48,11 @@ describe("the demo tenant", () => {
     expect(enriched.verdict).toBe("data_changed");
     expect(enriched.columnsAdded).toEqual([DEMO_COLUMNS.added]);
     expect(comparison.compared.find((o) => o.technicalName === DEMO_NAMES.configTable)!.verdict).toBe("unchanged");
+
+    // The scenario compiles on the demo's scan, and its run has a result for every check.
+    expect(scenarioRun).toMatchObject({ pipelineId: pipeline.id, scenarioName: DEMO_SCENARIO.name, status: "passed", passed: 4, total: 4 });
+    expect(scenarioRun.steps?.find((s) => s.technicalName === DEMO_NAMES.rawTable)?.note).toBe("fixture with 3 given rows");
+    expect(scenarioRun.checks?.map((c) => c.label)).toEqual(["row_count = 2", "unique shipmentId", "row_count = 1", "rows_equal on routeSegmentId (1 row)"]);
   });
 
   it("refuses to load it twice into one account, and adds nothing", async () => {

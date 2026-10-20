@@ -1,6 +1,42 @@
-import { FLOW_TYPES, refKey, type LineageGraph, type Pipeline } from "@ystara/shared";
+import { FLOW_TYPES, refKey, type LineageGraph, type Pipeline, type ScenarioInputs, type ScenarioStepNote } from "@ystara/shared";
+import { tableColumns } from "./fixtures.js";
 import { SimulationStop } from "./fragment.js";
-import { simulatePipeline } from "./simulate.js";
+import { simulatePipeline, type Simulation } from "./simulate.js";
+
+/**
+ * What a scenario of the pipeline can fill and check, from its definitions
+ * alone (nothing is sent): the tables that take rows (every one no compiled
+ * transformation flow loads), with all their columns and why they take rows;
+ * the views and tables a check can be on, with their columns when the
+ * definition lists them; and what stands in for each step when no rows are
+ * given. The builder in the app offers these, and `scenarioSkeleton` writes
+ * them as YAML.
+ */
+export function scenarioInputs(graph: LineageGraph, pipeline: Pipeline): Omit<ScenarioInputs, "scanId"> {
+  const simulation = simulatePipeline(graph, pipeline, { withoutFixture: "empty" });
+  const nodes = new Map(graph.nodes.map((n) => [refKey(n), n]));
+  const columnsOf = (key: string) => {
+    const node = nodes.get(key)!;
+    try {
+      return tableColumns(node.definition, node.technicalName).columns;
+    } catch (e) {
+      if (e instanceof SimulationStop) return null;
+      throw e;
+    }
+  };
+  return {
+    tables: simulation.steps.filter((s) => s.fixture).map((s) => ({ ...s.ref, why: s.fixture!.why ?? "", columns: s.fixture!.columns })),
+    checkpoints: simulation.steps
+      .filter((s) => s.query && !FLOW_TYPES.has(s.ref.type))
+      .map((s) => ({ ...s.ref, columns: s.fixture?.columns ?? columnsOf(refKey(s.ref)) })),
+    steps: stepNotes(simulation),
+  };
+}
+
+/** What stood in for each step, as a run stores it. */
+export function stepNotes(simulation: Simulation): ScenarioStepNote[] {
+  return simulation.steps.map((s) => ({ ...s.ref, note: s.note, ...(s.problem ? { problem: s.problem } : {}) }));
+}
 
 /**
  * The start of a scenario for a pipeline, as YAML for a person to fill in
@@ -14,11 +50,9 @@ import { simulatePipeline } from "./simulate.js";
  * is loaded by a step that can't be compiled).
  */
 export function scenarioSkeleton(graph: LineageGraph, pipeline: Pipeline, opts: { from?: string; file?: string } = {}): string {
-  const simulation = simulatePipeline(graph, pipeline, { withoutFixture: "empty" });
-  const tables = simulation.steps.filter((s) => s.fixture);
+  const { tables, checkpoints, steps } = scenarioInputs(graph, pipeline);
   if (!tables.length) throw new SimulationStop("no table of the pipeline can take rows: each one is loaded by a step that can't be compiled");
-  const checkpoints = simulation.steps.filter((s) => s.query && !FLOW_TYPES.has(s.ref.type));
-  const stopped = simulation.steps.filter((s) => s.problem);
+  const stopped = steps.filter((s) => s.problem);
   const output = refKey(pipeline.output);
 
   const lines = [
@@ -30,18 +64,18 @@ export function scenarioSkeleton(graph: LineageGraph, pipeline: Pipeline, opts: 
     "# The guide: docs/writing-scenarios.md",
     "#",
     "# Steps you can check:",
-    ...checkpoints.map((s) => `#   ${refKey(s.ref)}`),
+    ...checkpoints.map((s) => `#   ${refKey(s)}`),
   ];
   if (stopped.length) {
     lines.push("# Steps that can't be simulated, nor the steps that read them:");
-    for (const s of stopped) lines.push(`#   ${refKey(s.ref)}: ${s.problem}`);
+    for (const s of stopped) lines.push(`#   ${refKey(s)}: ${s.problem}`);
   }
   lines.push(`name: ${scalar(pipeline.output.technicalName)}`, "kind: golden", `pipeline: ${scalar(output)}`, "fixtures:");
-  for (const step of tables) {
-    lines.push(`  # ${step.ref.technicalName}: ${step.fixture!.why}`, `  - table: ${scalar(refKey(step.ref))}`, "    rows:");
-    const keys = step.fixture!.columns.map((c) => `${scalar(c.name)}: null`);
+  for (const table of tables) {
+    lines.push(`  # ${table.technicalName}: ${table.why}`, `  - table: ${scalar(refKey(table))}`, "    rows:");
+    const keys = table.columns.map((c) => `${scalar(c.name)}: null`);
     const width = Math.max(...keys.map((k) => k.length));
-    step.fixture!.columns.forEach((c, i) => lines.push(`${i ? "        " : "      - "}${keys[i].padEnd(width)}  # ${c.type}`));
+    table.columns.forEach((c, i) => lines.push(`${i ? "        " : "      - "}${keys[i].padEnd(width)}  # ${c.type}`));
   }
   lines.push(
     "expect:",
