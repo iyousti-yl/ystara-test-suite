@@ -1,6 +1,6 @@
 import { FLOW_TYPES, refKey, TABLE_TYPES, type DspObject, type DspObjectRef, type LineageGraph, type Pipeline } from "@ystara/shared";
 import { compileCsnQuery } from "./csn.js";
-import { fixtureQuery, sampleRows, tableColumns, type Cell } from "./fixtures.js";
+import { fixtureQuery, sampleRows, tableColumns, type Cell, type FixtureColumn } from "./fixtures.js";
 import { SimulationStop, type Fragment } from "./fragment.js";
 import { assertReadsOnlyDummy, inlineReferences } from "./sql-text.js";
 
@@ -37,6 +37,8 @@ export interface SimulatedStep {
   query?: Fragment;
   /** Steps whose query this one inlines (fixtures included). */
   reads: DspObjectRef[];
+  /** On a table a fixture stands in for (rows given, made up or none): its columns, and why a fixture stands in when no rows are given. */
+  fixture?: { columns: FixtureColumn[]; why?: string };
 }
 
 export interface Simulation {
@@ -52,8 +54,13 @@ export interface Simulation {
 }
 
 export interface SimulationOptions {
-  /** Fixture rows by table, keyed SPACE.NAME or NAME. A table left out gets made-up rows. */
+  /**
+   * Fixture rows by table, keyed SPACE.NAME or NAME. Rows given for a table
+   * stand in for it, also in place of a transformation flow that loads it.
+   */
   fixtures?: ReadonlyMap<string, Record<string, Cell>[]>;
+  /** What a table without given rows holds, when no transformation flow loads it: made-up rows (default) or none (a scenario). */
+  withoutFixture?: "sample" | "empty";
   /** How many made-up rows each table without a fixture gets (default 3). */
   sampleRows?: number;
 }
@@ -68,8 +75,13 @@ type Entity = Record<string, unknown>;
  */
 export const MAX_BOUND_VALUES = 32_767;
 
-/** Stops a query SAP HANA would refuse for its number of bound values. */
-function assertFits(query: Fragment): void {
+/**
+ * The checks every query passes before it can be sent, whatever built it:
+ * it reads nothing but subqueries and DUMMY, and SAP HANA takes its number of
+ * bound values. Throws SimulationStop.
+ */
+export function assertSendable(query: Fragment): void {
+  assertReadsOnlyDummy(query.sql);
   if (query.params.length <= MAX_BOUND_VALUES) return;
   const n = (v: number) => v.toLocaleString("en-US");
   throw new SimulationStop(
@@ -101,10 +113,7 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
     try {
       const result = compile(node, step);
       // The last check before anything can be sent, whatever compiled the step.
-      if (result.query) {
-        assertReadsOnlyDummy(result.query.sql);
-        assertFits(result.query);
-      }
+      if (result.query) assertSendable(result.query);
       // standIn may have added a sentence while compiling (an own target that starts empty).
       step.note = `${result.note}${step.note}`;
       step.query = result.query;
@@ -165,26 +174,40 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
 
   const table = (node: DspObject, step: SimulatedStep): { note: string; query: Fragment } => {
     const writers = writersOf(refKey(node));
+    const flow = writers.length === 1 && writers[0].type === "transformation_flow" ? writers[0] : undefined;
     const given = opts.fixtures?.get(refKey(node)) ?? opts.fixtures?.get(node.technicalName);
+    // Read only when a fixture stands in: a table its flow fills needs no columns of its own.
+    const fixture = () => {
+      const { columns, unknownTypes } = tableColumns(node.definition, node.technicalName);
+      return { columns, unknown: unknownTypes.length ? `; columns of a type the simulation doesn't know are text: ${unknownTypes.join(", ")}` : "" };
+    };
+    const rowsOf = (n: number, kind: string) => `${n} ${kind} row${n === 1 ? "" : "s"}`;
+    if (given) {
+      const { columns, unknown } = fixture();
+      step.fixture = { columns };
+      // Given rows win, also over the flow that loads the table, so a scenario can start in the middle of a pipeline.
+      const instead = flow ? `, in place of ${flow.technicalName}, which loads it` : "";
+      return { note: `fixture with ${rowsOf(given.length, "given")}${instead}${unknown}`, query: fixtureQuery(node.technicalName, columns, given) };
+    }
     let why = "nothing in the pipeline loads it";
-    if (writers.length === 1 && writers[0].type === "transformation_flow") {
-      const flow = build(refKey(writers[0]));
-      if (flow.query) {
-        step.reads.push(flow.ref);
-        return { note: `the SELECT of ${flow.ref.technicalName} (full load)`, query: flow.query };
+    if (flow) {
+      const loaded = build(refKey(flow));
+      if (loaded.query) {
+        step.reads.push(loaded.ref);
+        return { note: `the SELECT of ${loaded.ref.technicalName} (full load)`, query: loaded.query };
       }
-      // Made-up rows would pass off the flow's logic as tested: only rows given for the table stand in for it.
-      if (!given) throw new SimulationStop(`${flow.ref.technicalName}, which loads it, can't be compiled; give the table a fixture to test the steps after it`);
-      why = `${flow.ref.technicalName}, which loads it, can't be compiled`;
+      // Made-up or no rows would pass off the flow's logic as tested: only rows given for the table stand in for it.
+      throw new SimulationStop(`${loaded.ref.technicalName}, which loads it, can't be compiled; give the table a fixture to test the steps after it`);
     } else if (writers.length === 1) {
       why = `${writers[0].technicalName} loads it, and a ${writers[0].type.replace(/_/g, " ")} can't be expressed in SQL`;
     } else if (writers.length > 1) {
       why = `${writers.length} flows load it`;
     }
-    const { columns, unknownTypes } = tableColumns(node.definition, node.technicalName);
-    const rows = given ?? sampleRows(columns, opts.sampleRows ?? 3);
-    const unknown = unknownTypes.length ? `; columns of a type the simulation doesn't know are text: ${unknownTypes.join(", ")}` : "";
-    return { note: `fixture with ${rows.length} ${given ? "given" : "made-up"} row${rows.length === 1 ? "" : "s"}, because ${why}${unknown}`, query: fixtureQuery(node.technicalName, columns, rows) };
+    const { columns, unknown } = fixture();
+    step.fixture = { columns, why };
+    if (opts.withoutFixture === "empty") return { note: `empty, because no rows are given for it (${why})${unknown}`, query: fixtureQuery(node.technicalName, columns, []) };
+    const rows = sampleRows(columns, opts.sampleRows ?? 3);
+    return { note: `fixture with ${rowsOf(rows.length, "made-up")}, because ${why}${unknown}`, query: fixtureQuery(node.technicalName, columns, rows) };
   };
 
   const steps = pipeline.steps.map((s) => build(refKey(s)));
@@ -192,11 +215,41 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
     const node = nodes.get(refKey(ref));
     if (!node) throw new SimulationStop(`${refKey(ref)} isn't in the scan`);
     const query = inlineFor(node, { ref, note: "", reads: [] }, sql);
-    assertReadsOnlyDummy(query.sql);
-    assertFits(query);
+    assertSendable(query);
     return query;
   };
   return { steps, output: built.get(refKey(pipeline.output))?.query, inline };
+}
+
+/**
+ * A step's logic as its definition writes it, for a person working out what it
+ * should return: the SQL of a SQL view or of a transformation flow's SQL step,
+ * the CSN query of a graphical view. Undefined for tables, other flows and a
+ * definition the simulation can't read.
+ */
+export function stepLogic(node: DspObject): { language: "sql" | "csn"; text: string } | undefined {
+  try {
+    if (node.type === "transformation_flow") return { language: "sql", text: flowSql(node) };
+    if (node.type !== "sql_view" && node.type !== "graphical_view") return undefined;
+    const entity = entityOf(node);
+    const sql = entity["@DataWarehouse.sqlEditor.query"];
+    if (typeof sql === "string") return { language: "sql", text: sql };
+    const query = entity.query ?? (entity.projection ? { SELECT: entity.projection } : undefined);
+    return query ? { language: "csn", text: compactJson(query) } : undefined;
+  } catch (e) {
+    if (e instanceof SimulationStop) return undefined;
+    throw e;
+  }
+}
+
+/** JSON indented by level, with each part that fits in 100 characters on one line, so a CSN query reads like a query. */
+function compactJson(value: unknown, indent = ""): string {
+  const flat = JSON.stringify(value);
+  if (flat === undefined || flat.length + indent.length <= 100 || value === null || typeof value !== "object") return flat ?? "null";
+  const inner = `${indent}  `;
+  if (Array.isArray(value)) return `[\n${value.map((v) => inner + compactJson(v, inner)).join(",\n")}\n${indent}]`;
+  const entries = Object.entries(value as Record<string, unknown>).map(([k, v]) => `${inner}${JSON.stringify(k)}: ${compactJson(v, inner)}`);
+  return `{\n${entries.join(",\n")}\n${indent}}`;
 }
 
 /** The object's own CSN entity: `definitions.<name>`. */

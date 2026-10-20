@@ -17,3 +17,6 @@ tools/check/drafts/
 
 # Local scan settings (writer exclusions). Never committed.
 *.local.json
+
+# Scenarios written for a real tenant (they name its objects). Never committed.
+*.local.yaml

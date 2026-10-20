@@ -10,7 +10,9 @@
       "Bash(npm run check:browser)",
       "Bash(npm run check:browser *)",
       "Bash(npm run check:tenant-content)",
-      "Bash(npm run check:tenant-content *)"
+      "Bash(npm run check:tenant-content *)",
+      "Bash(npm run scenario:new *)",
+      "Bash(npm run scenario:run *)"
     ],
     "deny": [
       "Bash(datasphere * create *)",
