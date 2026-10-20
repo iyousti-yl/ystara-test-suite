@@ -139,10 +139,10 @@ expect:
       - type: rows_equal
         key: [REGION]
         rows: [{ REGION: NORTH, TOTAL: 15 }, { REGION: SOUTH, TOTAL: 3 }]
-      - { type: sql, query: "SELECT COUNT(*) FROM {{checkpoint}} WHERE TOTAL > 10", equals: 1 }
+      - { type: sql, query: 'SELECT COUNT(*) FROM {{checkpoint}} AS c WHERE c."TOTAL" > 10', equals: 1 }
 ```
 
-`npm run scenario:run -- --file tools/scenario/region-totals.local.yaml` compiles it over the newest saved scan, as the spike does, and runs each assertion as one SELECT over its step's result through the database user of `.env.local`, then prints pass or FAIL with what came back. `--compile-only` sends nothing. A table the scenario gives no rows for is empty, so a result depends only on what the scenario says; rows given for a table loaded by a transformation flow stand in for that flow, so a scenario can start in the middle of a pipeline. Write numbers as numbers (`TOTAL: 15` matches the decimal `15.00`), and put text that looks like a number in quotes (`"007"` stays `"007"`). A scenario that names a real tenant's objects belongs in a file ending in `.local.yaml`, which git ignores.
+`npm run scenario:run -- --file tools/scenario/region-totals.local.yaml` compiles it over the newest saved scan, as the spike does, and runs each assertion as one SELECT over its step's result through the database user of `.env.local`, then prints pass or FAIL with what came back. `--compile-only` sends nothing. A table the scenario gives no rows for is empty, so a result depends only on what the scenario says; rows given for a table loaded by a transformation flow stand in for that flow, so a scenario can start in the middle of a pipeline. Write numbers as numbers (`TOTAL: 15` matches the decimal `15.00`), and put text that looks like a number in quotes (`"007"` stays `"007"`). A scenario that names a real tenant's objects belongs in a file ending in `.local.yaml`, which git ignores. [docs/writing-scenarios.md](docs/writing-scenarios.md) walks through writing one, key by key.
 
 ## Read-only guarantee
 
