@@ -59,8 +59,7 @@ export function DiscoveryPage() {
       />
       {!tenant.data.host && (
         <MessageStrip design="Information" hideCloseButton>
-          This tenant has no Datasphere URL: it only has scans loaded with <span className="mono">npm run db:import</span>, so it can&apos;t be scanned from
-          here.
+          This tenant only has imported scans, so it has no Datasphere URL to scan from here. To scan a tenant, add it with its URL under Tenants.
         </MessageStrip>
       )}
       {tenant.data.host && (
@@ -75,7 +74,7 @@ export function DiscoveryPage() {
         />
       )}
       <section className="block">
-        <Title level="H4">Scans</Title>
+        <Title level="H2" size="H4">Scans</Title>
         <ErrorStrip error={scans.error} />
         <Table
           loading={scans.isPending}
@@ -116,9 +115,9 @@ export function DiscoveryPage() {
               <TableCell>
                 <ScanStatusTag status={s.status} />
               </TableCell>
-              <TableCell horizontalAlign="End">{s.objectCount ?? "–"}</TableCell>
-              <TableCell horizontalAlign="End">{s.edgeCount ?? "–"}</TableCell>
-              <TableCell horizontalAlign="End">{s.warnings.length || "–"}</TableCell>
+              <TableCell horizontalAlign="End" className="mono">{s.objectCount ?? "–"}</TableCell>
+              <TableCell horizontalAlign="End" className="mono">{s.edgeCount ?? "–"}</TableCell>
+              <TableCell horizontalAlign="End" className="mono">{s.warnings.length || "–"}</TableCell>
             </TableRow>
           ))}
         </Table>
@@ -132,7 +131,8 @@ export function DiscoveryPage() {
  * Picks the spaces to scan: for a connected tenant, from the spaces its
  * technical client could read at the last check (the API refuses any other);
  * typed in for a tenant without a client (only a worker started with
- * YSTARA_WORKER_MACHINE_LOGIN=1 can scan it, with its machine's own CLI login).
+ * YSTARA_WORKER_MACHINE_LOGIN=1 can scan it, with its machine's own CLI login;
+ * the README says how, the dialog doesn't).
  */
 function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => void }) {
   const start = useStartScan(tenantId);
@@ -197,7 +197,7 @@ function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => vo
 function scanLogin(connection: ConnectionJson | null, readable: string[]): string {
   const readOnly = "Read-only: the worker lists and reads object definitions, nothing else.";
   if (!connection) {
-    return `${readOnly} This tenant is not connected: an admin connects it under Connection › Technical client, and until then the scan fails. (Only a worker started on a developer's computer with YSTARA_WORKER_MACHINE_LOGIN=1 scans it with that computer's own Datasphere CLI login.)`;
+    return `${readOnly} This tenant is not connected yet: an admin connects it under Connection › Technical client, and until then a scan fails.`;
   }
   if (readable.length === 0) return `${readOnly} The technical client can't read any of its spaces yet: see Connection › Technical client.`;
   return `${readOnly} It logs in with the tenant's technical client, in the spaces its last check could read.`;

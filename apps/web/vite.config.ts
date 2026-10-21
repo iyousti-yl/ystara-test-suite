@@ -12,13 +12,13 @@ import { loadLocalEnv } from "@ystara/shared/env";
  */
 loadLocalEnv(fileURLToPath(new URL("../../", import.meta.url)));
 
-// SAP's "72" font files, served from this app instead of a public CDN (see src/fonts.ts).
+// IBM Plex font files, served from this app instead of a public CDN (see src/fonts.ts).
 const require = createRequire(import.meta.url);
-const fonts = path.join(path.dirname(require.resolve("@sap-theming/theming-base-content/package.json")), "content/Base/baseLib/baseTheme/fonts");
+const fontFiles = (name: string) => path.join(path.dirname(require.resolve(`@fontsource/${name}/package.json`)), "files");
 
 export default defineConfig({
   plugins: [react()],
-  resolve: { alias: { "@ui5-fonts": fonts } },
+  resolve: { alias: { "@plex-sans": fontFiles("ibm-plex-sans"), "@plex-mono": fontFiles("ibm-plex-mono") } },
   server: {
     host: "127.0.0.1",
     port: 5173,

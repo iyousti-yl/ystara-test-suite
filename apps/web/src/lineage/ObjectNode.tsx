@@ -12,7 +12,7 @@ export function ObjectNode({ data, selected }: NodeProps<ObjectNodeType>) {
   return (
     <div className={classes} style={{ width: data.width, borderLeftColor: typeColor(ref.type) }}>
       <Handle type="target" position={Position.Left} isConnectable={false} />
-      <div className="lineage-node-type" style={{ color: typeColor(ref.type) }}>
+      <div className="lineage-node-type">
         {typeLabel(ref.type)}
         {data.multiSpace && <span className="lineage-node-space"> · {ref.space}</span>}
       </div>
@@ -32,10 +32,10 @@ export function ObjectNode({ data, selected }: NodeProps<ObjectNodeType>) {
 }
 
 const MARK_FLAG: Record<StepMark, string> = {
-  unchanged: "flag-output",
-  data_changed: "flag-warning",
-  definition_changed: "flag-entry",
-  both: "flag-error",
+  unchanged: "flag-ok",
+  data_changed: "flag-changed",
+  definition_changed: "flag-changed",
+  both: "flag-changed",
   not_compared: "flag-muted",
   added: "flag-entry",
 };

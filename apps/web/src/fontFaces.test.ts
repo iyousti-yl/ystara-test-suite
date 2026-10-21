@@ -1,25 +1,32 @@
-import { existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import ui5FontFaces from "@ui5/webcomponents-base/dist/generated/css/FontFace.css.js";
-import { localFontFaces } from "./fontFaces";
+import { plexFaces } from "./fontFaces";
 
 const require = createRequire(import.meta.url);
-const fontDir = path.join(path.dirname(require.resolve("@sap-theming/theming-base-content/package.json")), "content/Base/baseLib/baseTheme/fonts");
-const referenced = [...ui5FontFaces.matchAll(/\/fonts\/([^)]+)\)/g)].map((m) => m[1]);
+const stylesheet = (font: string, weight: number) =>
+  readFileSync(path.join(path.dirname(require.resolve(`@fontsource/${font}/package.json`)), `${weight}.css`), "utf8");
+const filesOf = (css: string) => [...css.matchAll(/url\(\.\/files\/([^)]+\.woff2)\)/g)].map((m) => m[1]);
 
-describe("the 72 font", () => {
-  it("has a bundled file for every face UI5 uses (the two packages must stay on matching versions)", () => {
-    expect(referenced.length).toBeGreaterThan(10);
-    expect(referenced.filter((file) => !existsSync(path.join(fontDir, file)))).toEqual([]);
+describe("IBM Plex, served by Ystara itself", () => {
+  const css = stylesheet("ibm-plex-sans", 600);
+  const urls = new Map(filesOf(css).map((file) => [file, `/assets/${file}`]));
+
+  it("keeps the Latin subsets, with their unicode ranges, and only the bundled woff2", () => {
+    const faces = plexFaces(css, urls);
+    expect(faces.match(/@font-face/g)).toHaveLength(2);
+    expect(faces).toContain("/assets/ibm-plex-sans-latin-600-normal.woff2");
+    expect(faces).toContain("/assets/ibm-plex-sans-latin-ext-600-normal.woff2");
+    expect(faces).toMatch(/unicode-range: U\+0000-00FF/);
+    expect(faces).not.toMatch(/\.woff\)|cyrillic|greek|https?:/);
+    expect(plexFaces(css, new Map())).toBe("");
   });
 
-  it("is never fetched from a CDN", () => {
-    const urls = new Map(referenced.map((file) => [file, `/assets/${file}`]));
-    const css = localFontFaces(ui5FontFaces, urls);
-    expect(css).not.toMatch(/https?:/);
-    expect(css.match(/@font-face/g)).toHaveLength(ui5FontFaces.match(/@font-face/g)!.length);
-    expect(localFontFaces(ui5FontFaces, new Map())).toBe("");
+  it("gives the semibold faces a family of their own, for any weight UI5 asks", () => {
+    const faces = plexFaces(css, urls, "Ystara Plex Semibold");
+    expect(faces).toContain("font-family: 'Ystara Plex Semibold';");
+    expect(faces).toContain("font-weight: 100 900;");
+    expect(faces).not.toContain("IBM Plex Sans");
   });
 });

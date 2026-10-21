@@ -1,5 +1,5 @@
 import { Button } from "@ui5/webcomponents-react";
-import type { ClipboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, type ClipboardEvent } from "react";
 import { counted } from "../format";
 import { addRow, cellFromText, columnKind, columnNote, fillEmpty, parsePasted, pasteInto, shownColumns, type Grid } from "./model";
 
@@ -12,7 +12,8 @@ import { addRow, cellFromText, columnKind, columnNote, fillEmpty, parsePasted, p
  * duplicated and removed. Rows copied
  * from a spreadsheet are pasted in at the cell that has the focus, with a
  * header line or without. A cell left empty is NULL. A value that doesn't fit
- * its column's type is marked, with what it takes.
+ * its column's type is marked, with what it takes. The row numbers and the key
+ * columns the table starts with stay in view while the grid scrolls sideways.
  * Plain inputs, not ui5-input: a grid of hundreds of shadow-DOM fields is slow.
  */
 export function RowsGrid(props: {
@@ -25,10 +26,16 @@ export function RowsGrid(props: {
   onAllColumns?: (all: boolean) => void;
   /** Added rows and empty cells get values that get through (test rows); without it, rows start empty (expected rows). */
   prefill?: boolean;
+  /** How empty cells and pasting work, under the grid; false where the page says it once for all its grids. */
+  pasteHelp?: boolean;
 }) {
-  const { grid, onChange, readOnly, label, onAllColumns, prefill = true } = props;
+  const { grid, onChange, readOnly, label, onAllColumns, prefill = true, pasteHelp = true } = props;
   const allColumns = props.allColumns ?? !onAllColumns;
   const shown = shownColumns(grid, allColumns);
+  const keys = shown.findIndex((c) => !c.key) === -1 ? shown.length : shown.findIndex((c) => !c.key);
+  const table = usePinned(keys);
+  // The row number is cell 0; the leading key columns follow it.
+  const pin = (i: number, kind = "") => (i <= keys ? `${kind}is-pinned${i === keys ? " is-last-pinned" : ""}`.trim() : kind.trim() || undefined);
   const hidden = onAllColumns ? grid.columns.length - shownColumns(grid).length : 0;
   const setCell = (row: number, column: string, text: string) => onChange({ ...grid, rows: grid.rows.map((r, i) => (i === row ? { ...r, [column]: text } : r)) });
   const onPaste = (row: number, column: number) => (e: ClipboardEvent<HTMLInputElement>) => {
@@ -41,14 +48,14 @@ export function RowsGrid(props: {
   return (
     <div className="rows-grid">
       <div className="rows-grid-scroll">
-        <table aria-label={label}>
+        <table aria-label={label} ref={table}>
           <thead>
             <tr>
-              <th className="rows-grid-number" scope="col">
+              <th className={pin(0, "rows-grid-number ")} scope="col">
                 <span className="sr-only">Row</span>
               </th>
-              {shown.map((c) => (
-                <th key={c.name} scope="col" title={columnNote(c) || undefined}>
+              {shown.map((c, j) => (
+                <th key={c.name} scope="col" title={columnNote(c) || undefined} className={pin(j + 1)}>
                   <span className="mono">{c.name}</span>
                   <span className="rows-grid-type">
                     {c.type || "not a column of the table"}
@@ -67,14 +74,14 @@ export function RowsGrid(props: {
           <tbody>
             {grid.rows.map((row, i) => (
               <tr key={i}>
-                <th className="rows-grid-number" scope="row">
+                <th className={pin(0, "rows-grid-number ")} scope="row">
                   {i + 1}
                 </th>
                 {shown.map((c, j) => {
                   const text = row[c.name] ?? "";
                   const { invalid } = cellFromText(text, c.type);
                   return (
-                    <td key={c.name}>
+                    <td key={c.name} className={pin(j + 1)}>
                       <input
                         className={columnKind(c.type) === "number" ? "rows-grid-input mono is-number" : "rows-grid-input mono"}
                         value={text}
@@ -134,10 +141,45 @@ export function RowsGrid(props: {
           )}
           <span className="muted">
             {hidden > 0 && !allColumns ? `${counted(hidden, "column")} the pipeline doesn't read ${hidden === 1 ? "is" : "are"} hidden and stay${hidden === 1 ? "s" : ""} NULL. ` : ""}
-            Empty cells are NULL. To paste rows from a spreadsheet, click a cell and paste; a header line puts each value in its column.
+            {pasteHelp && PASTE_HELP}
           </span>
         </div>
       )}
     </div>
   );
+}
+
+export const PASTE_HELP = "Empty cells are NULL. To paste rows from a spreadsheet, click a cell and paste; a header line puts each value in its column.";
+
+/**
+ * Keeps the row number and the first `columns` columns after it in view while
+ * the grid scrolls sideways (the cells `is-pinned` in app.css): each pinned
+ * cell's offset from the left is the width of the pinned columns before it,
+ * measured once the table is drawn and again when its size changes. Returns
+ * the ref for the table.
+ */
+function usePinned(columns: number) {
+  const table = useRef<HTMLTableElement>(null);
+  // After every render: rows and columns come and go.
+  useLayoutEffect(() => placePinned(table.current, columns));
+  useEffect(() => {
+    const el = table.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => placePinned(el, columns));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [columns]);
+  return table;
+}
+
+function placePinned(table: HTMLTableElement | null, columns: number) {
+  const rows = table?.rows;
+  if (!rows?.length) return;
+  const lefts: number[] = [];
+  let x = 0;
+  for (const cell of [...rows[0].cells].slice(0, columns + 1)) {
+    lefts.push(x);
+    x += cell.offsetWidth;
+  }
+  for (const row of rows) lefts.forEach((left, i) => row.cells[i] && (row.cells[i].style.left = `${left}px`));
 }

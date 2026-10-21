@@ -16,6 +16,7 @@ import {
   type TenantJson,
 } from "../api";
 import { ConnectionStatusTag, ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
+import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTime } from "../format";
 import { useAddressTenant } from "../tenantScope";
@@ -47,14 +48,8 @@ export function TenantHomePage() {
     <div className="page">
       <PageHeader
         title={t.name}
-        subtitle={t.host ?? "No Datasphere URL: this tenant only has imported scans."}
-        actions={
-          can("tenant.connect") && (
-            <Button design="Transparent" icon="delete" onClick={() => setDeleting(true)}>
-              Delete
-            </Button>
-          )
-        }
+        subtitle={t.host ?? "Imported scans only: this tenant has no Datasphere URL to scan from."}
+        actions={<MoreActions actions={[can("tenant.connect") && { text: "Delete tenant", icon: "delete", onClick: () => setDeleting(true) }]} />}
       />
       <ErrorStrip error={connection.error ?? users.error ?? scans.error ?? pipelines.error} />
       {step && (

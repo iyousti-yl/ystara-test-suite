@@ -30,7 +30,7 @@ describe("opening view", () => {
   });
 
   it("otherwise shows whole columns from the output end, at a readable size", () => {
-    for (const width of [700, 1000, 1100]) {
+    for (const width of [600, 800, 850]) {
       const v = openingViewport(eight.nodes, eight.output, { width, height: 700 });
       expect(v.zoom, `${width}px`).toBeGreaterThanOrEqual(READABLE_ZOOM);
       expect(onCanvas(eight.output, v).right, `${width}px`).toBeLessThanOrEqual(width);
@@ -73,9 +73,12 @@ describe("opening view and the minimap", () => {
   });
 
   it("keeps whole columns from the output end clear of it too", () => {
-    const v = openingViewport(eight.nodes, eight.output, canvas, minimap);
-    expect(eight.nodes.some((n) => under(n, v))).toBe(false);
-    expect(onCanvas(eight.output, v).right).toBeLessThanOrEqual(minimap.x);
+    // Twelve columns: too long to show whole on this canvas.
+    const twelve = pipeline([[240, 240], [240], [240, 240, 240], [240], [240, 240], [240], [240], [240], [240], [240], [240], [240]]);
+    const v = openingViewport(twelve.nodes, twelve.output, canvas, minimap);
+    expect(v.zoom).toBeGreaterThanOrEqual(READABLE_ZOOM);
+    expect(twelve.nodes.some((n) => under(n, v))).toBe(false);
+    expect(onCanvas(twelve.output, v).right).toBeLessThanOrEqual(minimap.x);
   });
 
   it("changes nothing when no node would be under it", () => {

@@ -6,8 +6,8 @@
  * table: a name too long for a phone wraps there after all. `atLeast` is in
  * characters too, for a short column's header.
  *
- * 72Mono is 0.602em a character (measured in Chromium at 14px, the table's
- * size); 0.61em leaves room for a fallback font. 1.5rem is a cell's padding.
+ * IBM Plex Mono is 0.6em a character at every weight; 0.61em leaves room for
+ * a fallback font. 1.5rem is a cell's padding.
  */
 export function monoColumnWidth(texts: Iterable<string | null | undefined>, atLeast = 10): string {
   let longest = atLeast;

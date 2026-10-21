@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button, Dialog, Form, FormItem, Input, Label, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow } from "@ui5/webcomponents-react";
 import { useNavigate } from "react-router";
 import { useCan, useCreateTenant, useTenants } from "../api";
+import { EmptyState } from "../components/EmptyState";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
@@ -12,26 +13,30 @@ export function TenantsPage() {
   const can = useCan();
   const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
+  const addButton = can("tenant.connect") && (
+    <Button design="Emphasized" icon="add" onClick={() => setAdding(true)}>
+      Add tenant
+    </Button>
+  );
 
   return (
     <div className="page">
       <PageHeader
         title="Tenants"
         subtitle="Datasphere tenants Ystara reads from. Read-only: it only lists and reads object definitions."
-        actions={
-          can("tenant.connect") && (
-            <Button design="Emphasized" icon="add" onClick={() => setAdding(true)}>
-              Add tenant
-            </Button>
-          )
-        }
+        actions={tenants.data?.length ? addButton : undefined}
       />
       <ErrorStrip error={tenants.error} />
       {tenants.isPending ? (
         <Loading />
+      ) : tenants.data?.length === 0 ? (
+        <EmptyState icon="it-system" title="No tenants yet" action={addButton}>
+          {can("tenant.connect")
+            ? "Add a Datasphere tenant by its URL, then connect it to scan its spaces and test its pipelines."
+            : "An admin adds the account's Datasphere tenants. Once one is added, it shows here."}
+        </EmptyState>
       ) : (
         <Table
-          noDataText="No tenants yet. Add one, or load a saved scan with `npm run db:import`."
           overflowMode="Popin"
           onRowClick={(e) => navigate(`/tenants/${e.detail.row.rowKey}`)}
           headerRow={

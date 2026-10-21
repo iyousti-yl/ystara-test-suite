@@ -80,7 +80,7 @@ describe("layout", () => {
   it("makes nodes wide enough for the whole technical name", () => {
     expect(nodeWidth({ type: "SQL view", technicalName: "V_OUT" })).toBe(NODE_MIN_WIDTH);
     const longest = "X".repeat(50); // Datasphere's limit for technical names
-    expect(nodeWidth({ type: "SQL view", technicalName: longest })).toBeGreaterThanOrEqual(50 * 8 + 28);
+    expect(nodeWidth({ type: "SQL view", technicalName: longest })).toBeGreaterThanOrEqual(50 * 7.2 + 30);
     expect(nodeWidth({ type: "SQL view", technicalName: "V_OUT", businessName: "Long business name ".repeat(10) })).toBe(NODE_MAX_WIDTH);
   });
 });

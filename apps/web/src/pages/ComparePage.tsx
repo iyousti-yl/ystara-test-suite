@@ -131,7 +131,7 @@ function ComparisonView({ comparison: c, saved }: { comparison: SnapshotComparis
 
       {changed.length + definitionsChanged.length > 0 && (
         <section className="block">
-          <Title level="H4">Changed steps</Title>
+          <Title level="H2" size="H4">Changed steps</Title>
           {changed.map((o) => (
             <ChangedStep key={refKey(o)} step={o} />
           ))}
@@ -154,13 +154,13 @@ function ComparisonView({ comparison: c, saved }: { comparison: SnapshotComparis
       )}
       {c.measuredOnce.length > 0 && (
         <section className="block">
-          <Title level="H4">Measured in only one snapshot</Title>
+          <Title level="H2" size="H4">Measured in only one snapshot</Title>
           <NotComparedTable steps={c.measuredOnce} />
         </section>
       )}
       {(c.added.length > 0 || c.removed.length > 0) && (
         <section className="block">
-          <Title level="H4">Steps added or removed</Title>
+          <Title level="H2" size="H4">Steps added or removed</Title>
           <p className="muted">The pipeline itself changed between the two snapshots.</p>
           <ul className="steps">
             {c.added.map((s) => (

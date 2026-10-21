@@ -1,7 +1,23 @@
 /*
  * Layout and the lineage picture. Colours and fonts come from the UI5 theme's
- * CSS variables (--sap...), so everything follows light and dark mode.
+ * CSS variables (--sap...), which brand.ts sets to the youlytics brand, and
+ * from its own --ystara-... tokens, so everything follows light and dark mode.
+ * Spacing keeps to the brand's 4px scale (--space-...): blocks on a page are
+ * 24px apart, a section's parts 16px, and a control's parts 8px.
  */
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  /* Cards and buttons, and the larger panels. */
+  --radius: 10px;
+  --radius-panel: 12px;
+}
 html,
 body,
 #root {
@@ -14,13 +30,21 @@ body {
   font-family: var(--sapFontFamily);
   font-size: var(--sapFontSize);
 }
-
-/* The sign-in pages' frame (components/AuthFrame.tsx); signed in, UI5's NavigationLayout lays out the page (components/AppFrame.tsx). */
-.app {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
+p,
+li {
+  line-height: 1.6;
 }
+/* The brand's caption: Plex Mono, small capitals, spaced out. Breadcrumbs, labels over numbers, the type of a lineage step. */
+.caption {
+  font-family: var(--ystara-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ystara-muted);
+}
+
+/* Signed in, UI5's NavigationLayout lays out the page (components/AppFrame.tsx). */
 /* The part of the window that scrolls, under the top bar and next to the menu. */
 .app-main {
   flex: 1;
@@ -28,40 +52,92 @@ body {
   overflow: auto;
   box-sizing: border-box;
 }
+/* One centred column, 1200px at most, 32px from the sides (16px on a phone). */
 .page {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 1rem 1.5rem 2rem;
+  padding: var(--space-6) var(--space-6) var(--space-8);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--space-5);
 }
-/* Pages with a lineage picture or a pipeline's tabs use the whole width. */
+/* Pages with a lineage picture, a pipeline's tabs or the scenario builder: wider. */
 .page-wide {
-  max-width: none;
+  max-width: 1440px;
 }
 /* A lineage picture takes the height left over. */
 .page-fill {
   height: 100%;
   box-sizing: border-box;
-  padding-bottom: 1rem;
+  padding-bottom: var(--space-5);
+}
+@media (max-width: 600px) {
+  .page {
+    padding: var(--space-5) var(--space-4) var(--space-7);
+  }
 }
 .page-intro {
   margin: 0;
 }
+
+/* The page header (components/PageHeader.tsx): breadcrumbs as a caption, the title at 34px, a muted line under it, and 32px before the page. */
+.page-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-bottom: var(--space-2);
+}
+.crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.crumbs li {
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.crumbs li + li::before {
+  content: "/";
+  margin-right: var(--space-2);
+  color: var(--ystara-grey);
+}
+.crumbs a {
+  color: var(--ystara-muted);
+  text-decoration: none;
+}
+.crumbs a:hover,
+.crumbs a:focus-visible {
+  color: var(--sapLinkColor);
+  text-decoration: underline;
+}
 .page-header-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
-  margin-top: 0.25rem;
+  gap: var(--space-4) var(--space-5);
+}
+.page-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.page-header-text > ui5-title {
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.page-header-subtitle {
+  color: var(--ystara-muted);
+  line-height: 1.6;
+  max-width: 48rem;
 }
 .page-header-actions {
   justify-content: flex-end;
-}
-.page-header-subtitle {
-  margin-top: 0.25rem;
-  color: var(--sapContent_LabelColor);
 }
 .page-header-actions,
 .facts,
@@ -73,10 +149,10 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 .facts {
-  gap: 1rem;
+  gap: var(--space-2) var(--space-4);
 }
 .list-toolbar > :first-child {
   margin-right: auto;
@@ -84,30 +160,56 @@ body {
 .dialog-footer {
   justify-content: flex-end;
   width: 100%;
-  padding: 0.25rem 0;
+  padding: var(--space-1) 0;
 }
 .dialog-body {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-3);
   max-width: 32rem;
+}
+.dialog-body p {
+  margin: 0;
 }
 .block {
   display: block;
-  margin: 0.5rem 0;
+  margin: var(--space-2) 0;
 }
-section.block > ui5-title {
+/* A section of a page is a card: white, 24px inside, its heading at 22px, its parts 16px apart. */
+section.block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--ystara-card);
+  border: 1px solid var(--ystara-border);
+  border-radius: var(--radius-panel);
+  min-width: 0;
+}
+section.block > ui5-title,
+.section-head > ui5-title {
   display: block;
-  margin-bottom: 0.5rem;
+}
+/* A list that is the whole page sits in a card of its own. */
+.page > ui5-table,
+.card-table {
+  background: var(--ystara-card);
+  border: 1px solid var(--ystara-border);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 .muted {
-  color: var(--sapContent_LabelColor);
+  color: var(--ystara-muted);
 }
 .text-negative {
   color: var(--sapNegativeTextColor);
 }
 .mono {
-  font-family: var(--sapFontFamily_Mono, "72Mono", ui-monospace, monospace);
+  font-family: var(--ystara-mono);
+}
+/* A technical name as a heading keeps the heading's weight. */
+ui5-title .mono {
+  font-weight: 600;
 }
 /* Technical names have no spaces to break at: in a narrow table column they wrap anywhere instead of being cut off. */
 ui5-table-cell .mono,
@@ -115,28 +217,38 @@ ui5-table-cell.mono,
 .wrap-anywhere {
   overflow-wrap: anywhere;
 }
+/* Status tags: flat, in the brand's calm tints (brand.ts). */
+ui5-tag {
+  --ui5-tag-contrast-text-shadow: none;
+}
 .type-dot {
   display: inline-block;
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 50%;
-  margin-right: 0.4rem;
+  margin-right: var(--space-2);
+  vertical-align: 0.0625em;
 }
 /* --- Home: the tenant at a glance (pages/TenantHomePage.tsx) */
 .next-step {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem 1rem;
+  gap: var(--space-2) var(--space-4);
 }
 .overview {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
-  gap: 1rem;
-  margin-top: 0.5rem;
+  gap: var(--space-5);
+}
+/* Drawn like a section: a 1px border, no shadow. */
+.overview-card {
+  --_ui5_card_border: 1px solid var(--ystara-border);
+  --_ui5_card_box_shadow: none;
+  --_ui5_card_border-radius: var(--radius-panel);
 }
 .overview-body {
-  padding: 0 1rem 1rem;
+  padding: 0 var(--space-4) var(--space-4);
 }
 .overview-body > p {
   margin: 0;
@@ -149,48 +261,48 @@ ui5-table-cell.mono,
   overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--space-2);
 }
 
 /* --- Connection: technical client and database users */
 .connection-row {
-  margin: 0.5rem 0;
+  margin: var(--space-2) 0;
 }
 .full-width {
   width: 100%;
 }
 .space-results {
-  margin: 0.5rem 0;
-  padding-left: 1.25rem;
+  margin: var(--space-2) 0;
+  padding-left: var(--space-5);
 }
 .space-results li + li {
-  margin-top: 0.35rem;
+  margin-top: var(--space-2);
 }
 .database-user-visible ul {
   margin: 0;
-  padding-left: 1.25rem;
+  padding-left: var(--space-5);
   max-height: 12rem;
   overflow: auto;
 }
 .steps-to-do {
-  margin: 0 0 0.5rem;
-  padding-left: 1.25rem;
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-5);
 }
 .steps-to-do li + li {
-  margin-top: 0.25rem;
+  margin-top: var(--space-1);
 }
 .cli-output {
-  margin: 0.5rem 0 0;
+  margin: var(--space-2) 0 0;
   max-height: 10rem;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: var(--sapFontFamily_Mono, "72Mono", ui-monospace, monospace);
+  font-family: var(--ystara-mono);
   font-size: var(--sapFontSmallSize);
 }
 .warnings {
-  margin: 0.25rem 0 0;
-  padding-left: 1.25rem;
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-5);
   max-height: 10rem;
   overflow: auto;
 }
@@ -200,7 +312,7 @@ ui5-table-cell.mono,
 .pipeline {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-4);
   /* The height left over, but never less than the picture's own minimum: on a short window the page scrolls
      instead, so the picture never runs over the page's bottom edge. */
   flex: 1 0 27rem;
@@ -211,47 +323,44 @@ ui5-table-cell.mono,
 }
 .pipeline-main {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--space-4);
   flex: 1;
   min-height: 24rem;
 }
 .pipeline-graph {
   flex: 1;
-  border: 1px solid var(--sapGroup_ContentBorderColor);
-  border-radius: var(--sapElement_BorderCornerRadius);
-  background: var(--sapGroup_ContentBackground);
+  border: 1px solid var(--ystara-border);
+  border-radius: var(--radius-panel);
+  background: var(--ystara-card);
   overflow: hidden;
 }
 .object-panel {
   width: 22rem;
   flex-shrink: 0;
   overflow: auto;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--sapGroup_ContentBorderColor);
-  border-radius: var(--sapElement_BorderCornerRadius);
-  background: var(--sapGroup_ContentBackground);
+  padding: var(--space-5);
+  border: 1px solid var(--ystara-border);
+  border-radius: var(--radius-panel);
+  background: var(--ystara-card);
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-3);
   box-sizing: border-box;
+}
+.object-panel-name {
+  overflow-wrap: anywhere;
 }
 .steps-view {
   overflow: auto;
 }
-.object-panel-type {
-  font-size: var(--sapFontSmallSize);
-  font-weight: bold;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
 .object-panel-links ul,
 .steps {
-  margin: 0.25rem 0 0;
-  padding-left: 1.25rem;
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-5);
 }
 .object-panel-links li,
 .steps li {
-  margin: 0.15rem 0;
+  margin: var(--space-1) 0;
 }
 .object-panel-definition pre {
   margin: 0;
@@ -263,48 +372,72 @@ ui5-table-cell.mono,
 /* --- Snapshot and scan schedules */
 
 .schedule-summary {
-  margin: 0.25rem 0;
+  margin: var(--space-1) 0;
   overflow-wrap: anywhere;
 }
 .schedule-examples {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem 1rem;
-  margin-bottom: 0.25rem;
+  gap: var(--space-1) var(--space-4);
+  margin-bottom: var(--space-1);
 }
 .schedule-runs {
-  margin: 0.25rem 0 0;
-  padding-left: 1.25rem;
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-5);
 }
 
-/* --- Alerts: a section with nothing set yet, its one line and its one button */
+/* --- Empty states (components/EmptyState.tsx): an icon, what goes here, and its one action, centred */
 
 .empty-state {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 0.75rem;
-  max-width: 40rem;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-7) var(--space-5);
+  text-align: center;
+}
+/* On its own on a page, it is a card. */
+.page > .empty-state {
+  background: var(--ystara-card);
+  border: 1px solid var(--ystara-border);
+  border-radius: var(--radius-panel);
 }
 .empty-state p {
   margin: 0;
+  max-width: 34rem;
+}
+.empty-state-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: var(--space-3);
+  margin-bottom: var(--space-2);
+  border-radius: 50%;
+  background: var(--ystara-tint);
+  color: var(--ystara-sapphire);
+}
+.empty-state-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+.empty-state > ui5-button {
+  margin-top: var(--space-3);
 }
 
 /* --- Comparing two snapshots */
 
 .section-toolbar {
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--space-2);
 }
 .compare-pickers {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  margin: 0.5rem 0;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-2) 0;
 }
 .compare-picker {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--space-1);
   min-width: 0;
   flex: 0 1 16rem;
 }
@@ -315,8 +448,8 @@ ui5-table-cell.mono,
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem 0.75rem;
-  margin: 0.75rem 0 0.5rem;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-3) 0 var(--space-2);
 }
 .verdict-large {
   font-size: var(--sapFontLargeSize);
@@ -324,15 +457,15 @@ ui5-table-cell.mono,
 .compare-graph {
   flex: none;
   height: 22rem;
-  margin-top: 0.5rem;
+  margin-top: var(--space-2);
 }
 .compare-step {
-  margin: 0.5rem 0 1rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--sapGroup_ContentBorderColor);
-  border-left: 4px solid var(--sapCriticalElementColor);
-  border-radius: var(--sapElement_BorderCornerRadius);
-  background: var(--sapGroup_ContentBackground);
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--ystara-border);
+  border-left: 4px solid var(--ystara-amethyst);
+  border-radius: var(--radius);
+  background: var(--ystara-card);
   /* Room above it when the picture scrolls it into view. */
   scroll-margin-top: 1rem;
 }
@@ -340,120 +473,145 @@ ui5-table-cell.mono,
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.25rem 0.75rem;
+  gap: var(--space-1) var(--space-3);
 }
 .compare-step-name {
   font-weight: bold;
   overflow-wrap: anywhere;
 }
 .compare-facts {
-  margin: 0.5rem 0;
-  padding-left: 1.25rem;
+  margin: var(--space-2) 0;
+  padding-left: var(--space-5);
 }
 .compare-facts li + li {
-  margin-top: 0.2rem;
+  margin-top: var(--space-1);
 }
 .panel-intro {
-  margin: 0 0 0.5rem;
+  margin: 0 0 var(--space-2);
 }
 .compare-difference {
-  color: var(--sapCriticalTextColor);
+  color: var(--ystara-amethyst);
   font-weight: bold;
   white-space: nowrap;
 }
 
 /* --- Lineage nodes and edges (React Flow) */
 
-/* Width is set per node from its names (nodeWidth in lineage/layout.ts); height is NODE_HEIGHT there. */
+/* Width is set per node from its names (nodeWidth in lineage/layout.ts); height is NODE_HEIGHT there. The left edge has the type's colour. */
 .lineage-node {
   box-sizing: border-box;
-  height: 76px;
-  padding: 0.4rem 0.6rem;
-  border: 1px solid var(--sapGroup_ContentBorderColor);
+  height: 88px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--ystara-border);
   border-left-width: 4px;
-  border-radius: 0.5rem;
-  background: var(--sapTile_Background);
-  color: var(--sapTextColor);
-  box-shadow: var(--sapContent_Shadow0);
+  border-radius: var(--radius);
+  background: var(--ystara-card);
+  color: var(--ystara-ink);
   overflow: hidden;
 }
 .lineage-node.is-selected {
   outline: 2px solid var(--sapContent_FocusColor);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
+/* The pipeline's output, outlined in amber. */
 .lineage-node.is-output {
-  border-color: var(--sapPositiveElementColor);
+  border-color: var(--ystara-amber);
   border-width: 2px 2px 2px 4px;
 }
 /* A step that changed between two compared snapshots. */
 .lineage-node.is-changed {
-  border-color: var(--sapCriticalElementColor);
+  border-color: var(--ystara-amethyst);
   border-width: 2px 2px 2px 4px;
 }
 .lineage-node.is-excluded {
   opacity: 0.55;
   border-style: dashed;
 }
+/* The type as the brand's caption, at 11px to fit the node. */
 .lineage-node-type {
+  font-family: var(--ystara-mono);
   font-size: 0.6875rem;
-  font-weight: bold;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  color: var(--ystara-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .lineage-node-space {
-  color: var(--sapContent_LabelColor);
-  font-weight: normal;
+  text-transform: none;
+  letter-spacing: 0;
 }
 .lineage-node-name {
-  font-family: var(--sapFontFamily_Mono, "72Mono", ui-monospace, monospace);
-  font-size: 0.8125rem;
-  font-weight: bold;
+  font-family: var(--ystara-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 18px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .lineage-node-business {
   font-size: 0.75rem;
-  color: var(--sapContent_LabelColor);
+  line-height: 18px;
+  color: var(--ystara-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .lineage-node-flags {
   display: flex;
-  gap: 0.25rem;
-  margin-top: 0.15rem;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
 }
 .flag {
+  font-family: var(--ystara-mono);
   font-size: 0.625rem;
-  line-height: 1rem;
-  padding: 0 0.3rem;
-  border-radius: 0.25rem;
+  line-height: 14px;
+  padding: 0 var(--space-1);
+  border-radius: 4px;
   border: 1px solid currentColor;
 }
 .flag-output {
-  color: var(--sapPositiveTextColor);
+  color: var(--ystara-ink);
+  border-color: var(--ystara-amber);
 }
+.flag-ok,
 .flag-entry {
-  color: var(--sapInformativeTextColor);
+  color: var(--ystara-sapphire);
 }
 .flag-muted {
-  color: var(--sapContent_LabelColor);
+  color: var(--ystara-muted);
 }
 .flag-warning {
   color: var(--sapCriticalTextColor);
 }
 .flag-error {
-  color: var(--sapNegativeTextColor);
+  color: var(--ystara-ruby);
 }
+.flag-changed,
 .flag-measurable {
-  color: var(--sapAccentColor7);
+  color: var(--ystara-amethyst);
 }
 .steps-flag {
-  margin-left: 0.5rem;
+  margin-left: var(--space-2);
+}
+/* React Flow's own colours from the brand's tokens, in both themes: its dark mode is a neutral grey, not the app's navy. */
+.react-flow {
+  --xy-background-color: var(--ystara-card);
+  --xy-background-pattern-color: var(--ystara-border);
+  --xy-edge-stroke: var(--ystara-grey);
+  --xy-edge-label-background-color: var(--ystara-card);
+  --xy-edge-label-color: var(--ystara-muted);
+  --xy-minimap-background-color: var(--ystara-card);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--ystara-tint) 70%, transparent);
+  --xy-controls-button-background-color: var(--ystara-card);
+  --xy-controls-button-background-color-hover: var(--ystara-tint);
+  --xy-controls-button-color: var(--ystara-ink);
+  --xy-controls-button-color-hover: var(--ystara-ink);
+  --xy-controls-button-border-color: var(--ystara-border);
 }
 .react-flow__edge.lineage-edge.is-write path.react-flow__edge-path {
   stroke-width: 2;
@@ -468,85 +626,120 @@ ui5-table-cell.mono,
   z-index: 10;
   max-width: min(32rem, calc(100% - 1rem));
   box-sizing: border-box;
-  padding: 0.4rem 0.6rem;
-  border: 1px solid var(--sapGroup_ContentBorderColor);
-  border-radius: 0.5rem;
-  background: var(--sapGroup_ContentBackground);
-  color: var(--sapTextColor);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--ystara-border);
+  border-radius: var(--radius);
+  background: var(--ystara-card);
+  color: var(--ystara-ink);
   box-shadow: var(--sapContent_Shadow1);
   pointer-events: none;
 }
 .lineage-card-name {
-  font-family: var(--sapFontFamily_Mono, "72Mono", ui-monospace, monospace);
+  font-family: var(--ystara-mono);
   font-size: 0.875rem;
-  font-weight: bold;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 .lineage-card-business {
   font-size: 0.8125rem;
-  color: var(--sapContent_LabelColor);
+  color: var(--ystara-muted);
 }
 .lineage-hint {
-  color: var(--sapContent_LabelColor);
+  color: var(--ystara-muted);
   font-size: var(--sapFontSmallSize);
 }
 .react-flow__minimap-node.minimap-table {
-  fill: var(--sapChart_OrderedColor_1);
+  fill: var(--ystara-grey);
 }
 .react-flow__minimap-node.minimap-flow {
-  fill: var(--sapChart_OrderedColor_6);
+  fill: var(--ystara-amethyst);
 }
 .react-flow__minimap-node.minimap-view {
-  fill: var(--sapChart_OrderedColor_3);
+  fill: var(--ystara-sapphire);
 }
 .react-flow__minimap-node.minimap-model {
-  fill: var(--sapChart_OrderedColor_2);
+  fill: var(--ystara-amber);
 }
 .react-flow__minimap-node.minimap-other {
-  fill: var(--sapNeutralElementColor);
+  fill: var(--ystara-border);
 }
 
 /* --- Signing in and invitations (components/AuthFrame.tsx) */
 
-/* Side margins on a phone; at most 26rem wide inside its padding. */
-.auth-card {
+/* The mark, the product's name and the tagline over one card, centred in the window, with who makes it below. */
+.auth-page {
   box-sizing: border-box;
-  width: calc(100% - 2rem);
-  max-width: calc(26rem + 3.5rem + 2px);
-  margin: 3rem auto;
-  padding: 1.5rem 1.75rem;
-  background: var(--sapGroup_ContentBackground);
-  border: 1px solid var(--sapGroup_ContentBorderColor);
-  border-radius: var(--sapElement_BorderCornerRadius);
+  min-height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  padding: var(--space-7) var(--space-4);
+}
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: center;
+}
+.auth-brand p {
+  margin: 0;
+}
+.auth-product {
+  font-size: 1.375rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.auth-tagline {
+  color: var(--ystara-muted);
+}
+/* At most 26rem wide inside its padding; narrower on a phone. */
+.auth-card {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(26rem + 2 * var(--space-6) + 2px);
+  padding: var(--space-6);
+  background: var(--ystara-card);
+  border: 1px solid var(--ystara-border);
+  border-radius: var(--radius-panel);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.auth-by {
+  margin: 0;
+  color: var(--ystara-muted);
+  font-size: var(--sapFontSmallSize);
+}
+.youlytics-you {
+  font-weight: 600;
 }
 .auth-card p {
   margin: 0;
-  line-height: 1.4;
 }
 .auth-form {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 .auth-label {
   color: var(--sapContent_LabelColor);
   font-size: var(--sapFontSize);
-  margin-top: 0.25rem;
+  margin-top: var(--space-1);
 }
 .auth-label::after {
   content: "*";
   color: var(--sapField_RequiredColor);
-  margin-left: 0.125rem;
+  margin-left: var(--space-1);
 }
 /* Looks like a ui5-input (see Field in components/AuthFrame.tsx for why it isn't one). */
 .auth-input {
   box-sizing: border-box;
   width: 100%;
-  height: 2.25rem;
-  padding: 0 0.625rem;
+  height: 2.5rem;
+  padding: 0 var(--space-3);
   font: inherit;
   color: var(--sapField_TextColor);
   background: var(--sapField_Background);
@@ -571,7 +764,7 @@ ui5-table-cell.mono,
   font-style: italic;
 }
 .auth-form ui5-button[design="Emphasized"] {
-  margin-top: 0.5rem;
+  margin-top: var(--space-2);
 }
 /* The QR code stays black on white in dark mode too: authenticator apps read that best. */
 .auth-qr {
@@ -579,25 +772,28 @@ ui5-table-cell.mono,
   height: 12rem;
   align-self: center;
   background: #fff;
-  padding: 0.5rem;
+  padding: var(--space-2);
   border-radius: 0.25rem;
 }
 
 /* --- Users and roles */
 
+.shell-mark {
+  display: flex;
+}
 /* The top bar draws the divider before it. */
 .shell-account {
   color: var(--sapShell_InteractiveTextColor);
 }
 .you {
-  margin-left: 0.25rem;
+  margin-left: var(--space-1);
 }
 .tag-after {
-  margin-left: 0.5rem;
+  margin-left: var(--space-2);
 }
 .copy-row {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 .copy-row ui5-input {
   flex: 1;
@@ -605,8 +801,8 @@ ui5-table-cell.mono,
 .roles {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 0.375rem 1.5rem;
-  margin: 0.25rem 0 0;
+  gap: var(--space-2) var(--space-5);
+  margin: var(--space-1) 0 0;
 }
 .roles > div {
   display: contents;
@@ -631,56 +827,82 @@ ui5-table-cell.mono,
 
 .deleted-with {
   margin: 0;
-  padding-left: 1.25rem;
+  padding-left: var(--space-5);
 }
 
 /* --- One box per item (database users) */
 .item-list {
   list-style: none;
-  margin: 0.5rem 0;
+  margin: var(--space-2) 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 .item-list > li {
-  padding: 0.25rem 1rem;
-  background: var(--sapGroup_ContentBackground);
-  border: 1px solid var(--sapGroup_ContentBorderColor);
-  border-radius: var(--sapElement_BorderCornerRadius);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--ystara-card);
+  border: 1px solid var(--ystara-border);
+  border-radius: var(--radius-panel);
+}
+.item-list > li > * {
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 /* The operator's Anthropic API key: a field as wide as a key, its buttons beside it. */
 .claude-key {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--space-1);
   max-width: 40rem;
 }
 .claude-key-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 .claude-key-row ui5-input {
   flex: 1 1 16rem;
 }
 
 /* --- Scenarios (pages/Scenarios.tsx, scenario/) */
+
+/* The builder's Save and Run, and whether it is saved: a bar that stays 16px above the bottom of the window. */
+.action-bar {
+  position: sticky;
+  bottom: var(--space-4);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  background: var(--ystara-card);
+  border: 1px solid var(--ystara-border);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+.action-bar-state {
+  flex: 1;
+  min-width: 0;
+}
 .scenario-description {
   display: block;
 }
 /* Name and kind side by side when they fit, each as wide as half the page; the description below them. */
-.scenario-about {
+section.block.scenario-about {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
-  gap: 0.75rem 1rem;
+  gap: var(--space-3) var(--space-4);
 }
 .scenario-field {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--space-1);
 }
 .scenario-field ui5-input,
 .scenario-field ui5-select,
@@ -692,14 +914,14 @@ ui5-table-cell.mono,
 }
 .scenario-table,
 .scenario-checks {
-  margin: 0.75rem 0 1.25rem;
+  margin: var(--space-3) 0 var(--space-5);
 }
 .scenario-table-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.25rem 1rem;
-  margin-bottom: 0.375rem;
+  gap: var(--space-1) var(--space-4);
+  margin-bottom: var(--space-2);
 }
 /* "Takes rows: <a flow's name> loads it": the name has no spaces to break at on a phone. */
 .scenario-table-head > * {
@@ -707,7 +929,7 @@ ui5-table-cell.mono,
   overflow-wrap: anywhere;
 }
 .section-intro {
-  margin: 0 0 0.75rem;
+  margin: 0 0 var(--space-3);
 }
 .scenario-table-name {
   font-weight: bold;
@@ -715,10 +937,11 @@ ui5-table-cell.mono,
 }
 .check-list > li {
   display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.25rem 1rem;
-  padding: 0.25rem 0.5rem 0.25rem 1rem;
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
 }
 .check-list > li > .mono {
   overflow-wrap: anywhere;
@@ -728,7 +951,7 @@ ui5-table-cell.mono,
   display: flex;
 }
 .cli-output.scenario-yaml {
-  margin-top: 0.5rem;
+  margin-top: var(--space-2);
   max-height: 30rem;
 }
 /* The draft button with what it sends, and what came of a draft, a file or an Excel upload. */
@@ -736,18 +959,18 @@ ui5-table-cell.mono,
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.25rem 1rem;
+  gap: var(--space-1) var(--space-4);
 }
 .scenario-note {
-  margin: 0.5rem 0;
+  margin: var(--space-2) 0;
 }
 .scenario-note-lines {
-  margin: 0.375rem 0 0;
-  padding-left: 1.25rem;
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
   overflow-wrap: anywhere;
 }
 .scenario-note-lines > li + li {
-  margin-top: 0.25rem;
+  margin-top: var(--space-1);
 }
 
 /* Test rows: a table of plain inputs that scrolls sideways inside its own box when it is wider than the page. */
@@ -755,7 +978,7 @@ ui5-table-cell.mono,
   max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--sapList_BorderColor);
-  border-radius: var(--sapElement_BorderCornerRadius);
+  border-radius: var(--radius);
   background: var(--sapList_Background);
 }
 .rows-grid table {
@@ -764,13 +987,13 @@ ui5-table-cell.mono,
 }
 .rows-grid th,
 .rows-grid td {
-  padding: 0.25rem;
+  padding: var(--space-1);
   border-bottom: 1px solid var(--sapList_BorderColor);
   text-align: left;
   vertical-align: middle;
 }
 .rows-grid thead th {
-  padding: 0.375rem 0.5rem;
+  padding: var(--space-2) var(--space-2);
   background: var(--sapList_HeaderBackground);
   color: var(--sapList_HeaderTextColor);
   font-weight: normal;
@@ -806,13 +1029,26 @@ ui5-table-cell.mono,
 .rows-grid tbody tr:last-child > * {
   border-bottom: none;
 }
+/* The row numbers and leading key columns, kept in view while the grid scrolls sideways (left set by RowsGrid). */
+.rows-grid .is-pinned {
+  position: sticky;
+  z-index: 1;
+  background: var(--sapList_Background);
+}
+.rows-grid thead .is-pinned {
+  z-index: 2;
+  background: var(--sapList_HeaderBackground);
+}
+.rows-grid .is-last-pinned {
+  box-shadow: inset -1px 0 0 var(--sapList_BorderColor);
+}
 /* Looks like a ui5-input, as .auth-input does. */
 .rows-grid-input {
   box-sizing: border-box;
   width: 100%;
   min-width: 7rem;
   height: 2rem;
-  padding: 0 0.5rem;
+  padding: 0 var(--space-2);
   font-size: var(--sapFontSize);
   color: var(--sapField_TextColor);
   background: var(--sapField_Background);
@@ -847,8 +1083,8 @@ ui5-table-cell.mono,
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.25rem 1rem;
-  margin-top: 0.5rem;
+  gap: var(--space-1) var(--space-4);
+  margin-top: var(--space-2);
 }
 
 /* The check dialog grows for a grid of expected rows, within the window. */
@@ -868,4 +1104,12 @@ ui5-table-cell.mono,
 }
 .check-dialog-body > p {
   margin: 0;
+}
+
+/* --- Spacing between blocks: the parts of a page and of a section are spaced by its gap alone, whatever margin a part has
+   elsewhere. Keep this last, so it outranks those margins. */
+.page > *,
+section.block > * {
+  margin-top: 0;
+  margin-bottom: 0;
 }

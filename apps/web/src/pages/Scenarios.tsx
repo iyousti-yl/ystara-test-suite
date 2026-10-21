@@ -58,13 +58,15 @@ import {
 import { emailDelivery, teamsDelivery } from "../alerts";
 import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading } from "../components/Feedback";
+import { EmptyState } from "../components/EmptyState";
+import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTime, formatDateTimesApart } from "../format";
 import { typeLabel } from "../objectTypes";
 import { CheckDialog, type Checkpoint } from "../scenario/CheckDialog";
 import { readWorkbook, workbookOf } from "../scenario/excel";
 import { assertionLabel, cellFromText, gridFromRows, rowsFromGrid, shownColumns, type Grid } from "../scenario/model";
-import { RowsGrid } from "../scenario/RowsGrid";
+import { PASTE_HELP, RowsGrid } from "../scenario/RowsGrid";
 import { useInTenant } from "../tenantScope";
 
 /**
@@ -122,12 +124,18 @@ export function ScenariosSection({ pipelineId, tenantId }: { pipelineId: string;
   const whyNoRun = tenant.data && databaseUsers.data ? whyNoScenarioRun(databaseUsers.data, tenant.data.host !== null) : undefined;
   const running = suites.data?.find((s) => s.status === "queued" || s.status === "running");
   const whyNotRunAll = !scenarios.data?.length ? "Make a scenario first" : (whyNoRun ?? (running ? "Its scenarios are running" : undefined));
+  const empty = scenarios.data?.length === 0;
+  const newScenario = can("scenarios.write_visual") && (
+    <Button design="Emphasized" icon="add" onClick={() => navigate(`/pipelines/${pipelineId}/scenarios/new`)}>
+      New scenario
+    </Button>
+  );
   return (
     <>
       <section className="block">
         <div className="list-toolbar section-toolbar">
-          <Title level="H4">{scenarios.data ? counted(scenarios.data.length, "scenario") : "Scenarios"}</Title>
-          {can("runs.execute") && (
+          <Title level="H2" size="H4">{scenarios.data ? counted(scenarios.data.length, "scenario") : "Scenarios"}</Title>
+          {!empty && can("runs.execute") && (
             <Button
               icon="media-play"
               disabled={!!whyNotRunAll || runAll.isPending}
@@ -137,71 +145,75 @@ export function ScenariosSection({ pipelineId, tenantId }: { pipelineId: string;
               Run all
             </Button>
           )}
-          {can("scenarios.write_visual") && (
-            <Button design="Emphasized" icon="add" onClick={() => navigate(`/pipelines/${pipelineId}/scenarios/new`)}>
-              New scenario
-            </Button>
-          )}
+          {!empty && newScenario}
         </div>
-        <p className="muted section-intro">
-          A scenario gives test rows to the pipeline&apos;s tables and says what to expect at its steps. It runs on those rows only, compiled from the
-          definitions of the latest scan: nothing is written to the tenant and none of its data is read.
-        </p>
         <ErrorStrip error={scenarios.error ?? runAll.error} />
-        <Table
-          loading={scenarios.isPending}
-          noDataText={can("scenarios.write_visual") ? "No scenarios yet. Make one with New scenario." : "No scenarios yet."}
-          overflowMode="Popin"
-          onRowClick={(e) => navigate(`/scenarios/${e.detail.row.rowKey}`)}
-          headerRow={
-            <TableHeaderRow>
-              <TableHeaderCell minWidth="14rem" importance={1}>
-                Scenario
-              </TableHeaderCell>
-              <TableHeaderCell minWidth="6rem">Kind</TableHeaderCell>
-              <TableHeaderCell minWidth="5rem">Checks</TableHeaderCell>
-              <TableHeaderCell minWidth="12rem" importance={1}>
-                Latest run
-              </TableHeaderCell>
-              <TableHeaderCell minWidth="12rem">Saved</TableHeaderCell>
-            </TableHeaderRow>
-          }
-        >
-          {scenarios.data?.map((s) => (
-            <TableRow key={s.id} rowKey={s.id} interactive>
-              <TableCell>
-                <span>
-                  {s.name}
-                  {s.spec.description && <span className="muted scenario-description">{s.spec.description}</span>}
-                </span>
-              </TableCell>
-              <TableCell>{kindLabel(s.spec.kind)}</TableCell>
-              <TableCell>{checkCount(s.spec)}</TableCell>
-              <TableCell>
-                {s.lastRun ? (
-                  <span className="facts">
-                    <RunStatusTag status={s.lastRun.status} />
-                    {s.lastRun.total !== null && (
-                      <span>
-                        {s.lastRun.passed} of {s.lastRun.total} passed
+        {empty ? (
+          <EmptyState icon="lab" title="No scenarios yet" action={newScenario}>
+            A scenario gives test rows to the pipeline&apos;s tables and says what to expect at its steps. It runs on those rows only: nothing is
+            written to the tenant and none of its data is read.
+          </EmptyState>
+        ) : (
+          <>
+            <p className="muted section-intro">
+              A scenario gives test rows to the pipeline&apos;s tables and says what to expect at its steps. It runs on those rows only, compiled from the
+              definitions of the latest scan: nothing is written to the tenant and none of its data is read.
+            </p>
+            <Table
+              loading={scenarios.isPending}
+              overflowMode="Popin"
+              onRowClick={(e) => navigate(`/scenarios/${e.detail.row.rowKey}`)}
+              headerRow={
+                <TableHeaderRow>
+                  <TableHeaderCell minWidth="14rem" importance={1}>
+                    Scenario
+                  </TableHeaderCell>
+                  <TableHeaderCell minWidth="6rem">Kind</TableHeaderCell>
+                  <TableHeaderCell minWidth="5rem">Checks</TableHeaderCell>
+                  <TableHeaderCell minWidth="12rem" importance={1}>
+                    Latest run
+                  </TableHeaderCell>
+                  <TableHeaderCell minWidth="12rem">Saved</TableHeaderCell>
+                </TableHeaderRow>
+              }
+            >
+              {scenarios.data?.map((s) => (
+                <TableRow key={s.id} rowKey={s.id} interactive>
+                  <TableCell>
+                    <span>
+                      {s.name}
+                      {s.spec.description && <span className="muted scenario-description">{s.spec.description}</span>}
+                    </span>
+                  </TableCell>
+                  <TableCell>{kindLabel(s.spec.kind)}</TableCell>
+                  <TableCell>{checkCount(s.spec)}</TableCell>
+                  <TableCell>
+                    {s.lastRun ? (
+                      <span className="facts">
+                        <RunStatusTag status={s.lastRun.status} />
+                        {s.lastRun.total !== null && (
+                          <span>
+                            {s.lastRun.passed} of {s.lastRun.total} passed
+                          </span>
+                        )}
                       </span>
+                    ) : (
+                      <span className="muted">Never run</span>
                     )}
-                  </span>
-                ) : (
-                  <span className="muted">Never run</span>
-                )}
-              </TableCell>
-              <TableCell>
-                {formatDateTime(s.updatedAt)}
-                {s.updatedBy && <span className="muted"> by {s.updatedBy}</span>}
-              </TableCell>
-            </TableRow>
-          ))}
-        </Table>
+                  </TableCell>
+                  <TableCell>
+                    {formatDateTime(s.updatedAt)}
+                    {s.updatedBy && <span className="muted"> by {s.updatedBy}</span>}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </Table>
+          </>
+        )}
       </section>
       {!!suites.data?.length && (
         <section className="block">
-          <Title level="H4">All scenarios together</Title>
+          <Title level="H2" size="H4">All scenarios together</Title>
           <p className="muted section-intro">
             Each time Run all was clicked, or a scan changed a step of this pipeline and its scenarios ran again on their own.
           </p>
@@ -230,7 +242,7 @@ export function ScenariosSection({ pipelineId, tenantId }: { pipelineId: string;
                 <TableCell>
                   <RunStatusTag status={s.status} />
                 </TableCell>
-                <TableCell horizontalAlign="End">{s.passed === null || s.total === null ? "–" : `${s.passed} of ${s.total}`}</TableCell>
+                <TableCell horizontalAlign="End" className="mono">{s.passed === null || s.total === null ? "–" : `${s.passed} of ${s.total}`}</TableCell>
               </TableRow>
             ))}
           </Table>
@@ -559,46 +571,24 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
           { label: props.pipelineName, to: `/pipelines/${pipelineId}/scenarios` },
         ]}
         title={saved ? saved.name : "New scenario"}
-        subtitle={
-          <span className="facts">
-            <span>{saved ? `Saved ${formatDateTime(saved.updatedAt)}${saved.updatedBy ? ` by ${saved.updatedBy}` : ""}` : "Not saved yet"}</span>
-            {dirty && editable && saved && <Tag design="Critical">Unsaved changes</Tag>}
-            <span>Compiled on the latest successful scan</span>
-          </span>
-        }
+        subtitle="Test rows for the pipeline's tables and what each step should give for them, compiled on the latest successful scan."
         actions={
-          <>
-            {editable && (
-              <Button design="Emphasized" icon="save" disabled={!!whyNotSave || save.isPending} tooltip={whyNotSave} onClick={submit}>
-                Save
-              </Button>
-            )}
-            {saved && can("runs.execute") && (
-              <Button
-                icon="media-play"
-                disabled={!!whyNotRun || run.isPending}
-                tooltip={whyNotRun ?? "Run the checks on this scenario's rows"}
-                onClick={() => run.mutate(undefined, { onSuccess: (r) => navigate(`/scenario-runs/${r.id}`) })}
-              >
-                Run
-              </Button>
-            )}
-            {saved && editable && (
-              <Button
-                design="Transparent"
-                icon="delete"
-                disabled={remove.isPending}
-                onClick={() => {
-                  if (window.confirm(`Delete the scenario "${saved.name}" and its runs? Nothing changes in Datasphere.`)) {
-                    leaving.current = true;
-                    remove.mutate(saved.id, { onSuccess: () => navigate(`/pipelines/${pipelineId}/scenarios`) });
-                  }
-                }}
-              >
-                Delete
-              </Button>
-            )}
-          </>
+          <MoreActions
+            actions={[
+              saved &&
+                editable && {
+                  text: "Delete scenario",
+                  icon: "delete",
+                  disabled: remove.isPending,
+                  onClick: () => {
+                    if (window.confirm(`Delete the scenario "${saved.name}" and its runs? Nothing changes in Datasphere.`)) {
+                      leaving.current = true;
+                      remove.mutate(saved.id, { onSuccess: () => navigate(`/pipelines/${pipelineId}/scenarios`) });
+                    }
+                  },
+                },
+            ]}
+          />
         }
       />
       <ErrorStrip error={save.error ?? run.error ?? remove.error} />
@@ -683,7 +673,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
 
       <section className="block">
         <div className="list-toolbar section-toolbar">
-          <Title level="H4">Test rows</Title>
+          <Title level="H2" size="H4">Test rows</Title>
           {shape.tables.length > 0 && (
             <Button icon="excel-attachment" tooltip="One sheet per table, with the columns the grids show and the rows they have" onClick={() => void downloadRows()}>
               Download Excel template
@@ -711,7 +701,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
         {rowsNote && <NoteStrip note={rowsNote} onClose={() => setRowsNote(undefined)} />}
         <p className="muted page-intro">
           These rows stand in for the pipeline&apos;s tables. A table you give no rows is empty in this scenario. Use made-up values, not rows copied from the
-          tenant: the scenario is stored in Ystara.
+          tenant: the scenario is stored in Ystara.{editable && shape.tables.length > 0 && ` ${PASTE_HELP}`}
         </p>
         {shape.tables.length === 0 && (
           <MessageStrip design="Critical" hideCloseButton>
@@ -736,6 +726,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
                 onChange={(g) => setGrids((all) => ({ ...all, [t.key]: g }))}
                 allColumns={allColumns[t.key] ?? false}
                 onAllColumns={(all) => setAllColumns((current) => ({ ...current, [t.key]: all }))}
+                pasteHelp={false}
               />
             )}
           </div>
@@ -749,7 +740,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
 
       <section className="block">
         <div className="list-toolbar section-toolbar">
-          <Title level="H4">Checks</Title>
+          <Title level="H2" size="H4">Checks</Title>
           {editable && checkpoints.length > 0 && (
             <Button icon="add" onClick={() => setEditing({ checkpoint: firstCheckpoint })}>
               Add check
@@ -791,8 +782,8 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
 
       <Panel className="block" headerText="As a scenario file (YAML)" collapsed>
         <p className="muted">
-          The same scenario as a file for Git or <span className="mono">npm run scenario:run</span>. Save it as a <span className="mono">.local.yaml</span>{" "}
-          file: test rows stay out of the repository.
+          The same scenario as a file, to keep in Git or to run from the command line. Give it a name ending in <span className="mono">.local.yaml</span>,
+          so its test rows stay out of the repository.
         </p>
         <div className="list-toolbar">
           <Button icon="copy" onClick={() => void navigator.clipboard.writeText(toScenarioYaml(spec))}>
@@ -822,6 +813,33 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
       </Panel>
 
       {saved && <RunsSection scenarioId={saved.id} />}
+
+      {(editable || (saved && can("runs.execute"))) && (
+        <footer className="action-bar">
+          <span className="action-bar-state">
+            {dirty && editable ? (
+              <Tag design="Critical">{saved ? "Unsaved changes" : "Not saved yet"}</Tag>
+            ) : (
+              <span className="muted">{saved ? `Saved ${formatDateTime(saved.updatedAt)}${saved.updatedBy ? ` by ${saved.updatedBy}` : ""}` : "Not saved yet"}</span>
+            )}
+          </span>
+          {saved && can("runs.execute") && (
+            <Button
+              icon="media-play"
+              disabled={!!whyNotRun || run.isPending}
+              tooltip={whyNotRun ?? "Run the checks on this scenario's rows"}
+              onClick={() => run.mutate(undefined, { onSuccess: (r) => navigate(`/scenario-runs/${r.id}`) })}
+            >
+              Run
+            </Button>
+          )}
+          {editable && (
+            <Button design="Emphasized" icon="save" disabled={!!whyNotSave || save.isPending} tooltip={whyNotSave} onClick={submit}>
+              Save
+            </Button>
+          )}
+        </footer>
+      )}
 
       {editing && checkpoints.length > 0 && (
         <CheckDialog
@@ -931,7 +949,7 @@ function RunsSection({ scenarioId }: { scenarioId: string }) {
   const time = formatDateTimesApart((runs.data ?? []).map((r) => r.requestedAt));
   return (
     <section className="block">
-      <Title level="H4">{runs.data ? counted(runs.data.length, "run") : "Runs"}</Title>
+      <Title level="H2" size="H4">{runs.data ? counted(runs.data.length, "run") : "Runs"}</Title>
       <ErrorStrip error={runs.error} />
       <Table
         loading={runs.isPending}
@@ -958,7 +976,7 @@ function RunsSection({ scenarioId }: { scenarioId: string }) {
             <TableCell>
               <RunStatusTag status={r.status} />
             </TableCell>
-            <TableCell horizontalAlign="End">{r.total === null ? "–" : `${r.passed} of ${r.total}`}</TableCell>
+            <TableCell horizontalAlign="End" className="mono">{r.total === null ? "–" : `${r.passed} of ${r.total}`}</TableCell>
           </TableRow>
         ))}
       </Table>
@@ -1008,7 +1026,7 @@ export function ScenarioRunPage() {
       {busy && <p className="muted">The worker is sending the checks as SELECTs that read only the scenario&apos;s rows. This page refreshes on its own.</p>}
       {r.checks && (
         <section className="block">
-          <Title level="H4">Checks</Title>
+          <Title level="H2" size="H4">Checks</Title>
           <Table
             overflowMode="Popin"
             headerRow={
@@ -1045,7 +1063,7 @@ export function ScenarioRunPage() {
       )}
       {r.steps && (
         <section className="block">
-          <Title level="H4">How each step was simulated</Title>
+          <Title level="H2" size="H4">How each step was simulated</Title>
           <StepsTable steps={r.steps} />
         </section>
       )}
@@ -1117,7 +1135,7 @@ export function ScenarioSuitePage() {
       )}
       {s.changed.length > 0 && (
         <section className="block">
-          <Title level="H4">What the scan changed</Title>
+          <Title level="H2" size="H4">What the scan changed</Title>
           <Table
             overflowMode="Popin"
             headerRow={
@@ -1145,7 +1163,7 @@ export function ScenarioSuitePage() {
         </section>
       )}
       <section className="block">
-        <Title level="H4">Scenarios</Title>
+        <Title level="H2" size="H4">Scenarios</Title>
         <Table
           overflowMode="Popin"
           noDataText="This suite has no scenarios."
@@ -1171,7 +1189,7 @@ export function ScenarioSuitePage() {
               <TableCell>
                 <RunStatusTag status={r.status} />
               </TableCell>
-              <TableCell horizontalAlign="End">{r.total === null ? "–" : `${r.passed} of ${r.total}`}</TableCell>
+              <TableCell horizontalAlign="End" className="mono">{r.total === null ? "–" : `${r.passed} of ${r.total}`}</TableCell>
               {errors && (
                 <TableCell>
                   <span className="wrap-anywhere">{r.error ?? ""}</span>
