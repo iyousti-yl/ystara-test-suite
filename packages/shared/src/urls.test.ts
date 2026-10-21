@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isDatasphereUrl, isTokenUrl } from "./urls.js";
+import { isDatasphereUrl, isTokenUrl, teamsWebhookHost } from "./urls.js";
 
 /** A URL with a user name before the host, built from parts so it never reads as an email address. */
 const withUser = (user: string, rest: string) => `https://${user}@${rest}`;
@@ -62,6 +62,28 @@ describe("a token URL", () => {
       "not a url",
     ]) {
       expect(isTokenUrl(url), url).toBe(false);
+    }
+  });
+});
+
+describe("a Teams webhook address", () => {
+  it("is one of Microsoft's webhook hosts, on https", () => {
+    expect(teamsWebhookHost("https://default0a1b.2c.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/1/triggers/manual/paths/invoke?sig=x")).toBe(
+      "default0a1b.2c.environment.api.powerplatform.com",
+    );
+    expect(teamsWebhookHost("https://prod-12.westeurope.logic.azure.com:443/workflows/1/triggers/manual/paths/invoke?sig=x")).toBe("prod-12.westeurope.logic.azure.com");
+    expect(teamsWebhookHost(" https://org.webhook.office.com/webhookb2/a@b/IncomingWebhook/c/d ")).toBe("org.webhook.office.com");
+    for (const url of [
+      "http://org.webhook.office.com/webhookb2/x",
+      "https://org.webhook.office.com:8443/webhookb2/x",
+      withUser("user:pw", "org.webhook.office.com/webhookb2/x"),
+      "https://org.webhook.office.com/",
+      "https://webhook.office.com.evil.example/x",
+      "https://logic.azure.com/x",
+      "https://10.0.0.1/x",
+      "not a url",
+    ]) {
+      expect(teamsWebhookHost(url), url).toBeUndefined();
     }
   });
 });

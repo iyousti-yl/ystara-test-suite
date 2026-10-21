@@ -184,7 +184,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
           <PipelineView result={result.data} />
         </>
       ) : tab === "scenarios" ? (
-        <ScenariosSection pipelineId={definition.id} />
+        <ScenariosSection pipelineId={definition.id} tenantId={definition.tenantId} />
       ) : (
         <>
           {whyNot && can("runs.execute") && (
@@ -200,13 +200,13 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
   );
 }
 
-/** Watchers get an email when a scheduled snapshot of the pipeline calls for an alert. Anyone in the account can watch. */
+/** Watchers get an email when a scheduled snapshot of the pipeline, or a rerun of its scenarios after a scan, calls for an alert. Anyone in the account can watch. */
 function WatchButton({ pipelineId }: { pipelineId: string }) {
   const watch = useWatch(pipelineId);
   const setWatching = useSetWatching(pipelineId);
   const state = watch.data;
   const others = state ? state.watchers - (state.watching ? 1 : 0) : 0;
-  const tooltip = `${state?.watching ? "You get" : "Get"} an email when a scheduled snapshot fails or its output or definitions change.${
+  const tooltip = `${state?.watching ? "You get" : "Get"} an email when a scheduled snapshot fails or its output or definitions change, and when a scenario breaks after a scan.${
     others ? ` ${others === 1 ? "1 other person watches" : `${others} other people watch`} this pipeline.` : ""
   }`;
   return (

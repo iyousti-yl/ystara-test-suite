@@ -105,6 +105,7 @@ interface RunRow {
   pipeline_id: string;
   scenario_id: string;
   scan_id: string | null;
+  suite_id: string | null;
   spec: ScenarioSpec;
   status: ScenarioRunStatus;
   requested_at: Date;
@@ -134,6 +135,7 @@ const toRun = (r: RunRow): ScenarioRun => ({
   pipelineId: r.pipeline_id,
   pipelineName: r.pipeline_name,
   scanId: r.scan_id,
+  suiteId: r.suite_id,
   spec: r.spec,
   status: r.status,
   requestedAt: r.requested_at,

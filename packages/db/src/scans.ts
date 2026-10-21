@@ -30,6 +30,7 @@ interface ScanRow {
   edge_count: number | null;
   warnings: string[];
   error: string | null;
+  scheduled: boolean;
 }
 
 const toScan = (r: ScanRow): Scan => ({
@@ -45,10 +46,17 @@ const toScan = (r: ScanRow): Scan => ({
   edgeCount: r.edge_count,
   warnings: r.warnings,
   error: r.error,
+  scheduled: r.scheduled,
 });
 
-export async function createScan(db: Queryable, tenantId: string, spaces: string[], source: ScanSource = "tenant"): Promise<Scan> {
-  const { rows } = await db.query<ScanRow>("insert into scans (tenant_id, spaces, source) values ($1, $2, $3) returning *", [tenantId, spaces, source]);
+/** `scheduled`: started by the tenant's scan schedule (schedule-tick.ts in the worker). */
+export async function createScan(db: Queryable, tenantId: string, spaces: string[], source: ScanSource = "tenant", opts: { scheduled?: boolean } = {}): Promise<Scan> {
+  const { rows } = await db.query<ScanRow>("insert into scans (tenant_id, spaces, source, scheduled) values ($1, $2, $3, $4) returning *", [
+    tenantId,
+    spaces,
+    source,
+    opts.scheduled ?? false,
+  ]);
   return toScan(rows[0]);
 }
 
@@ -67,6 +75,21 @@ export async function latestSucceededScan(db: Queryable, tenantId: string): Prom
     [tenantId],
   );
   return rows[0] && toScan(rows[0]);
+}
+
+/** The tenant's latest successful scan that finished before `scan` did: what a scan's changes are found against. */
+export async function previousSucceededScan(db: Queryable, scan: Pick<Scan, "id" | "tenantId" | "finishedAt">): Promise<Scan | undefined> {
+  const { rows } = await db.query<ScanRow>(
+    "select * from scans where tenant_id = $1 and status = 'succeeded' and id <> $2 and finished_at <= $3 order by finished_at desc limit 1",
+    [scan.tenantId, scan.id, scan.finishedAt ?? new Date()],
+  );
+  return rows[0] && toScan(rows[0]);
+}
+
+/** Whether a scan of the tenant asked for after `since` is still queued or running. */
+export async function hasUnfinishedScan(db: Queryable, tenantId: string, since: Date): Promise<boolean> {
+  const { rows } = await db.query("select 1 from scans where tenant_id = $1 and status in ('queued', 'running') and requested_at > $2 limit 1", [tenantId, since]);
+  return rows.length > 0;
 }
 
 export async function markScanRunning(db: Queryable, id: string): Promise<void> {

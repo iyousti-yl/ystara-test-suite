@@ -1,6 +1,7 @@
 import { Button, Link, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Title } from "@ui5/webcomponents-react";
 import { describeAlertReason, type ColumnMeasures, type Json, type SnapshotAlert, type SnapshotObject } from "@ystara/shared";
 import { useNavigate, useParams } from "react-router";
+import { emailDelivery, teamsDelivery } from "../alerts";
 import { useSchedule, useSnapshot, useSnapshots, type SnapshotJson } from "../api";
 import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
@@ -171,16 +172,10 @@ export function SnapshotPage() {
 /** The alert this scheduled snapshot raised: why, and whether the watchers got it. */
 function AlertStrip({ alert, pipelineId, snapshotId }: { alert: Json<SnapshotAlert>; pipelineId: string; snapshotId: string }) {
   const navigate = useNavigate();
-  const sent: Record<SnapshotAlert["status"], string> = {
-    sent: `Emailed to ${counted(alert.recipients, "watcher")} on ${formatDateTime(alert.sentAt)}.`,
-    sending: "The email is being sent.",
-    failed: `The email could not be sent (${alert.error ?? "no reason given"}). The worker tries again a few times.`,
-    no_watchers: "Nobody watches this pipeline, so no email went out.",
-    no_mail_server: "No email went out: this Ystara has no mail server (SMTP_URL) set.",
-  };
   return (
     <MessageStrip design="Critical" hideCloseButton className="block wrap-anywhere">
-      <strong>This scheduled snapshot raised an alert.</strong> {alert.reasons.map(describeAlertReason).join(" ")} {sent[alert.status]}{" "}
+      <strong>This scheduled snapshot raised an alert.</strong> {alert.reasons.map(describeAlertReason).join(" ")} {emailDelivery(alert)}{" "}
+      {teamsDelivery(alert.teams)}{" "}
       {alert.comparedWith && (
         <Link onClick={() => navigate(`/pipelines/${pipelineId}/compare?from=${alert.comparedWith}&to=${snapshotId}`)}>Compare with the snapshot before</Link>
       )}

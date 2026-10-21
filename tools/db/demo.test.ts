@@ -25,8 +25,8 @@ describe("the demo tenant", () => {
     for (const name of Object.values(DEMO_COLUMNS)) expect(name).toMatch(/^[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*$/);
   });
 
-  it("loads a scan, a pipeline over the output, two snapshots that differ and a scenario with a run", async () => {
-    const { tenant, pipeline, snapshots, scenarioRun } = await loadDemo(db, accountId);
+  it("loads a scan, a pipeline over the output, two snapshots that differ, a scenario with a run and a suite that broke", async () => {
+    const { tenant, pipeline, snapshots, scenarioRun, suite } = await loadDemo(db, accountId);
     expect(tenant).toMatchObject({ name: DEMO_TENANT, host: null });
     expect(pipeline.output).toEqual({ space: DEMO_SPACE, technicalName: DEMO_NAMES.output });
     expect(snapshots.map((s) => [s.status, s.scheduled])).toEqual([
@@ -53,6 +53,11 @@ describe("the demo tenant", () => {
     expect(scenarioRun).toMatchObject({ pipelineId: pipeline.id, scenarioName: DEMO_SCENARIO.name, status: "passed", passed: 4, total: 4 });
     expect(scenarioRun.steps?.find((s) => s.technicalName === DEMO_NAMES.rawTable)?.note).toBe("fixture with 3 given rows");
     expect(scenarioRun.checks?.map((c) => c.label)).toEqual(["row_count = 2", "unique shipmentId", "row_count = 1", "rows_equal on routeSegmentId (1 row)"]);
+
+    // A suite after a scan that changed the enrichment flow: the scenario broke there, and the alert says which check.
+    expect(suite).toMatchObject({ cause: "scan", status: "failed", passed: 0, total: 1, changed: [{ technicalName: DEMO_NAMES.enrichFlow, change: "definition" }] });
+    expect(suite.runs).toMatchObject([{ scenarioName: DEMO_SCENARIO.name, status: "failed", passed: 3, total: 4 }]);
+    expect(suite.alert).toMatchObject({ status: "no_watchers", broken: [{ name: DEMO_SCENARIO.name, failedChecks: ["rows_equal on routeSegmentId (1 row)"] }], teams: null });
   });
 
   it("refuses to load it twice into one account, and adds nothing", async () => {

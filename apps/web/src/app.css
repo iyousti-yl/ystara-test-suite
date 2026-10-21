@@ -260,7 +260,7 @@ ui5-table-cell.mono,
   font-size: var(--sapFontSmallSize);
 }
 
-/* --- Snapshot schedules */
+/* --- Snapshot and scan schedules */
 
 .schedule-summary {
   margin: 0.25rem 0;
@@ -275,6 +275,19 @@ ui5-table-cell.mono,
 .schedule-runs {
   margin: 0.25rem 0 0;
   padding-left: 1.25rem;
+}
+
+/* --- Alerts: a section with nothing set yet, its one line and its one button */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  max-width: 40rem;
+}
+.empty-state p {
+  margin: 0;
 }
 
 /* --- Comparing two snapshots */

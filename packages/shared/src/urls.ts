@@ -34,3 +34,29 @@ function plainHttps(value: string): URL | undefined {
   const url = new URL(value); // the host comes back lowercased, and ":443" as no port
   return url.protocol === "https:" && url.port === "" && !url.username && !url.password ? url : undefined;
 }
+
+/**
+ * A Microsoft Teams channel's webhook, where alerts are posted (the worker
+ * POSTs to it, and the API once when it is saved). Only Microsoft's own hosts
+ * for it, on https and the default port (Workflows addresses carry ":443",
+ * which is the same): a Workflows webhook (*.environment.api.powerplatform.com,
+ * or *.logic.azure.com from before 2026) or an older incoming webhook
+ * (*.webhook.office.com). Its query (the signature) is kept.
+ */
+const TEAMS_HOSTS = [
+  /^[a-z0-9-]+(\.[a-z0-9-]+)*\.environment\.api\.powerplatform\.com$/,
+  /^[a-z0-9-]+\.[a-z0-9-]+\.logic\.azure\.com$/,
+  /^[a-z0-9-]+\.webhook\.office\.com$/,
+];
+
+export const TEAMS_WEBHOOK_HINT =
+  "Use the address of a Teams workflow \"Post to a channel when a webhook request is received\": https://….environment.api.powerplatform.com/… (or an older …webhook.office.com address).";
+
+/** The webhook's host when `value` is a Teams webhook address, else undefined. */
+export function teamsWebhookHost(value: string): string | undefined {
+  const text = value.trim();
+  if (!URL.canParse(text) || text.includes("#")) return undefined;
+  const url = new URL(text);
+  if (url.protocol !== "https:" || url.port !== "" || url.username || url.password || url.pathname === "/") return undefined;
+  return TEAMS_HOSTS.some((host) => host.test(url.hostname)) ? url.hostname : undefined;
+}

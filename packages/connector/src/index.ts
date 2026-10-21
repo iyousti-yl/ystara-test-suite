@@ -4,6 +4,7 @@ export * from "./cli.js";
 export * from "./classify.js";
 export * from "./discovery/references.js";
 export * from "./discovery/graph.js";
+export * from "./discovery/changes.js";
 export * from "./discovery/scan.js";
 export * from "./discovery/mermaid.js";
 export * from "./mask.js";

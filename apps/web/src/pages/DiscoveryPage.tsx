@@ -12,6 +12,7 @@ import {
   TableHeaderCell,
   TableHeaderRow,
   TableRow,
+  Title,
 } from "@ui5/webcomponents-react";
 import { useNavigate, useSearchParams } from "react-router";
 import { readableSpaces } from "@ystara/shared";
@@ -20,12 +21,13 @@ import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
 import { useAddressTenant } from "../tenantScope";
+import { ScanScheduleSection } from "./Schedule";
 import { parseSpaces } from "./TenantConnection";
 
 /**
- * Discovery: the tenant's scans, newest first (refreshed while one runs), and
- * Scan spaces. A scan opens its objects; from there an output's pipeline.
- * `?scan=1` (Home's next step) opens the scan dialog.
+ * Discovery: the tenant's scan schedule, its scans, newest first (refreshed
+ * while one runs), and Scan spaces. A scan opens its objects; from there an
+ * output's pipeline. `?scan=1` (Home's next step) opens the scan dialog.
  */
 export function DiscoveryPage() {
   const { tenantId, tenant } = useAddressTenant();
@@ -33,6 +35,8 @@ export function DiscoveryPage() {
   const [params, setParams] = useSearchParams();
   const can = useCan();
   const scans = useScans(tenantId);
+  const connection = useConnection(tenantId);
+  const readable = connection.data ? readableSpaces(connection.data) : [];
   const canScan = can("discovery.run") && Boolean(tenant.data?.host);
   const scanning = params.get("scan") === "1" && canScan;
   const setScanning = (open: boolean) => setParams(open ? { scan: "1" } : {}, { replace: true });
@@ -59,51 +63,66 @@ export function DiscoveryPage() {
           here.
         </MessageStrip>
       )}
-      <ErrorStrip error={scans.error} />
-      <Table
-        loading={scans.isPending}
-        noDataText="No scans yet."
-        overflowMode="Popin"
-        onRowClick={(e) => navigate(`/scans/${e.detail.row.rowKey}`)}
-        headerRow={
-          <TableHeaderRow>
-            <TableHeaderCell minWidth="11rem" importance={1}>
-              Requested
-            </TableHeaderCell>
-            <TableHeaderCell minWidth="8rem" importance={1}>
-              Spaces
-            </TableHeaderCell>
-            <TableHeaderCell minWidth="7rem" importance={1}>
-              Status
-            </TableHeaderCell>
-            <TableHeaderCell minWidth="5rem" horizontalAlign="End">
-              Objects
-            </TableHeaderCell>
-            <TableHeaderCell minWidth="5rem" horizontalAlign="End">
-              Links
-            </TableHeaderCell>
-            <TableHeaderCell minWidth="6rem" horizontalAlign="End">
-              Warnings
-            </TableHeaderCell>
-          </TableHeaderRow>
-        }
-      >
-        {scans.data?.map((s) => (
-          <TableRow key={s.id} rowKey={s.id} interactive>
-            <TableCell>
-              {formatDateTime(s.requestedAt)}
-              {s.source === "import" && <span className="muted"> (imported)</span>}
-            </TableCell>
-            <TableCell className="mono">{s.spaces.join(", ")}</TableCell>
-            <TableCell>
-              <ScanStatusTag status={s.status} />
-            </TableCell>
-            <TableCell horizontalAlign="End">{s.objectCount ?? "–"}</TableCell>
-            <TableCell horizontalAlign="End">{s.edgeCount ?? "–"}</TableCell>
-            <TableCell horizontalAlign="End">{s.warnings.length || "–"}</TableCell>
-          </TableRow>
-        ))}
-      </Table>
+      {tenant.data.host && (
+        <ScanScheduleSection
+          tenantId={tenantId}
+          spaces={readable}
+          whyNot={
+            connection.isSuccess && !readable.length
+              ? "Scheduled scans read the spaces the technical client can read, and it can't read any yet: see Connection › Technical client."
+              : undefined
+          }
+        />
+      )}
+      <section className="block">
+        <Title level="H4">Scans</Title>
+        <ErrorStrip error={scans.error} />
+        <Table
+          loading={scans.isPending}
+          noDataText="No scans yet."
+          overflowMode="Popin"
+          onRowClick={(e) => navigate(`/scans/${e.detail.row.rowKey}`)}
+          headerRow={
+            <TableHeaderRow>
+              <TableHeaderCell minWidth="11rem" importance={1}>
+                Requested
+              </TableHeaderCell>
+              <TableHeaderCell minWidth="8rem" importance={1}>
+                Spaces
+              </TableHeaderCell>
+              <TableHeaderCell minWidth="7rem" importance={1}>
+                Status
+              </TableHeaderCell>
+              <TableHeaderCell minWidth="5rem" horizontalAlign="End">
+                Objects
+              </TableHeaderCell>
+              <TableHeaderCell minWidth="5rem" horizontalAlign="End">
+                Links
+              </TableHeaderCell>
+              <TableHeaderCell minWidth="6rem" horizontalAlign="End">
+                Warnings
+              </TableHeaderCell>
+            </TableHeaderRow>
+          }
+        >
+          {scans.data?.map((s) => (
+            <TableRow key={s.id} rowKey={s.id} interactive>
+              <TableCell>
+                {formatDateTime(s.requestedAt)}
+                {s.source === "import" && <span className="muted"> (imported)</span>}
+                {s.scheduled && <span className="muted"> (scheduled)</span>}
+              </TableCell>
+              <TableCell className="mono">{s.spaces.join(", ")}</TableCell>
+              <TableCell>
+                <ScanStatusTag status={s.status} />
+              </TableCell>
+              <TableCell horizontalAlign="End">{s.objectCount ?? "–"}</TableCell>
+              <TableCell horizontalAlign="End">{s.edgeCount ?? "–"}</TableCell>
+              <TableCell horizontalAlign="End">{s.warnings.length || "–"}</TableCell>
+            </TableRow>
+          ))}
+        </Table>
+      </section>
       {scanning && <ScanDialog tenantId={tenantId} onClose={() => setScanning(false)} />}
     </div>
   );
