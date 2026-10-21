@@ -14,6 +14,8 @@ import {
   Text,
   UserMenu,
   UserMenuAccount,
+  UserMenuItem,
+  UserMenuItemGroup,
   type NavigationLayoutDomRef,
 } from "@ui5/webcomponents-react";
 import type { Me } from "@ystara/shared";
@@ -21,6 +23,7 @@ import { useLocation, useNavigate } from "react-router";
 import { useSignOut, useSwitchAccount, useTenants } from "../api";
 import { ROLE_LABEL } from "../roles";
 import { useTenantScope } from "../tenantScope";
+import { setThemePreference, THEME_PREFERENCES, useThemePreference, type ThemePreference } from "../theme";
 
 /**
  * The frame around every signed-in page, laid out like Datasphere (UI5's
@@ -150,17 +153,22 @@ function TopBar(props: { me: Me; slot?: string; onMenu: () => void; onTenantMenu
   );
 }
 
-/** The accounts to switch between, and signing out. */
+/** The accounts to switch between, light or dark, and signing out. */
 function AccountMenu({ me, opener, onClose }: { me: Me; opener?: HTMLElement; onClose: () => void }) {
   const navigate = useNavigate();
   const signOut = useSignOut();
   const switchAccount = useSwitchAccount();
+  const theme = useThemePreference();
   return (
     <UserMenu
       open={opener !== undefined}
       opener={opener}
       showOtherAccounts={me.accounts.length > 1}
       onClose={onClose}
+      onItemClick={(e) => {
+        const picked = e.detail.item.dataset.theme;
+        if (picked) setThemePreference(picked as ThemePreference);
+      }}
       onSignOutClick={() =>
         signOut.mutate(undefined, {
           onSettled: () => navigate("/sign-in", { replace: true }),
@@ -184,7 +192,15 @@ function AccountMenu({ me, opener, onClose }: { me: Me; opener?: HTMLElement; on
             selected={a.id === me.account.id}
           />
         ))}
-    />
+    >
+      <UserMenuItem icon="palette" text="Appearance" showSelection>
+        <UserMenuItemGroup checkMode="Single">
+          {THEME_PREFERENCES.map((t) => (
+            <UserMenuItem key={t.value} data-theme={t.value} text={t.label} checked={t.value === theme} />
+          ))}
+        </UserMenuItemGroup>
+      </UserMenuItem>
+    </UserMenu>
   );
 }
 

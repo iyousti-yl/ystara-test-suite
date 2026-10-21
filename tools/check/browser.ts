@@ -139,6 +139,8 @@ async function main() {
       const group = pages.filter((p) => p.signedIn === signedIn);
       if (!group.length) continue;
       const context = await browser.newContext({ viewport: { width, height: width < 600 ? 844 : 900 }, colorScheme: values.dark ? "dark" : "light" });
+      // The app is light unless the person picks Dark in the account menu (apps/web/src/theme.ts keeps it under this key).
+      await context.addInitScript((dark: boolean) => localStorage.setItem("ystara.theme", dark ? "dark" : "light"), values.dark);
       if (signedIn) await context.addCookies([{ name: "ystara_session", value: token, url: `${base}/api` }]);
       for (const page of group) results.push(await check(context, page, width, outDir));
       await context.close();

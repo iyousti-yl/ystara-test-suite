@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import type { Db } from "@ystara/db";
+import { getServerSecret, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import type { AccountOverview, Member, UserOverview } from "@ystara/shared";
+import { serverSecretContext } from "@ystara/shared/secrets";
 import { TEST_PASSWORD, testSecrets, testUser, type TestUser } from "../auth/testing.js";
 import { totpCode, totpStep } from "../auth/totp.js";
+import { claudeDrafter, currentClaudeKey, type ClaudeAccess } from "../drafting.js";
 import { buildServer } from "../server.js";
 
 let db: Db;
@@ -110,5 +112,62 @@ describe("the operator panel", () => {
     expect((await call("POST", "/auth/login", { cookie: "", payload: { email: lost.email, password: "a brand new password" } })).statusCode).toBe(200);
     expect((await call("GET", `/resets/${token}`, { cookie: "" })).statusCode).toBe(404);
     expect(await resetSeen()).toEqual([{ madeAt: expect.any(String), usedAt: expect.any(String), open: false }]);
+  });
+});
+
+describe("the Anthropic API key for drafting scenarios", () => {
+  const GOOD = "sk-ant-synthetic-key-that-works";
+  let reachable = true;
+  const claude: ClaudeAccess = {
+    check: async (key) => {
+      if (!reachable) throw new Error("connect ECONNREFUSED");
+      return key === GOOD ? "ok" : "refused";
+    },
+  };
+
+  it("is checked with Anthropic, kept sealed, never shown again, and turns drafting on", async () => {
+    const withClaude = await buildServer({ db, queue: { send: async () => undefined }, secrets: testSecrets, claude }, { logger: false });
+    const admin = await testUser(db, { account: "Drafting customer", email: "admin@drafting.example.com", role: "admin" });
+    const key = (method: "GET" | "PUT" | "DELETE", payload?: object, as: TestUser = ops) =>
+      withClaude.inject({ method, url: "/api/operator/claude", payload, headers: { cookie: as.cookie } });
+    try {
+      expect((await key("GET", undefined, admin)).statusCode).toBe(403);
+      expect((await key("PUT", { apiKey: GOOD }, admin)).statusCode).toBe(403);
+      expect((await key("GET")).json()).toEqual({ source: null, operatorKey: null });
+
+      const refused = await key("PUT", { apiKey: "sk-ant-synthetic-key-that-fails" });
+      expect([refused.statusCode, refused.json().error]).toEqual([400, "Anthropic doesn't accept this key. Copy it again from console.anthropic.com."]);
+      reachable = false;
+      expect((await key("PUT", { apiKey: GOOD })).statusCode).toBe(502);
+      reachable = true;
+      expect(await getServerSecret(db, "anthropic_api_key")).toBeUndefined();
+
+      const set = await key("PUT", { apiKey: `  ${GOOD}\n` });
+      expect(set.statusCode).toBe(200);
+      expect(set.json()).toMatchObject({ source: "operator", operatorKey: { updatedBy: "ops@ystara.example.com" } });
+      expect(set.body).not.toContain(GOOD);
+      const sealed = (await getServerSecret(db, "anthropic_api_key"))!;
+      expect(sealed).not.toContain(GOOD);
+      expect(testSecrets.open(sealed, serverSecretContext("anthropic_api_key"))).toBe(GOOD);
+      expect(await claudeDrafter(() => currentClaudeKey(db, testSecrets, claude)).available()).toBe(true);
+      // The server's own ANTHROPIC_API_KEY wins while it is set.
+      expect(await currentClaudeKey(db, testSecrets, { ...claude, fromEnvironment: "sk-ant-synthetic-server-key" })).toBe("sk-ant-synthetic-server-key");
+
+      expect((await key("DELETE")).statusCode).toBe(204);
+      expect((await key("GET")).json()).toEqual({ source: null, operatorKey: null });
+      expect(await claudeDrafter(() => currentClaudeKey(db, testSecrets, claude)).available()).toBe(false);
+    } finally {
+      await withClaude.close();
+    }
+  });
+
+  it("says when the server's own key is used", async () => {
+    const withEnvKey = await buildServer({ db, queue: { send: async () => undefined }, secrets: testSecrets, claude: { ...claude, fromEnvironment: "sk-ant-synthetic-server-key" } }, { logger: false });
+    try {
+      const res = await withEnvKey.inject({ method: "GET", url: "/api/operator/claude", headers: { cookie: ops.cookie } });
+      expect(res.json()).toEqual({ source: "environment", operatorKey: null });
+    } finally {
+      await withEnvKey.close();
+    }
   });
 });

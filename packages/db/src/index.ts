@@ -12,3 +12,4 @@ export * from "./snapshots.js";
 export * from "./schedules.js";
 export * from "./alerts.js";
 export * from "./scenarios.js";
+export * from "./server-secrets.js";

@@ -251,7 +251,7 @@ export function CheckDialog(props: {
               The step must have these rows and no others. Rows are matched on the key columns, then every column a row gives is compared; a column left empty
               isn&apos;t compared.
             </p>
-            <RowsGrid label="Expected rows" grid={rowGrid} onChange={(grid) => set({ grid })} />
+            <RowsGrid label="Expected rows" grid={rowGrid} onChange={(grid) => set({ grid })} prefill={false} />
           </>
         )}
 

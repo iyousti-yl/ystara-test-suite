@@ -152,7 +152,10 @@ A saved pipeline's Scenarios tab lists its scenarios with their latest run. The 
 - **Checks:** added per step in a dialog (row count, no empty values, unique, an aggregate, exact rows, SQL), with the step's columns to pick from.
 - **Compile as you go:** the draft is sent, unsaved, to `POST /api/pipelines/:id/scenario-check`, which compiles it on the latest scan and says what stops it or a check. Nothing is sent to the tenant.
 - **Run:** `POST /api/scenarios/:id/runs` refuses (409, with the reason) a scenario that can't run, and otherwise queues a `scenario-run` job. The run keeps the scenario as it was, and its page shows each check's result and what stood in for each step.
-- **As a file:** the builder shows the scenario as YAML to copy into a `.local.yaml` file for the CLI or Git.
+- **As a file:** the builder shows the scenario as YAML to copy into a `.local.yaml` file for the CLI or Git, and loads one back.
+- **The columns that matter (phase 3c):** each table column comes with what the pipeline's logic does with it (`key`, `used`, `joined`, `keeps` a filter value, a validity `range`; `columnUsage` in `packages/connector/src/simulate/usage.ts`, reading each step's SQL or CSN by name). A grid shows the keys and the columns read, the rest on request; added rows start with values that get through (`prefillText` in `apps/web/src/scenario/model.ts`).
+- **Excel (phase 3c):** the test rows as a workbook, one sheet per table, and the same file read back (`apps/web/src/scenario/excel.ts`), in the browser.
+- **Drafting with Claude (phase 3c):** `POST /api/pipelines/:id/scenario-draft` sends the description and the pipeline's definitions to Claude and gets rows and checks back, compiled and corrected up to three times, never saved (`apps/api/src/drafting.ts`). Only when the operator has entered an Anthropic API key on the operator panel (`/api/operator/claude`, sealed in `server_secrets`) or the API has `ANTHROPIC_API_KEY`. No tenant data goes out: Ystara has none.
 
 Who may do what: everyone in the account reads scenarios and runs (`scenarios.read`, `runs.read`); developers, test coordinators and admins save them (`scenarios.write_visual`) and run them (`runs.execute`).
 

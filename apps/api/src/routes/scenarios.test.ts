@@ -5,6 +5,8 @@ import { createPipeline, createScan, createTenant, finishScenarioRun, getDatabas
 import { createTestDb } from "@ystara/db/testing";
 import { JOBS } from "@ystara/shared";
 import { testUser, testSecrets, type TestUser } from "../auth/testing.js";
+import type { DraftBrief, ScenarioDrafter } from "../drafting.js";
+import { DraftFailed } from "../drafting.js";
 import { buildServer } from "../server.js";
 
 // Synthetic space: V_OUT keeps the open rows of LT_DATA.
@@ -58,9 +60,9 @@ async function pipelineOf(name: string, databaseUser = false) {
 
 const draft = (name: string, extra: object = {}) => ({
   name,
-  kind: "golden",
+  kind: "golden" as const,
   fixtures: [{ table: "S.LT_DATA", rows: [{ ID: "1", STATUS: "OPEN", AMOUNT: 10.5 }, { ID: "2", STATUS: "CLOSED", AMOUNT: 3 }] }],
-  expect: [{ checkpoint: "S.V_OUT", assertions: [{ type: "row_count", equals: 1 }] }],
+  expect: [{ checkpoint: "S.V_OUT", assertions: [{ type: "row_count" as const, equals: 1 }] }],
   ...extra,
 });
 
@@ -78,11 +80,14 @@ describe("building a scenario", () => {
         why: "nothing in the pipeline loads it",
         columns: [
           { name: "ID", type: "NVARCHAR(10)" },
-          { name: "STATUS", type: "NVARCHAR(10)" },
+          // V_OUT keeps the rows whose STATUS is OPEN.
+          { name: "STATUS", type: "NVARCHAR(10)", used: true, keeps: "OPEN" },
           { name: "AMOUNT", type: "DECIMAL(15, 2)" },
         ],
       },
     ]);
+    // This server has no Anthropic API key, so the builder doesn't offer drafting.
+    expect(inputs.drafting).toBe(false);
     expect(inputs.checkpoints.map((c: { technicalName: string }) => c.technicalName)).toEqual(["LT_DATA", "V_OUT"]);
     expect((await call("GET", `/pipelines/${pipeline.id}/scenario-inputs`, stranger)).statusCode).toBe(404);
   });
@@ -106,6 +111,59 @@ describe("building a scenario", () => {
     const invalid = await call("POST", `/pipelines/${pipeline.id}/scenario-check`, viewer, { ...draft("Invalid"), expect: [], run: [] });
     expect(invalid.statusCode).toBe(400);
     expect(invalid.json().issues.map((i: { message: string }) => i.message)).toEqual(["expect: Array must contain at least 1 element(s)", "the file: Unrecognized key(s) in object: 'run'"]);
+  });
+});
+
+describe("drafting a scenario with Claude", () => {
+  it("isn't offered without an Anthropic API key", async () => {
+    const pipeline = await pipelineOf("No key");
+    const res = await call("POST", `/pipelines/${pipeline.id}/scenario-draft`, coordinator, { description: "Closed rows are left out." });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error).toMatch(/enters an Anthropic API key on the operator panel/);
+  });
+
+  it("sends the pipeline's definitions, compiles the draft on the latest scan, and saves nothing", async () => {
+    const briefs: DraftBrief[] = [];
+    let answer: "draft" | "declined" | "unreachable" = "draft";
+    const drafter: ScenarioDrafter = {
+      available: async () => true,
+      async draft(brief, request, compile) {
+        briefs.push(brief);
+        if (answer === "declined") throw new DraftFailed("Claude declined to draft this scenario.");
+        if (answer === "unreachable") throw new Error("connect ECONNREFUSED");
+        // A first answer with a misplaced check, as Claude might give before its correction.
+        const scenario = { ...draft(request.name ?? "Drafted"), description: request.description };
+        const wrong = compile({ ...scenario, expect: [{ checkpoint: "S.V_NOPE", assertions: [{ type: "row_count", equals: 1 }] }] });
+        return { scenario, notes: ["Row 2 is closed."], problems: [...compile(scenario), ...wrong.map((p) => `first try: ${p}`)], usage: { input: 1, output: 1, cacheRead: 0 } };
+      },
+    };
+    const withClaude = await buildServer({ db, queue: { send: async () => {} }, secrets: testSecrets, drafter }, { logger: false });
+    const post = (url: string, as: TestUser, payload: object) => withClaude.inject({ method: "POST", url: `/api${url}`, headers: { cookie: as.cookie }, payload });
+    try {
+      const pipeline = await pipelineOf("Drafted");
+      expect((await withClaude.inject({ method: "GET", url: `/api/pipelines/${pipeline.id}/scenario-inputs`, headers: { cookie: viewer.cookie } })).json().drafting).toBe(true);
+      expect((await post(`/pipelines/${pipeline.id}/scenario-draft`, viewer, { description: "Closed rows are left out." })).statusCode).toBe(403);
+      expect((await post(`/pipelines/${pipeline.id}/scenario-draft`, stranger, { description: "Closed rows are left out." })).statusCode).toBe(404);
+      expect((await post(`/pipelines/${pipeline.id}/scenario-draft`, coordinator, { description: "  " })).json().issues[0].message).toBe("Describe the scenario first");
+      expect(briefs).toEqual([]);
+
+      const res = await post(`/pipelines/${pipeline.id}/scenario-draft`, coordinator, { description: "Closed rows are left out.", name: "Open rows" });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ scenario: { name: "Open rows", description: "Closed rows are left out." }, notes: ["Row 2 is closed."], problems: ["first try: The check row_count = 1 on S.V_NOPE: S.V_NOPE isn't a step of the pipeline."] });
+      // Definitions only: the columns with what the logic does with them, and each step's SQL.
+      expect(briefs[0]).toMatchObject({ output: "S.V_OUT", tables: [{ technicalName: "LT_DATA", columns: expect.arrayContaining([{ name: "STATUS", type: "NVARCHAR(10)", used: true, keeps: "OPEN" }]) }] });
+      expect(briefs[0]!.logic).toContain(`WHERE "STATUS" = 'OPEN'`);
+      expect(briefs[0]!.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect((await call("GET", `/pipelines/${pipeline.id}/scenarios`, viewer)).json()).toEqual([]);
+
+      answer = "declined";
+      const declined = await post(`/pipelines/${pipeline.id}/scenario-draft`, coordinator, { description: "Closed rows are left out." });
+      expect([declined.statusCode, declined.json().error]).toEqual([502, "Claude declined to draft this scenario."]);
+      answer = "unreachable";
+      expect((await post(`/pipelines/${pipeline.id}/scenario-draft`, coordinator, { description: "Closed rows are left out." })).json().error).toMatch(/^Claude couldn't be reached/);
+    } finally {
+      await withClaude.close();
+    }
   });
 });
 

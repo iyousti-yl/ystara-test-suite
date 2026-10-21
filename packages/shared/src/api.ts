@@ -328,10 +328,25 @@ export interface ScenarioRun extends ScenarioRunSummary {
   requestedBy: string | null;
 }
 
-/** A column as a scenario fills or checks it: its technical name and SAP HANA type. */
+/**
+ * A column as a scenario fills or checks it: its technical name and SAP HANA
+ * type, and on a table that takes rows what the pipeline's logic does with it
+ * (columnUsage in the connector), so the builder shows the columns that matter
+ * and fills new rows with values that get through.
+ */
 export interface ScenarioColumn {
   name: string;
   type: string;
+  /** Part of the table's key. */
+  key?: boolean;
+  /** Read by a filter, join, grouping or calculation of the pipeline, not only passed on. */
+  used?: boolean;
+  /** Compared with another table's column in a join. */
+  joined?: boolean;
+  /** A value the pipeline's filters keep (NULL for IS NULL). */
+  keeps?: string | number | boolean | null;
+  /** Compared with today's date: the start or the end of a validity range. */
+  range?: "start" | "end";
 }
 
 /**
@@ -343,9 +358,36 @@ export interface ScenarioColumn {
  */
 export interface ScenarioInputs {
   scanId: string;
+  /** Whether this server can draft a scenario from its description with Claude (POST /api/pipelines/:id/scenario-draft): it has an Anthropic API key. */
+  drafting: boolean;
   tables: (DspObjectRef & { why: string; columns: ScenarioColumn[] })[];
   checkpoints: (DspObjectRef & { columns: ScenarioColumn[] | null })[];
   steps: ScenarioStepNote[];
+}
+
+/**
+ * POST /api/pipelines/:id/scenario-draft: rows and checks Claude drafted from
+ * the scenario's description and the pipeline's definitions (names, columns
+ * and logic; never data, which Ystara doesn't read), compiled on the latest
+ * scan. Nothing is saved: the builder shows the draft for a person to check.
+ */
+export interface ScenarioDrafted {
+  scenario: Omit<ScenarioSpec, "pipeline" | "version" | "tags">;
+  /** What the rows cover and what Claude assumed, then why each expected value is right. */
+  notes: string[];
+  /** What still stops the draft from compiling after Claude's corrections; empty when it compiles. */
+  problems: string[];
+}
+
+/**
+ * GET /api/operator/claude: whether drafting scenarios with Claude is on, and
+ * where its Anthropic API key comes from. Never the key itself.
+ */
+export interface ClaudeSetting {
+  /** "environment": the server's ANTHROPIC_API_KEY, which wins; "operator": the key entered on the operator panel; null: drafting is off. */
+  source: "environment" | "operator" | null;
+  /** When the operator's key was entered, and by whom; null without one. */
+  operatorKey: { updatedAt: Date; updatedBy: string | null } | null;
 }
 
 /** POST /api/pipelines/:id/scenario-check: a scenario compiled on the latest scan, nothing sent. */

@@ -1,7 +1,17 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Title } from "@ui5/webcomponents-react";
+import { Button, Dialog, Input, Label, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Title } from "@ui5/webcomponents-react";
 import type { Json, UserOverview } from "@ystara/shared";
-import { useAccountOverviews, useCreateAccount, useCreateReset, useInviteAdmin, useMe, useRenameAccountAsOperator, useUserOverviews } from "../api";
+import {
+  useAccountOverviews,
+  useClaudeSetting,
+  useCreateAccount,
+  useCreateReset,
+  useInviteAdmin,
+  useMe,
+  useRenameAccountAsOperator,
+  useSetClaudeKey,
+  useUserOverviews,
+} from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { LinkToSend } from "../components/LinkToSend";
 import { PageHeader } from "../components/PageHeader";
@@ -13,6 +23,7 @@ import { ROLE_LABEL } from "../roles";
  * The operator panel (/operator), for whoever runs Ystara: every customer
  * account and user, creating and renaming accounts, a new admin for an
  * account, and reset links. It shows counts, never tenants, scans or pipelines.
+ * It also takes the server's Anthropic API key, for drafting scenarios with Claude.
  */
 export function OperatorPage() {
   const isOperator = useMe().data?.operator ?? false;
@@ -155,6 +166,8 @@ export function OperatorPage() {
         )}
       </section>
 
+      <ClaudeSection />
+
       {dialog?.kind === "account" && <CreateAccountDialog onClose={() => setDialog(undefined)} />}
       {dialog?.kind === "admin" && <InviteAdminDialog accountId={dialog.accountId} name={dialog.name} onClose={() => setDialog(undefined)} />}
       {dialog?.kind === "reset" && <ResetDialog user={dialog.user} onClose={() => setDialog(undefined)} />}
@@ -168,6 +181,63 @@ export function OperatorPage() {
         />
       )}
     </div>
+  );
+}
+
+/** The Anthropic API key drafting uses: whether one is set and since when, entering one, removing it. */
+function ClaudeSection() {
+  const setting = useClaudeSetting(true);
+  const setKey = useSetClaudeKey();
+  const [apiKey, setApiKey] = useState("");
+  const s = setting.data;
+  return (
+    <section className="block">
+      <Title level="H4">Drafting scenarios with Claude</Title>
+      <p className="muted section-intro">
+        With an Anthropic API key, the scenario builder drafts test rows and checks from a scenario&apos;s description. Each draft sends the description and
+        the pipeline&apos;s definitions (object and column names, types and each step&apos;s SQL) to Anthropic, never tenant data, and is paid on this key.
+      </p>
+      <ErrorStrip error={setting.error ?? setKey.error} />
+      {s && (
+        <p>
+          {s.source === "environment"
+            ? "On, with the server's own ANTHROPIC_API_KEY. It wins over a key entered here."
+            : s.operatorKey
+              ? `On, with the key entered ${formatDateTime(s.operatorKey.updatedAt)}${s.operatorKey.updatedBy ? ` by ${s.operatorKey.updatedBy}` : ""}.`
+              : "Off: no key yet. The builder doesn't offer drafting."}
+        </p>
+      )}
+      {setKey.isSuccess && setKey.variables !== null && (
+        <MessageStrip design="Positive" className="block" onClose={() => setKey.reset()}>
+          Anthropic accepted the key. It is kept sealed and isn&apos;t shown again.
+        </MessageStrip>
+      )}
+      <div className="claude-key">
+        <Label for="claude-key">{s?.operatorKey ? "Replace the key" : "Anthropic API key"}</Label>
+        <div className="claude-key-row">
+          <Input id="claude-key" type="Password" value={apiKey} placeholder="sk-ant-…" onInput={(e) => setApiKey(e.target.value)} />
+          <Button
+            design="Emphasized"
+            disabled={!apiKey.trim() || setKey.isPending}
+            onClick={() => setKey.mutate(apiKey.trim(), { onSuccess: () => setApiKey("") })}
+          >
+            {setKey.isPending && setKey.variables !== null ? "Checking…" : "Check and save"}
+          </Button>
+          {s?.operatorKey && (
+            <Button
+              design="Transparent"
+              icon="delete"
+              disabled={setKey.isPending}
+              onClick={() => {
+                if (window.confirm("Remove the Anthropic API key? The builder stops offering drafting, unless the server has its own key.")) setKey.mutate(null);
+              }}
+            >
+              Remove
+            </Button>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
