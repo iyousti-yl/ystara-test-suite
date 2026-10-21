@@ -2,7 +2,7 @@
 
 A scenario tests a pipeline's logic on rows you choose. You give a few rows for the pipeline's tables and say what you expect at its steps. `npm run scenario:run` compiles every view and transformation flow of the pipeline over your rows and checks each expectation. Nothing is loaded into or run in the tenant: each check is one SELECT that reads only your rows (`FROM DUMMY`), sent through the space's database user.
 
-In the app, a saved pipeline's **Scenarios** tab does the same without a file: a grid of rows for each table, checks added per step, a compile check as you type, and Run. This guide is for files, which the builder can also show; the fields are the same.
+In the app, a saved pipeline's **Scenarios** tab does the same without a file: a grid of rows for each table (the keys and the columns the pipeline reads, with values that get through filled in for you), an Excel template to fill many rows, checks added per step, a compile check as you type, and Run. Once the operator has entered an Anthropic API key, **Draft rows and checks with Claude** writes a first version from the description. This guide is for files, which the builder can also show and load; the fields are the same.
 
 The examples use the synthetic sales pipeline the tests run (`packages/connector/src/simulate/fixtures/sales-space.ts`):
 
@@ -156,6 +156,6 @@ A key the format doesn't know, or a misspelt one, makes the file invalid, so a t
 
 ## What it doesn't do yet
 
-- Scenarios don't run on a schedule, and a file can't be loaded into the app's builder yet (the builder shows its scenario as a file to copy).
+- Scenarios don't run on a schedule yet.
 - Transformation flows run as a full load: a flow that reads its own target sees it empty.
 - `CURRENT_DATE` and other session values aren't fixed, so a step that uses them gives a result that depends on the day.

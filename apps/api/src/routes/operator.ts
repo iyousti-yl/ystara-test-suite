@@ -1,8 +1,21 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { createAccountWithAdmin, createSignInReset, inviteAdminWhereNoneLeft, listAccountOverviews, listUserOverviews, renameAccount, type Db } from "@ystara/db";
-import type { AccountOverview, CreatedInvitation, CreatedReset, UserOverview } from "@ystara/shared";
+import {
+  createAccountWithAdmin,
+  createSignInReset,
+  deleteServerSecret,
+  inviteAdminWhereNoneLeft,
+  listAccountOverviews,
+  listUserOverviews,
+  renameAccount,
+  serverSecretState,
+  setServerSecret,
+  type Db,
+} from "@ystara/db";
+import type { AccountOverview, ClaudeSetting, CreatedInvitation, CreatedReset, UserOverview } from "@ystara/shared";
+import { serverSecretContext, type SecretBox } from "@ystara/shared/secrets";
 import { signedIn } from "../auth/access.js";
+import type { ClaudeAccess } from "../drafting.js";
 
 /**
  * The operator panel, under /api/operator: every customer account and user,
@@ -11,7 +24,9 @@ import { signedIn } from "../auth/access.js";
  * can create or rename an account, invite an admin to an account
  * that has none left, and make a reset link for someone who lost their
  * password or phone. Each of these goes into the log with the operator's id,
- * and the account's admins see resets on their Users and roles page.
+ * and the account's admins see resets on their Users and roles page. It also
+ * holds the server's Anthropic API key, for drafting scenarios with Claude:
+ * checked with Anthropic before it is kept, sealed, and never shown again.
  */
 const operator = { access: "operator" } as const;
 const email = z.string().trim().toLowerCase().email().max(254);
@@ -20,8 +35,14 @@ const NewAccount = z.object({ name: accountName, adminEmail: email });
 const AccountRename = z.object({ name: accountName });
 const AdminInvitation = z.object({ email });
 const id = z.object({ id: z.string().uuid() });
+const ClaudeKey = z.object({ apiKey: z.string().trim().min(20, "That is too short for an Anthropic API key").max(500) });
 
-export function operatorRoutes(db: Db) {
+export function operatorRoutes(db: Db, secrets: SecretBox, claude: ClaudeAccess) {
+  const claudeSetting = async (): Promise<ClaudeSetting> => {
+    const operatorKey = (await serverSecretState(db, "anthropic_api_key")) ?? null;
+    return { source: claude.fromEnvironment ? "environment" : operatorKey ? "operator" : null, operatorKey };
+  };
+
   return async (app: FastifyInstance) => {
     app.get("/operator/accounts", { config: operator }, async () => (await listAccountOverviews(db)) satisfies AccountOverview[]);
 
@@ -53,6 +74,30 @@ export function operatorRoutes(db: Db) {
       }
       req.log.info({ operator: signedIn(req).userId, accountId, invitationId: created.invitation.id }, "operator invited an admin to an account without one");
       return reply.code(201).send(created satisfies CreatedInvitation);
+    });
+
+    app.get("/operator/claude", { config: operator }, claudeSetting);
+
+    // A key is kept only once Anthropic has taken it, sealed with MASTER_KEY.
+    app.put("/operator/claude", { config: operator }, async (req, reply) => {
+      const { apiKey } = ClaudeKey.parse(req.body);
+      let checked: "ok" | "refused";
+      try {
+        checked = await claude.check(apiKey);
+      } catch (e) {
+        req.log.warn(e, "checking an Anthropic API key failed");
+        return reply.code(502).send({ error: "Anthropic couldn't be reached to check the key. Try again in a moment." });
+      }
+      if (checked === "refused") return reply.code(400).send({ error: "Anthropic doesn't accept this key. Copy it again from console.anthropic.com." });
+      const sealed = secrets.seal(apiKey, serverSecretContext("anthropic_api_key"));
+      await setServerSecret(db, { name: "anthropic_api_key", sealed, updatedBy: signedIn(req).userId });
+      req.log.info({ operator: signedIn(req).userId }, "operator set the Anthropic API key");
+      return claudeSetting();
+    });
+
+    app.delete("/operator/claude", { config: operator }, async (req, reply) => {
+      if (await deleteServerSecret(db, "anthropic_api_key")) req.log.info({ operator: signedIn(req).userId }, "operator removed the Anthropic API key");
+      return reply.code(204).send();
     });
 
     app.get("/operator/users", { config: operator }, async () => (await listUserOverviews(db)) satisfies UserOverview[]);

@@ -12,6 +12,7 @@ import { ROLES } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 import { masterKeyFromEnv, secretBox, type SecretBox } from "@ystara/shared/secrets";
 import { installAccess } from "./auth/access.js";
+import { checkClaudeKey, claudeDrafter, currentClaudeKey, keyFromEnv, type ClaudeAccess, type ScenarioDrafter } from "./drafting.js";
 import { authRoutes } from "./routes/auth.js";
 import { connectionRoutes } from "./routes/connections.js";
 import { databaseUserRoutes } from "./routes/database-users.js";
@@ -87,7 +88,16 @@ const requestForLog = (req: FastifyRequest) => ({
   remotePort: req.socket?.remotePort,
 });
 
-export async function buildServer(deps: { db: Db; queue: JobQueue; secrets: SecretBox }, opts: ServerOptions = {}) {
+/**
+ * `claude` says where drafting with Claude gets its key (by default only the
+ * operator's, from the database); `drafter` replaces the drafting itself in tests.
+ */
+export async function buildServer(
+  deps: { db: Db; queue: JobQueue; secrets: SecretBox; claude?: ClaudeAccess; drafter?: ScenarioDrafter },
+  opts: ServerOptions = {},
+) {
+  const claude = deps.claude ?? { check: checkClaudeKey };
+  const drafter = deps.drafter ?? claudeDrafter(() => currentClaudeKey(deps.db, deps.secrets, claude));
   const logger = opts.logger === false ? false : { serializers: { req: requestForLog }, ...(opts.logStream && { stream: opts.logStream }) };
   // A count of proxies: believe the forwarded addresses up to that many hops back (what Fastify does with a number,
   // which its types don't take).
@@ -130,12 +140,12 @@ export async function buildServer(deps: { db: Db; queue: JobQueue; secrets: Secr
       api.get("/meta", open, async () => ({ roles: ROLES, version: process.env.npm_package_version ?? "dev" }));
       await api.register(authRoutes(deps.db, deps.secrets));
       await api.register(teamRoutes(deps.db));
-      await api.register(operatorRoutes(deps.db));
+      await api.register(operatorRoutes(deps.db, deps.secrets, claude));
       await api.register(discoveryRoutes(deps.db, deps.queue));
       await api.register(connectionRoutes(deps.db, deps.queue, deps.secrets));
       await api.register(databaseUserRoutes(deps.db, deps.queue, deps.secrets));
       await api.register(snapshotRoutes(deps.db, deps.queue));
-      await api.register(scenarioRoutes(deps.db, deps.queue));
+      await api.register(scenarioRoutes(deps.db, deps.queue, drafter));
     },
     { prefix: "/api" },
   );
@@ -174,6 +184,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   await boss.start(); // queues are created by `npm run db:migrate`
 
   const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
-  const app = await buildServer({ db, queue: boss, secrets }, { webRoot: existsSync(webRoot) ? webRoot : undefined, trustProxy });
+  const claude = { fromEnvironment: keyFromEnv(), check: checkClaudeKey };
+  const app = await buildServer({ db, queue: boss, secrets, claude }, { webRoot: existsSync(webRoot) ? webRoot : undefined, trustProxy });
+  if (claude.fromEnvironment) app.log.info("Drafting scenarios with Claude uses this server's ANTHROPIC_API_KEY");
   await app.listen({ port: Number(process.env.YSTARA_API_PORT ?? 4000), host: process.env.API_HOST ?? "127.0.0.1" });
 }

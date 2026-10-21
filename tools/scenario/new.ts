@@ -20,8 +20,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { buildPipeline, scenarioSkeleton, simulatePipeline, SimulationStop, stepLogic, tableColumns } from "@ystara/connector";
-import { refKey, TABLE_TYPES } from "@ystara/shared";
+import { buildPipeline, pipelineLogic, scenarioSkeleton, SimulationStop } from "@ystara/connector";
 import { excludeWritersFor, loadScanConfig } from "../scan/config.js";
 import { loadSavedScan, objectIn } from "../scan/saved.js";
 
@@ -61,24 +60,8 @@ const config = await loadScanConfig(root, values.config);
 const pipeline = buildPipeline(graph, { space, technicalName }, { excludeWriters: excludeWritersFor(config, space, technicalName, values["exclude-writer"]) });
 
 if (values.logic) {
-  const nodes = new Map(graph.nodes.map((n) => [refKey(n), n]));
-  const simulation = simulatePipeline(graph, pipeline, { withoutFixture: "empty" });
   console.log(`The logic of ${space}.${technicalName}'s ${pipeline.steps.length} steps, upstream first, from ${path.relative(root, from)}:`);
-  for (const step of simulation.steps) {
-    const node = nodes.get(refKey(step.ref))!;
-    console.log(`\n== ${refKey(step.ref)} (${step.ref.type.replace(/_/g, " ")}): ${step.problem ? `STOPS: ${step.problem}` : step.note}`);
-    if (TABLE_TYPES.has(node.type)) {
-      try {
-        for (const c of tableColumns(node.definition, node.technicalName).columns) console.log(`   ${c.name}  ${c.type}`);
-      } catch (e) {
-        if (!(e instanceof SimulationStop)) throw e;
-        console.log(`   (${e.message})`);
-      }
-      continue;
-    }
-    const logic = stepLogic(node);
-    if (logic) console.log(logic.language === "csn" ? `CSN query:\n${logic.text}` : logic.text.trim());
-  }
+  console.log(pipelineLogic(graph, pipeline));
 }
 
 if (file) {

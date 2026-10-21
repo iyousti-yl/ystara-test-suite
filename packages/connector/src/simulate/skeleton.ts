@@ -1,19 +1,28 @@
-import { FLOW_TYPES, refKey, type LineageGraph, type Pipeline, type ScenarioInputs, type ScenarioStepNote } from "@ystara/shared";
-import { tableColumns } from "./fixtures.js";
+import { FLOW_TYPES, refKey, TABLE_TYPES, type LineageGraph, type Pipeline, type ScenarioColumn, type ScenarioInputs, type ScenarioStepNote } from "@ystara/shared";
+import { tableColumns, type FixtureColumn } from "./fixtures.js";
 import { SimulationStop } from "./fragment.js";
-import { simulatePipeline, type Simulation } from "./simulate.js";
+import { simulatePipeline, stepLogic, type Simulation } from "./simulate.js";
+import { columnUsage } from "./usage.js";
 
 /**
  * What a scenario of the pipeline can fill and check, from its definitions
  * alone (nothing is sent): the tables that take rows (every one no compiled
- * transformation flow loads), with all their columns and why they take rows;
- * the views and tables a check can be on, with their columns when the
- * definition lists them; and what stands in for each step when no rows are
- * given. The builder in the app offers these, and `scenarioSkeleton` writes
- * them as YAML.
+ * transformation flow loads), with all their columns, what the pipeline's
+ * logic does with each (`columnUsage`) and why they take rows; the views and
+ * tables a check can be on, with their columns when the definition lists
+ * them; and what stands in for each step when no rows are given. The builder
+ * in the app offers these, and `scenarioSkeleton` writes them as YAML.
  */
-export function scenarioInputs(graph: LineageGraph, pipeline: Pipeline): Omit<ScenarioInputs, "scanId"> {
+export function scenarioInputs(graph: LineageGraph, pipeline: Pipeline): Omit<ScenarioInputs, "scanId" | "drafting"> {
   const simulation = simulatePipeline(graph, pipeline, { withoutFixture: "empty" });
+  const usage = columnUsage(graph, pipeline);
+  const annotated = (c: FixtureColumn): ScenarioColumn => ({
+    ...c,
+    ...(usage.used.has(c.name) ? { used: true } : {}),
+    ...(usage.joined.has(c.name) ? { joined: true } : {}),
+    ...(usage.keeps.has(c.name) ? { keeps: usage.keeps.get(c.name) } : {}),
+    ...(usage.range.has(c.name) ? { range: usage.range.get(c.name) } : {}),
+  });
   const nodes = new Map(graph.nodes.map((n) => [refKey(n), n]));
   const columnsOf = (key: string) => {
     const node = nodes.get(key)!;
@@ -25,12 +34,41 @@ export function scenarioInputs(graph: LineageGraph, pipeline: Pipeline): Omit<Sc
     }
   };
   return {
-    tables: simulation.steps.filter((s) => s.fixture).map((s) => ({ ...s.ref, why: s.fixture!.why ?? "", columns: s.fixture!.columns })),
+    tables: simulation.steps.filter((s) => s.fixture).map((s) => ({ ...s.ref, why: s.fixture!.why ?? "", columns: s.fixture!.columns.map(annotated) })),
     checkpoints: simulation.steps
       .filter((s) => s.query && !FLOW_TYPES.has(s.ref.type))
       .map((s) => ({ ...s.ref, columns: s.fixture?.columns ?? columnsOf(refKey(s.ref)) })),
     steps: stepNotes(simulation),
   };
+}
+
+/**
+ * The pipeline's logic, upstream first, for working out what each step should
+ * return (`npm run scenario:new -- --logic`, and the brief Claude drafts a
+ * scenario from): each step with what stands in for it, then the columns of
+ * a table (type, and whether it is a key) or the SQL or CSN query of a view
+ * or flow, as its definition writes it.
+ */
+export function pipelineLogic(graph: LineageGraph, pipeline: Pipeline): string {
+  const nodes = new Map(graph.nodes.map((n) => [refKey(n), n]));
+  const simulation = simulatePipeline(graph, pipeline, { withoutFixture: "empty" });
+  const lines: string[] = [];
+  for (const step of simulation.steps) {
+    const node = nodes.get(refKey(step.ref))!;
+    lines.push("", `== ${refKey(step.ref)} (${step.ref.type.replace(/_/g, " ")}): ${step.problem ? `STOPS: ${step.problem}` : step.note}`);
+    if (TABLE_TYPES.has(node.type)) {
+      try {
+        for (const c of tableColumns(node.definition, node.technicalName).columns) lines.push(`   ${c.name}  ${c.type}${c.key ? "  key" : ""}`);
+      } catch (e) {
+        if (!(e instanceof SimulationStop)) throw e;
+        lines.push(`   (${e.message})`);
+      }
+      continue;
+    }
+    const logic = stepLogic(node);
+    if (logic) lines.push(logic.language === "csn" ? `CSN query:\n${logic.text}` : logic.text.trim());
+  }
+  return lines.join("\n");
 }
 
 /** What stood in for each step, as a run stores it. */

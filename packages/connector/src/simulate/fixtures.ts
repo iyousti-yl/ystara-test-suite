@@ -6,6 +6,8 @@ export interface FixtureColumn {
   name: string;
   /** e.g. NVARCHAR(40), DECIMAL(15, 2), DATE */
   type: string;
+  /** Part of the table's key, when its definition says so. */
+  key?: boolean;
 }
 
 /** A fixture value, as a scenario writes it. */
@@ -18,6 +20,7 @@ interface CsnElement {
   precision?: number;
   scale?: number | string;
   virtual?: boolean;
+  key?: boolean;
 }
 
 const count = (n: unknown, fallback: number) => (Number.isInteger(n) && (n as number) > 0 ? (n as number) : fallback);
@@ -72,7 +75,7 @@ export function tableColumns(definition: unknown, name: string): { columns: Fixt
     if (element.virtual || element.type === "cds.Association" || element.type === "cds.Composition") continue;
     const type = hanaType(element);
     if (!type) unknownTypes.push(`${column} (${element.type ?? "no type"})`);
-    columns.push({ name: column, type: type ?? "NVARCHAR(5000)" });
+    columns.push({ name: column, type: type ?? "NVARCHAR(5000)", ...(element.key ? { key: true } : {}) });
   }
   if (!columns.length) throw new SimulationStop(`the definition of ${name} lists no columns`);
   return { columns, unknownTypes };

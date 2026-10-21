@@ -637,6 +637,23 @@ ui5-table-cell.mono,
   border-radius: var(--sapElement_BorderCornerRadius);
 }
 
+/* The operator's Anthropic API key: a field as wide as a key, its buttons beside it. */
+.claude-key {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 40rem;
+}
+.claude-key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.claude-key-row ui5-input {
+  flex: 1 1 16rem;
+}
+
 /* --- Scenarios (pages/Scenarios.tsx, scenario/) */
 .scenario-description {
   display: block;
@@ -701,6 +718,24 @@ ui5-table-cell.mono,
   margin-top: 0.5rem;
   max-height: 30rem;
 }
+/* The draft button with what it sends, and what came of a draft, a file or an Excel upload. */
+.scenario-draft {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
+}
+.scenario-note {
+  margin: 0.5rem 0;
+}
+.scenario-note-lines {
+  margin: 0.375rem 0 0;
+  padding-left: 1.25rem;
+  overflow-wrap: anywhere;
+}
+.scenario-note-lines > li + li {
+  margin-top: 0.25rem;
+}
 
 /* Test rows: a table of plain inputs that scrolls sideways inside its own box when it is wider than the page. */
 .rows-grid-scroll {
@@ -736,6 +771,14 @@ ui5-table-cell.mono,
   display: block;
   font-size: var(--sapFontSmallSize);
   color: var(--sapContent_LabelColor);
+}
+/* A key column, and a column the pipeline's logic reads: the columns a test row needs. */
+.rows-grid-key {
+  color: var(--sapInformativeColor);
+  font-weight: bold;
+}
+.rows-grid-used {
+  color: var(--sapInformativeColor);
 }
 .rows-grid-number {
   width: 2rem;

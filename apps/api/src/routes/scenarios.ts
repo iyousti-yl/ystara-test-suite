@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z, ZodError } from "zod";
-import { buildPipeline, planScenario, scenarioInputs, stepNotes } from "@ystara/connector";
+import { buildPipeline, pipelineLogic, planScenario, scenarioInputs, stepNotes } from "@ystara/connector";
 import {
   createScenario,
   createScenarioRun,
@@ -28,11 +28,13 @@ import {
   type Pipeline,
   type PipelineDefinition,
   type ScenarioCompile,
+  type ScenarioDrafted,
   type ScenarioInputs,
   type ScenarioRunJobData,
   type Scan,
 } from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
+import { DraftFailed, type ScenarioDrafter } from "../drafting.js";
 import type { JobQueue } from "../server.js";
 
 /**
@@ -43,17 +45,24 @@ import type { JobQueue } from "../server.js";
  * Building one compiles it on the tenant's latest successful scan, from the
  * stored definitions alone: nothing is sent to the tenant. Running one
  * ("runs.execute") queues a job, and the worker sends each check as a SELECT
- * that reads only the scenario's rows. As everywhere, another account's
- * pipeline, scenario or run answers 404.
+ * that reads only the scenario's rows. Drafting one from its description
+ * ("scenarios.write_visual") sends the pipeline's definitions to Claude when
+ * the server has an Anthropic API key (drafting.ts, operator.ts). As everywhere, another
+ * account's pipeline, scenario or run answers 404.
  */
 const id = z.object({ id: z.string().uuid() });
 /** A scenario as the builder sends it: the pipeline comes from the saved pipeline, never from the body. */
 const ScenarioDraft = ScenarioSpec.omit({ pipeline: true, version: true });
+const DraftRequest = z.object({
+  description: z.string().trim().min(1, "Describe the scenario first").max(4000),
+  name: z.string().max(200).optional(),
+  kind: z.enum(["golden", "common", "outlying"]).optional(),
+});
 
 /** Scans don't change once they succeeded, so a few of their graphs are kept for compiling while someone builds. */
 const GRAPHS_KEPT = 4;
 
-export function scenarioRoutes(db: Db, queue: JobQueue) {
+export function scenarioRoutes(db: Db, queue: JobQueue, drafter: ScenarioDrafter) {
   const graphs = new Map<string, Promise<LineageGraph>>();
   const graphOf = (scanId: string) => {
     let graph = graphs.get(scanId);
@@ -106,8 +115,42 @@ export function scenarioRoutes(db: Db, queue: JobQueue) {
       if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
       const b = await built(pipeline);
       if ("error" in b) return reply.code(409).send({ error: b.error });
-      return { scanId: b.scan.id, ...scenarioInputs(b.graph, b.steps) } satisfies ScenarioInputs;
+      return { scanId: b.scan.id, drafting: await drafter.available(), ...scenarioInputs(b.graph, b.steps) } satisfies ScenarioInputs;
     });
+
+    // Rows and checks drafted by Claude from a description, compiled on the latest scan and corrected; not saved.
+    // A few a minute per person at most: each one costs a call to Claude.
+    app.post(
+      "/pipelines/:id/scenario-draft",
+      { config: { access: "scenarios.write_visual", rateLimit: { max: 5, timeWindow: "1 minute", hook: "preHandler", keyGenerator: (req: FastifyRequest) => signedIn(req).userId } } },
+      async (req, reply) => {
+        const pipeline = await ownPipeline(req, id.parse(req.params).id);
+        if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
+        if (!(await drafter.available())) return reply.code(503).send({ error: "Drafting with Claude isn't set up on this server: its operator enters an Anthropic API key on the operator panel" });
+        const request = DraftRequest.parse(req.body);
+        const b = await built(pipeline);
+        if ("error" in b) return reply.code(409).send({ error: b.error });
+        const inputs = scenarioInputs(b.graph, b.steps);
+        if (!inputs.tables.length) return reply.code(409).send({ error: "No table of this pipeline takes rows, so there is nothing to draft" });
+        const output = refKey(pipeline.output);
+        const compile = (draft: unknown) => {
+          const parsed = ScenarioDraft.safeParse(draft);
+          if (!parsed.success) return scenarioProblems(parsed.error);
+          const plan = planScenario(b.graph, b.steps, ScenarioSpec.parse({ ...parsed.data, pipeline: output }));
+          return [...plan.problems, ...plan.checks.flatMap((c) => (c.problem ? [`The check ${c.label} on ${c.checkpoint}: ${c.problem}`] : []))];
+        };
+        try {
+          const brief = { output, tables: inputs.tables, checkpoints: inputs.checkpoints, logic: pipelineLogic(b.graph, b.steps), today: new Date().toISOString().slice(0, 10) };
+          const { usage, ...drafted } = await drafter.draft(brief, request, compile);
+          req.log.info({ pipelineId: pipeline.id, usage, problems: drafted.problems.length }, "scenario drafted with Claude");
+          return drafted satisfies ScenarioDrafted;
+        } catch (e) {
+          if (e instanceof DraftFailed) return reply.code(502).send({ error: e.message });
+          req.log.error(e, "drafting a scenario with Claude failed");
+          return reply.code(502).send({ error: "Claude couldn't be reached to draft the scenario. Try again in a moment." });
+        }
+      },
+    );
 
     // A scenario compiled as the builder has it now, saved or not. Sends nothing to the tenant.
     app.post("/pipelines/:id/scenario-check", { config: { access: "scenarios.read" } }, async (req, reply) => {

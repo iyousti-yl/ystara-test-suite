@@ -16,12 +16,26 @@ import {
   TextArea,
   Title,
 } from "@ui5/webcomponents-react";
-import { refKey, toScenarioYaml, whyNoScenarioRun, type Assertion, type Expectation, type Fixture, type ObjectType, type ScenarioInputs, type ScenarioSpec, type ScenarioStepNote } from "@ystara/shared";
+import {
+  parseScenarioYaml,
+  refKey,
+  scenarioProblems,
+  toScenarioYaml,
+  whyNoScenarioRun,
+  type Assertion,
+  type Expectation,
+  type Fixture,
+  type ObjectType,
+  type ScenarioInputs,
+  type ScenarioSpec,
+  type ScenarioStepNote,
+} from "@ystara/shared";
 import { useBeforeUnload, useBlocker, useNavigate, useParams } from "react-router";
 import {
   useCan,
   useDatabaseUsers,
   useDeleteScenario,
+  useDraftScenario,
   useRunScenario,
   useSavedPipeline,
   useSaveScenario,
@@ -42,7 +56,8 @@ import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTime, formatDateTimesApart } from "../format";
 import { typeLabel } from "../objectTypes";
 import { CheckDialog, type Checkpoint } from "../scenario/CheckDialog";
-import { assertionLabel, cellFromText, gridFromRows, rowsFromGrid, type Grid } from "../scenario/model";
+import { readWorkbook, workbookOf } from "../scenario/excel";
+import { assertionLabel, cellFromText, gridFromRows, rowsFromGrid, shownColumns, type Grid } from "../scenario/model";
 import { RowsGrid } from "../scenario/RowsGrid";
 import { useInTenant } from "../tenantScope";
 
@@ -51,7 +66,9 @@ import { useInTenant } from "../tenantScope";
  * scenario gives test rows for the pipeline's tables and the checks expected
  * at its steps; the builder compiles it as it changes (nothing is sent to the
  * tenant), and a run sends each check as one SELECT that reads only those rows.
- * The same scenario can be read as a scenario file (YAML) for Git or the CLI.
+ * The same scenario can be read as a scenario file (YAML) for Git or the CLI,
+ * and loaded from one. Test rows can go out to Excel and come back (excel.ts),
+ * and Claude can draft the rows and checks from the description (phase 3c).
  */
 
 const KINDS: { kind: ScenarioSpec["kind"]; label: string }[] = [
@@ -114,9 +131,7 @@ export function ScenariosSection({ pipelineId }: { pipelineId: string }) {
               Scenario
             </TableHeaderCell>
             <TableHeaderCell minWidth="6rem">Kind</TableHeaderCell>
-            <TableHeaderCell minWidth="5rem" horizontalAlign="End">
-              Checks
-            </TableHeaderCell>
+            <TableHeaderCell minWidth="5rem">Checks</TableHeaderCell>
             <TableHeaderCell minWidth="12rem" importance={1}>
               Latest run
             </TableHeaderCell>
@@ -133,7 +148,7 @@ export function ScenariosSection({ pipelineId }: { pipelineId: string }) {
               </span>
             </TableCell>
             <TableCell>{kindLabel(s.spec.kind)}</TableCell>
-            <TableCell horizontalAlign="End">{checkCount(s.spec)}</TableCell>
+            <TableCell>{checkCount(s.spec)}</TableCell>
             <TableCell>
               {s.lastRun ? (
                 <span className="facts">
@@ -196,9 +211,11 @@ interface RowsTable {
   why: string | null;
 }
 
-/** What the builder edits, from the saved scenario (or a new one) and what the pipeline offers. */
-function startingPoint(inputs: ScenarioInputs, saved: ScenarioJson | undefined) {
-  const spec = saved?.spec;
+/** A scenario as the builder starts from it: saved, loaded from a file, drafted by Claude, or none for a new one. */
+type StartSpec = Omit<ScenarioSpec, "pipeline" | "version" | "tags"> & { tags?: string[] };
+
+/** What the builder edits, from a scenario (or a new one) and what the pipeline offers. */
+function startingPoint(inputs: ScenarioInputs, spec: StartSpec | undefined) {
   const resolve = <T extends { space: string; technicalName: string }>(list: T[], name: string) =>
     list.find((x) => refKey(x) === name) ?? (list.filter((x) => x.technicalName === name).length === 1 ? list.find((x) => x.technicalName === name) : undefined);
 
@@ -239,7 +256,7 @@ type Start = ReturnType<typeof startingPoint>;
  * table without one is empty); a scenario needs one, so with no rows at all
  * the first table gets an empty one.
  */
-function draftOf(s: Omit<Start, "tables"> & { tables: RowsTable[] }): ScenarioDraft {
+function draftOf(s: Start): ScenarioDraft {
   const fixtures: Fixture[] = s.tables.filter((t) => s.grids[t.key].rows.length > 0).map((t) => ({ table: t.key, rows: rowsFromGrid(s.grids[t.key]) }));
   fixtures.push(...s.kept);
   if (!fixtures.length && s.tables.length) fixtures.push({ table: s.tables[0].key, rows: [] });
@@ -268,13 +285,23 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
   const navigate = useNavigate();
   const can = useCan();
   const editable = can("scenarios.write_visual");
-  const start = useMemo(() => startingPoint(inputs, saved), [inputs, saved]);
+  const start = useMemo(() => startingPoint(inputs, saved?.spec), [inputs, saved]);
   const [name, setName] = useState(start.name);
   const [kind, setKind] = useState(start.kind);
   const [description, setDescription] = useState(start.description);
   const [grids, setGrids] = useState(start.grids);
   const [expect, setExpect] = useState(start.expect);
+  // The tables with rows, CSV fixtures and tags: they change only when a file or a draft is loaded.
+  const [shape, setShape] = useState({ tables: start.tables, kept: start.kept, tags: start.tags });
   const [editing, setEditing] = useState<{ expectation: number; assertion: number } | { checkpoint: string } | undefined>();
+  // Tables whose grid shows every column, not only the keys and those the pipeline reads.
+  const [allColumns, setAllColumns] = useState<Record<string, boolean>>({});
+  const [drafted, setDrafted] = useState<{ notes: string[]; problems: string[] }>();
+  const [rowsNote, setRowsNote] = useState<Note>();
+  const [fileNote, setFileNote] = useState<Note>();
+  const rowsFile = useRef<HTMLInputElement>(null);
+  const scenarioFile = useRef<HTMLInputElement>(null);
+  const drafting = useDraftScenario(pipelineId);
   const save = useSaveScenario(pipelineId, saved?.id);
   const remove = useDeleteScenario(pipelineId);
   const run = useRunScenario(pipelineId, saved?.id ?? "");
@@ -283,10 +310,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
   // Why no scenario of this tenant can run (an imported tenant, no connected database user), once both are known.
   const whyNoRun = tenant.data && databaseUsers.data ? whyNoScenarioRun(databaseUsers.data, tenant.data.host !== null) : undefined;
 
-  const draft = useMemo(
-    () => draftOf({ ...start, name, kind, description, grids, expect }),
-    [start, name, kind, description, grids, expect],
-  );
+  const draft = useMemo(() => draftOf({ ...shape, name, kind, description, grids, expect }), [shape, name, kind, description, grids, expect]);
   const initial = useMemo(() => JSON.stringify(draftOf(start)), [start]);
   const dirty = JSON.stringify(draft) !== initial;
   // Compiled once the draft has a check; a name isn't needed for that.
@@ -353,6 +377,91 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
     setExpect((current) =>
       current.map((e, i) => (i === expectation ? { ...e, assertions: e.assertions.filter((_, k) => k !== assertion) } : e)).filter((e) => e.assertions.length),
     );
+
+  const hasRowsOrChecks = expect.length > 0 || Object.values(grids).some((g) => g.rows.length > 0);
+
+  /** Everything the builder edits, from another scenario: a file or Claude's draft. Saving keeps it. */
+  const load = (spec: StartSpec) => {
+    const next = startingPoint(inputs, spec);
+    setName(next.name);
+    setKind(next.kind);
+    setDescription(next.description);
+    setGrids(next.grids);
+    setExpect(next.expect);
+    setShape({ tables: next.tables, kept: next.kept, tags: next.tags });
+    setEditing(undefined);
+    // What an earlier upload or draft said is about rows that are gone now.
+    setRowsNote(undefined);
+    setDrafted(undefined);
+    setFileNote(undefined);
+  };
+
+  const draftWithClaude = () => {
+    if (hasRowsOrChecks && !window.confirm("Replace the test rows and checks with Claude's draft?")) return;
+    setDrafted(undefined);
+    drafting.mutate(
+      { description: description.trim(), ...(name.trim() ? { name: name.trim() } : {}), kind },
+      {
+        onSuccess: (d) => {
+          load({ ...d.scenario, tags: shape.tags });
+          setDrafted({ notes: d.notes, problems: d.problems });
+        },
+      },
+    );
+  };
+
+  const downloadRows = async () => {
+    try {
+      const tables = shape.tables.map((t) => ({ key: t.key, technicalName: t.technicalName, grid: grids[t.key], shown: shownColumns(grids[t.key], allColumns[t.key]) }));
+      saveFile(await workbookOf(tables), `${props.pipelineName} test rows.xlsx`);
+    } catch (e) {
+      setRowsNote({ design: "Negative", title: "The Excel file couldn't be made.", lines: [e instanceof Error ? e.message : String(e)] });
+    }
+  };
+
+  const uploadRows = async (file: File) => {
+    setRowsNote(undefined);
+    try {
+      const read = await readWorkbook(
+        file,
+        shape.tables.map((t) => ({ key: t.key, technicalName: t.technicalName, columns: grids[t.key].columns })),
+      );
+      if (!read.rows.size) {
+        setRowsNote({ design: "Negative", title: `${file.name} has no sheet for a table of this pipeline.`, lines: read.problems });
+        return;
+      }
+      const replaced = [...read.rows.keys()].filter((key) => grids[key].rows.length > 0);
+      if (replaced.length && !window.confirm(`Replace the rows of ${replaced.map((key) => key.split(".").pop()).join(", ")} with those in ${file.name}?`)) return;
+      setGrids((all) => ({ ...all, ...Object.fromEntries([...read.rows].map(([key, rows]) => [key, { ...all[key], rows }])) }));
+      const total = [...read.rows.values()].reduce((n, rows) => n + rows.length, 0);
+      setRowsNote({
+        design: read.problems.length ? "Critical" : "Positive",
+        title: `Read ${counted(total, "row")} for ${counted(read.rows.size, "table")} from ${file.name}. Save to keep them.`,
+        lines: read.problems,
+      });
+    } catch (e) {
+      setRowsNote({ design: "Negative", title: `${file.name} couldn't be read as an Excel workbook (.xlsx).`, lines: [e instanceof Error ? e.message : String(e)] });
+    }
+  };
+
+  const loadScenarioFile = async (file: File) => {
+    setFileNote(undefined);
+    let spec: ScenarioSpec;
+    try {
+      spec = parseScenarioYaml(await file.text());
+    } catch (e) {
+      setFileNote({ design: "Negative", title: `${file.name} isn't a scenario file the builder can read.`, lines: scenarioProblems(e) });
+      return;
+    }
+    if (hasRowsOrChecks && !window.confirm(`Replace this scenario's name, rows and checks with those in ${file.name}?`)) return;
+    load(spec);
+    const elsewhere = spec.pipeline !== props.output && spec.pipeline !== props.output.split(".").pop();
+    setFileNote(
+      elsewhere
+        ? { design: "Critical", title: `Loaded ${file.name}. It was written for ${spec.pipeline}: its rows and checks now count for ${props.output}. Save to keep them.`, lines: [] }
+        : { design: "Positive", title: `Loaded ${file.name}. Save to keep it.`, lines: [] },
+    );
+  };
 
   const submit = () =>
     save.mutate(draft, {
@@ -438,7 +547,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
           <Label for="scenario-name" required>
             Name
           </Label>
-          <Input id="scenario-name" value={name} readonly={!editable} placeholder="Closed orders are left out" onInput={(e) => setName(e.target.value)} />
+          <Input id="scenario-name" value={name} readonly={!editable} placeholder="What this scenario shows, in a few words" onInput={(e) => setName(e.target.value)} />
         </div>
         <div className="scenario-field">
           <Label for="scenario-kind">Kind</Label>
@@ -458,24 +567,92 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
             readonly={!editable}
             rows={2}
             growing
-            placeholder="What this scenario shows, in a sentence"
+            placeholder={
+              inputs.drafting
+                ? "The case in a sentence or two: which rows go in and what should come out. Claude can draft the rows and checks from it."
+                : "The case in a sentence or two: which rows go in and what should come out"
+            }
             onInput={(e) => setDescription(e.target.value)}
           />
         </div>
+        {editable && (
+          <div className="scenario-field-wide scenario-draft">
+            <Button
+              icon="ai"
+              disabled={!inputs.drafting || !description.trim() || drafting.isPending}
+              tooltip={!inputs.drafting ? undefined : !description.trim() ? "Describe the scenario first" : "Claude drafts test rows and checks from the description and the pipeline's logic"}
+              onClick={draftWithClaude}
+            >
+              {drafting.isPending ? "Drafting…" : "Draft rows and checks with Claude"}
+            </Button>
+            <span className="muted">
+              {drafting.isPending
+                ? "Claude is reading the pipeline's logic and working out what each step should give. This can take a minute or two."
+                : inputs.drafting
+                  ? "Sends the description and the pipeline's definitions (names, columns and logic) to Claude, never the tenant's data."
+                  : "Drafting with Claude isn't set up yet: Ystara's operator enters an Anthropic API key on the operator panel."}
+            </span>
+          </div>
+        )}
+        {drafting.error && (
+          <div className="scenario-field-wide">
+            <ErrorStrip error={drafting.error} />
+          </div>
+        )}
+        {drafted && (
+          <div className="scenario-field-wide">
+            <NoteStrip
+              note={{
+                design: drafted.problems.length ? "Critical" : "Information",
+                title: drafted.problems.length
+                  ? `Claude's draft still has problems: ${drafted.problems.join(" ")} Fix them below, or describe the case differently and draft again.`
+                  : "Claude drafted the rows and checks below. Check them before you save: Claude works the expected values out from the logic, and can be wrong.",
+                lines: drafted.notes,
+              }}
+              onClose={() => setDrafted(undefined)}
+            />
+          </div>
+        )}
       </section>
 
       <section className="block">
-        <Title level="H4">Test rows</Title>
+        <div className="list-toolbar section-toolbar">
+          <Title level="H4">Test rows</Title>
+          {shape.tables.length > 0 && (
+            <Button icon="excel-attachment" tooltip="One sheet per table, with the columns the grids show and the rows they have" onClick={() => void downloadRows()}>
+              Download Excel template
+            </Button>
+          )}
+          {editable && shape.tables.length > 0 && (
+            <>
+              <Button icon="upload" tooltip="The template filled in: each sheet's rows replace its table's" onClick={() => rowsFile.current?.click()}>
+                Upload Excel file
+              </Button>
+              <input
+                ref={rowsFile}
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void uploadRows(file);
+                }}
+              />
+            </>
+          )}
+        </div>
+        {rowsNote && <NoteStrip note={rowsNote} onClose={() => setRowsNote(undefined)} />}
         <p className="muted page-intro">
           These rows stand in for the pipeline&apos;s tables. A table you give no rows is empty in this scenario. Use made-up values, not rows copied from the
           tenant: the scenario is stored in Ystara.
         </p>
-        {start.tables.length === 0 && (
+        {shape.tables.length === 0 && (
           <MessageStrip design="Critical" hideCloseButton>
             No table of this pipeline takes rows: every one is loaded by a step that can&apos;t be compiled. The steps below say why.
           </MessageStrip>
         )}
-        {start.tables.map((t) => (
+        {shape.tables.map((t) => (
           <div className="scenario-table" key={t.key}>
             <div className="scenario-table-head">
               <span className="mono scenario-table-name">{t.technicalName}</span>
@@ -486,11 +663,18 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
             {grids[t.key].rows.length === 0 && !editable ? (
               <p className="muted">No rows: the table is empty in this scenario.</p>
             ) : (
-              <RowsGrid label={`Rows of ${t.technicalName}`} grid={grids[t.key]} readOnly={!editable} onChange={(g) => setGrids((all) => ({ ...all, [t.key]: g }))} />
+              <RowsGrid
+                label={`Rows of ${t.technicalName}`}
+                grid={grids[t.key]}
+                readOnly={!editable}
+                onChange={(g) => setGrids((all) => ({ ...all, [t.key]: g }))}
+                allColumns={allColumns[t.key] ?? false}
+                onAllColumns={(all) => setAllColumns((current) => ({ ...current, [t.key]: all }))}
+              />
             )}
           </div>
         ))}
-        {start.kept.map((f) => (
+        {shape.kept.map((f) => (
           <MessageStrip key={f.table} design="Information" hideCloseButton>
             The rows of <span className="mono">{f.table}</span> come from a CSV file, which the builder doesn&apos;t edit. They are kept as they are.
           </MessageStrip>
@@ -544,9 +728,30 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
           The same scenario as a file for Git or <span className="mono">npm run scenario:run</span>. Save it as a <span className="mono">.local.yaml</span>{" "}
           file: test rows stay out of the repository.
         </p>
-        <Button icon="copy" onClick={() => void navigator.clipboard.writeText(toScenarioYaml(spec))}>
-          Copy
-        </Button>
+        <div className="list-toolbar">
+          <Button icon="copy" onClick={() => void navigator.clipboard.writeText(toScenarioYaml(spec))}>
+            Copy
+          </Button>
+          {editable && (
+            <>
+              <Button icon="document-text" tooltip="A scenario file's name, rows and checks replace this scenario's" onClick={() => scenarioFile.current?.click()}>
+                Load a scenario file
+              </Button>
+              <input
+                ref={scenarioFile}
+                type="file"
+                accept=".yaml,.yml"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void loadScenarioFile(file);
+                }}
+              />
+            </>
+          )}
+        </div>
+        {fileNote && <NoteStrip note={fileNote} onClose={() => setFileNote(undefined)} />}
         <pre className="cli-output scenario-yaml">{toScenarioYaml(spec)}</pre>
       </Panel>
 
@@ -587,6 +792,40 @@ function CompileStrip({ compiled, error, empty, busy }: { compiled: ScenarioComp
 }
 
 type ScenarioCompileJson = NonNullable<ReturnType<typeof useScenarioCompile>["data"]>;
+
+/** What came of loading a file or drafting: a line, and the details below it. */
+interface Note {
+  design: "Positive" | "Information" | "Critical" | "Negative";
+  title: string;
+  lines: string[];
+}
+
+function NoteStrip({ note, onClose }: { note: Note; onClose: () => void }) {
+  return (
+    <div className="scenario-note">
+      <MessageStrip design={note.design} onClose={onClose}>
+        {note.title}
+      </MessageStrip>
+      {note.lines.length > 0 && (
+        <ul className="scenario-note-lines">
+          {note.lines.map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** Hands the browser a file to save, as a download. */
+function saveFile(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name.replace(/[\\/:*?"<>|]/g, "_");
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
 
 function StepsTable({ steps }: { steps: ScenarioStepNote[] }) {
   return (

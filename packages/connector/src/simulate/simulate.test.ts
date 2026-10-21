@@ -46,7 +46,7 @@ describe("fixtures", () => {
     stopsWith(() => fixtureQuery("LT_EMP", columns, [{ EMP_ID: "E1", BONUS: 1 }]), /LT_EMP has columns the table doesn't have: BONUS/);
   });
 
-  it("read a table's columns and types from its CSN, skipping associations", () => {
+  it("read a table's columns, types and keys from its CSN, skipping associations", () => {
     const definition = {
       definitions: {
         LT_X: {
@@ -62,7 +62,7 @@ describe("fixtures", () => {
     };
     expect(tableColumns(definition, "LT_X")).toEqual({
       columns: [
-        { name: "ID", type: "NVARCHAR(10)" },
+        { name: "ID", type: "NVARCHAR(10)", key: true },
         { name: "N", type: "BIGINT" },
         { name: "D", type: "DECIMAL(5, 1)" },
         { name: "ODD", type: "NVARCHAR(5000)" },

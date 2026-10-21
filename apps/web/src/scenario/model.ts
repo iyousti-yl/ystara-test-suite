@@ -77,6 +77,82 @@ export function rowsFromGrid(grid: Grid): Record<string, Cell>[] {
   });
 }
 
+/**
+ * The columns a table's grid shows: its keys, the columns the pipeline's logic
+ * reads (`used`, from the scan) and any column a row has a value in, in the
+ * table's order; every column when asked, or when the scan says nothing of
+ * how the columns are used. A column the grid hides is NULL in new rows.
+ */
+export function shownColumns(grid: Grid, all = false): ScenarioColumn[] {
+  if (all || !grid.columns.some((c) => c.key || c.used)) return grid.columns;
+  return grid.columns.filter((c) => c.key || c.used || !c.type || grid.rows.some((r) => (r[c.name] ?? "") !== ""));
+}
+
+/** What the pipeline does with a column, in a sentence for its header. */
+export function columnNote(c: ScenarioColumn): string {
+  const parts: string[] = [];
+  if (c.key) parts.push("A key column.");
+  if (c.keeps !== undefined) parts.push(c.keeps === null ? "A filter keeps rows where it is NULL." : `A filter keeps ${JSON.stringify(c.keeps)}.`);
+  if (c.range) parts.push(`Compared with today's date, as the ${c.range} of a validity range.`);
+  if (c.joined) parts.push("Joined with a column of another table.");
+  if (c.used && c.keeps === undefined && !c.range && !c.joined) parts.push("Read by the pipeline's logic.");
+  return parts.join(" ");
+}
+
+const lengthOf = (type: string) => Number(/\((\d+)/.exec(type)?.[1] ?? 5000);
+const base = (type: string) => type.replace(/\(.*$/, "").trim().toUpperCase();
+
+/**
+ * A value to start a new row with, from what the pipeline does with the column
+ * and its type, so a made-up row gets through: the value a filter keeps, a
+ * validity range that includes today, and otherwise row n's number in every
+ * key, joined and numeric column, so rows of different tables join row by
+ * row. Other text is the column's name and the row's number, cut to its
+ * length. Row n counts from 1.
+ */
+export function prefillText(c: ScenarioColumn, n: number, today = new Date()): string {
+  const type = base(c.type);
+  if (c.keeps !== undefined) return c.keeps === null ? "" : String(c.keeps);
+  const compact = (type === "NVARCHAR" || type === "VARCHAR" || type === "NCHAR" || type === "CHAR") && lengthOf(c.type) === 8;
+  if (c.range) {
+    const [date, time] = c.range === "start" ? ["2000-01-01", "00:00:00"] : ["9999-12-31", "23:59:59"];
+    if (type === "DATE") return date;
+    if (type === "TIMESTAMP" || type === "SECONDDATE") return `${date} ${time}`;
+    // SAP often keeps a date as text: YYYYMMDD.
+    if (compact) return date.replace(/-/g, "");
+  }
+  if (columnKind(c.type) === "number") return String(n);
+  if (columnKind(c.type) === "boolean") return "true";
+  const day = `${today.getFullYear()}-01-${String(((n - 1) % 28) + 1).padStart(2, "0")}`;
+  if (type === "DATE") return day;
+  if (type === "TIME") return "08:00:00";
+  if (type === "TIMESTAMP" || type === "SECONDDATE") return `${day} 08:00:00`;
+  if (/BINARY|BLOB/.test(type)) return "";
+  const number = String(n);
+  const max = lengthOf(c.type);
+  if (c.key || c.joined) return number.slice(-max);
+  const label = `${c.name} ${number}`;
+  return label.length <= max ? label : number.slice(-max);
+}
+
+/** The grid with a row added, its shown columns prefilled. */
+export function addRow(grid: Grid, shown: ScenarioColumn[]): Grid {
+  const n = grid.rows.length + 1;
+  return { ...grid, rows: [...grid.rows, Object.fromEntries(shown.map((c) => [c.name, prefillText(c, n)]).filter(([, v]) => v !== ""))] };
+}
+
+/** The grid with every empty cell of its shown columns prefilled, row by row. */
+export function fillEmpty(grid: Grid, shown: ScenarioColumn[]): Grid {
+  return {
+    ...grid,
+    rows: grid.rows.map((row, i) => {
+      const out = { ...row };
+      for (const c of shown) if ((out[c.name] ?? "") === "") out[c.name] = prefillText(c, i + 1);
+      return out;
+    }),
+  };
+}
+
 /** Text copied from a spreadsheet: one line per row, cells apart by tabs. */
 export function parsePasted(text: string): string[][] {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
@@ -85,16 +161,17 @@ export function parsePasted(text: string): string[][] {
 }
 
 /**
- * The grid with `pasted` written in from row `row` and column `column` on,
- * with rows added as needed. Cells past the last column are left out. When
- * the first pasted line is the columns' names (a spreadsheet's header), the
- * cells go to the columns they name, in whatever order.
+ * The grid with `pasted` written in from row `row` and column `column` (of the
+ * `shown` columns) on, with rows added as needed. Cells past the last column
+ * are left out. When the first pasted line is the columns' names (a
+ * spreadsheet's header), the cells go to the columns they name, in whatever
+ * order, shown or not.
  */
-export function pasteInto(grid: Grid, row: number, column: number, pasted: string[][]): Grid {
+export function pasteInto(grid: Grid, row: number, column: number, pasted: string[][], shown: ScenarioColumn[] = grid.columns): Grid {
   const names = grid.columns.map((c) => c.name);
   const header = pasted.length > 1 && pasted[0].every((cell) => names.includes(cell.trim())) ? pasted[0].map((cell) => cell.trim()) : undefined;
   const lines = header ? pasted.slice(1) : pasted;
-  const targets = header ?? names.slice(column);
+  const targets = header ?? shown.map((c) => c.name).slice(column);
   const rows = grid.rows.map((r) => ({ ...r }));
   lines.forEach((cells, i) => {
     const at = row + i;

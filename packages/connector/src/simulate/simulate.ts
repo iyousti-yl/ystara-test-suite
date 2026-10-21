@@ -222,24 +222,33 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
 }
 
 /**
- * A step's logic as its definition writes it, for a person working out what it
- * should return: the SQL of a SQL view or of a transformation flow's SQL step,
- * the CSN query of a graphical view. Undefined for tables, other flows and a
- * definition the simulation can't read.
+ * A step's logic as its definition holds it: the SQL text of a SQL view or of
+ * a transformation flow's SQL step, the CSN query of a graphical view.
+ * Undefined for tables, other flows and a definition the simulation can't read.
  */
-export function stepLogic(node: DspObject): { language: "sql" | "csn"; text: string } | undefined {
+export function stepSource(node: DspObject): { sql: string } | { csn: unknown } | undefined {
   try {
-    if (node.type === "transformation_flow") return { language: "sql", text: flowSql(node) };
+    if (node.type === "transformation_flow") return { sql: flowSql(node) };
     if (node.type !== "sql_view" && node.type !== "graphical_view") return undefined;
     const entity = entityOf(node);
     const sql = entity["@DataWarehouse.sqlEditor.query"];
-    if (typeof sql === "string") return { language: "sql", text: sql };
+    if (typeof sql === "string") return { sql };
     const query = entity.query ?? (entity.projection ? { SELECT: entity.projection } : undefined);
-    return query ? { language: "csn", text: compactJson(query) } : undefined;
+    return query ? { csn: query } : undefined;
   } catch (e) {
     if (e instanceof SimulationStop) return undefined;
     throw e;
   }
+}
+
+/**
+ * A step's logic as text, for a person (or Claude) working out what it should
+ * return: the SQL as written, a CSN query as indented JSON.
+ */
+export function stepLogic(node: DspObject): { language: "sql" | "csn"; text: string } | undefined {
+  const source = stepSource(node);
+  if (!source) return undefined;
+  return "sql" in source ? { language: "sql", text: source.sql } : { language: "csn", text: compactJson(source.csn) };
 }
 
 /** JSON indented by level, with each part that fits in 100 characters on one line, so a CSN query reads like a query. */

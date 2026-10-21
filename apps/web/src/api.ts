@@ -3,6 +3,7 @@ import type {
   Account,
   AccountOverview,
   AuthenticatorSetup,
+  ClaudeSetting,
   ConnectionState,
   CreatedInvitation,
   CreatedReset,
@@ -19,6 +20,7 @@ import type {
   SavedPipelineResult,
   Scan,
   ScenarioCompile,
+  ScenarioDrafted,
   ScenarioInputs,
   ScenarioRun,
   ScenarioRunSummary,
@@ -197,6 +199,20 @@ export const useInviteAdmin = () =>
     request<Json<CreatedInvitation>>("POST", `/operator/accounts/${input.accountId}/invitations`, { email: input.email }),
   );
 export const useCreateReset = () => useOperatorChange((userId: string) => request<Json<CreatedReset>>("POST", `/operator/users/${userId}/reset`));
+
+/** Whether drafting scenarios with Claude is on, and where its key comes from. Never the key. */
+export const useClaudeSetting = (allowed: boolean) =>
+  useQuery({ queryKey: [...OPERATOR, "claude"], queryFn: () => request<Json<ClaudeSetting>>("GET", "/operator/claude"), enabled: allowed });
+/** Checks the key with Anthropic, then keeps it sealed. Every builder asks again whether it can draft. */
+export function useSetClaudeKey() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (apiKey: string | null): Promise<Json<ClaudeSetting> | undefined> =>
+      apiKey === null ? request<undefined>("DELETE", "/operator/claude") : request<Json<ClaudeSetting>>("PUT", "/operator/claude", { apiKey }),
+    onSettled: () =>
+      Promise.all([client.invalidateQueries({ queryKey: [...OPERATOR, "claude"] }), client.invalidateQueries({ predicate: (q) => q.queryKey.includes("scenario-inputs") })]),
+  });
+}
 
 /** The operator may belong to the account too, so the header's account name is asked for again. */
 export function useRenameAccountAsOperator() {
@@ -500,6 +516,17 @@ export const useScenarioCompile = (pipelineId: string, draft: ScenarioDraft | un
     staleTime: Infinity,
     // While the next draft compiles, keep showing what the last one gave.
     placeholderData: (previous) => previous,
+  });
+
+/**
+ * Rows and checks drafted by Claude from the scenario's description (only when
+ * the server has an Anthropic API key: ScenarioInputs.drafting). Saves nothing;
+ * an answer can take a minute or two.
+ */
+export const useDraftScenario = (pipelineId: string) =>
+  useMutation({
+    mutationFn: (body: { description: string; name?: string; kind?: ScenarioSpec["kind"] }) =>
+      request<ScenarioDrafted>("POST", `/pipelines/${pipelineId}/scenario-draft`, body),
   });
 
 export const useScenario = (id: string) =>
