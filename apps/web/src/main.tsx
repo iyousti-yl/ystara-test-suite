@@ -1,4 +1,5 @@
 import "./fonts";
+import { applyBrand } from "./brand";
 import "./locale";
 import "./theme";
 import "./icons";
@@ -12,10 +13,11 @@ import { isUnauthorized, ME } from "./api";
 import { router } from "./App";
 
 /**
- * Entry point: fonts and theme first, then the data cache, UI5 and the router.
+ * Entry point: fonts, the youlytics brand and the theme first, then the data cache, UI5 and the router.
  * A 401 on any call means the sign-in ended (expired, signed out elsewhere, or
  * removed from the account): asking for /auth/me again lets App.tsx show the sign-in page.
  */
+applyBrand();
 const signInEnded = (error: Error) => {
   if (isUnauthorized(error)) void queryClient.invalidateQueries({ queryKey: ME });
 };

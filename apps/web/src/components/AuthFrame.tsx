@@ -1,18 +1,26 @@
 import type { HTMLInputAutoCompleteAttribute, ReactNode } from "react";
-import { ShellBar, ShellBarBranding, Title } from "@ui5/webcomponents-react";
+import { Title } from "@ui5/webcomponents-react";
+import { Mark, Youlytics } from "./Logo";
 
-/** The frame of the pages people see before they are signed in: a plain bar and one centred card. */
+/** The frame of the pages people see before they are signed in: the mark and the product's name over one centred card, and who makes it. */
 export function AuthFrame({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="app">
-      <ShellBar branding={<ShellBarBranding>Ystara Test Suite</ShellBarBranding>} />
-      <main className="app-main">
-        <div className="auth-card">
-          <Title level="H3">{title}</Title>
-          {children}
-        </div>
-      </main>
-    </div>
+    <main className="auth-page">
+      <div className="auth-brand">
+        <Mark size={48} />
+        <p className="auth-product">Ystara</p>
+        <p className="auth-tagline">SAP analytics, made clear.</p>
+      </div>
+      <div className="auth-card">
+        <Title level="H1" size="H3">
+          {title}
+        </Title>
+        {children}
+      </div>
+      <p className="auth-by">
+        by <Youlytics />
+      </p>
+    </main>
   );
 }
 

@@ -24,7 +24,7 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
   return (
     <section className="block">
       <div className="list-toolbar section-toolbar">
-        <Title level="H4">{snapshots.data ? counted(snapshots.data.length, "snapshot") : "Snapshots"}</Title>
+        <Title level="H2" size="H4">{snapshots.data ? counted(snapshots.data.length, "snapshot") : "Snapshots"}</Title>
         <Button
           icon="compare"
           disabled={succeeded < 2}
@@ -68,9 +68,9 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
               <ScanStatusTag status={s.status} />
             </TableCell>
             <TableCell>{s.scheduled ? (s.alert ? "Scheduled, alert" : "Scheduled") : "By hand"}</TableCell>
-            <TableCell horizontalAlign="End">{s.counts.measured}</TableCell>
-            <TableCell horizontalAlign="End">{s.counts.notMeasurable}</TableCell>
-            <TableCell horizontalAlign="End">{s.counts.failed || "–"}</TableCell>
+            <TableCell horizontalAlign="End" className="mono">{s.counts.measured}</TableCell>
+            <TableCell horizontalAlign="End" className="mono">{s.counts.notMeasurable}</TableCell>
+            <TableCell horizontalAlign="End" className="mono">{s.counts.failed || "–"}</TableCell>
           </TableRow>
         ))}
       </Table>
@@ -128,7 +128,7 @@ export function SnapshotPage() {
       )}
       {measured.map((o) => (
         <section className="block" key={`${o.space}.${o.technicalName}`}>
-          <Title level="H4">
+          <Title level="H2" size="H4">
             <span className="mono wrap-anywhere">{o.technicalName}</span>
           </Title>
           <p className="muted">
@@ -138,7 +138,7 @@ export function SnapshotPage() {
         </section>
       ))}
       <section className="block">
-        <Title level="H4">Every step</Title>
+        <Title level="H2" size="H4">Every step</Title>
         <Table
           overflowMode="Popin"
           headerRow={
@@ -238,8 +238,8 @@ function ColumnsTable({ columns }: { columns: ColumnMeasures[] }) {
         <TableRow key={c.name} rowKey={c.name}>
           <TableCell className="mono">{c.name}</TableCell>
           <TableCell className="muted">{c.dataType}</TableCell>
-          <TableCell horizontalAlign="End">{formatNumber(c.nonNull)}</TableCell>
-          <TableCell horizontalAlign="End">{formatNumber(c.distinct)}</TableCell>
+          <TableCell horizontalAlign="End" className="mono">{formatNumber(c.nonNull)}</TableCell>
+          <TableCell horizontalAlign="End" className="mono">{formatNumber(c.distinct)}</TableCell>
           <TableCell horizontalAlign="End" className="mono">
             {"minHash" in c ? fingerprint(c.minHash) : "–"}
           </TableCell>

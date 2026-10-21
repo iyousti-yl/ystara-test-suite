@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Button, Dialog, Input, Label, MessageStrip, Tag, Title } from "@ui5/webcomponents-react";
 import { useSearchParams } from "react-router";
 import { useCan, useCheckConnection, useConnect, useConnection, useDisconnect, useSetConnectionSpaces, type ConnectionJson, type TenantJson } from "../api";
+import { EmptyState } from "../components/EmptyState";
 import { ConnectionStatusTag, ErrorStrip, Loading } from "../components/Feedback";
+import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
 import { useAddressTenant } from "../tenantScope";
@@ -46,28 +48,25 @@ export function TechnicalClientPage() {
         title="Technical client"
         subtitle="How the worker logs in to scan this tenant with nobody signed in: a technical OAuth client, and the spaces it reads."
         actions={
-          t.host && (
+          t.host &&
+          c && (
             <>
-              {can("tenant.connect") && (
-                <Button design={c ? "Default" : "Emphasized"} icon="chain-link" disabled={connection.isPending} onClick={() => setConnecting(true)}>
-                  {c ? "Change client" : "Connect"}
-                </Button>
-              )}
-              {c && can("tenant.connect") && (
-                <Button icon="edit" onClick={() => setEditingSpaces(true)}>
-                  Change spaces
-                </Button>
-              )}
-              {c && can("discovery.run") && (
+              {can("discovery.run") && (
                 <Button icon="refresh" disabled={c.status === "checking" || check.isPending} onClick={() => check.mutate()}>
                   Check again
                 </Button>
               )}
-              {c && can("tenant.connect") && (
-                <Button design="Transparent" icon="delete" disabled={disconnect.isPending} onClick={remove}>
-                  Remove
+              {can("tenant.connect") && (
+                <Button icon="edit" onClick={() => setEditingSpaces(true)}>
+                  Change spaces
                 </Button>
               )}
+              <MoreActions
+                actions={[
+                  can("tenant.connect") && { text: "Change client", icon: "chain-link", onClick: () => setConnecting(true) },
+                  can("tenant.connect") && { text: "Remove client", icon: "delete", disabled: disconnect.isPending, onClick: remove },
+                ]}
+              />
             </>
           )
         }
@@ -75,16 +74,26 @@ export function TechnicalClientPage() {
       <ErrorStrip error={connection.error ?? check.error ?? disconnect.error} />
       {!t.host ? (
         <MessageStrip design="Information" hideCloseButton>
-          This tenant has no Datasphere URL: it only has imported scans, so there is nothing to connect.
+          This tenant only has imported scans, so there is nothing to connect.
         </MessageStrip>
       ) : connection.isPending ? (
         <Loading />
       ) : !c ? (
-        <MessageStrip design="Information" hideCloseButton className="block">
+        <EmptyState
+          icon="connected"
+          title="Not connected yet"
+          action={
+            can("tenant.connect") && (
+              <Button design="Emphasized" icon="chain-link" onClick={() => setConnecting(true)}>
+                Connect
+              </Button>
+            )
+          }
+        >
           {can("tenant.connect")
-            ? "Not connected yet. Connect this tenant with a technical OAuth client, so the worker can scan it with nobody signed in."
-            : "Not connected yet. An admin connects this tenant with a technical OAuth client."}
-        </MessageStrip>
+            ? "Connect this tenant with a technical OAuth client, so the worker can scan it with nobody signed in."
+            : "An admin connects this tenant with a technical OAuth client, so the worker can scan it with nobody signed in."}
+        </EmptyState>
       ) : (
         <section className="block">
           <div className="facts connection-row">
@@ -95,7 +104,7 @@ export function TechnicalClientPage() {
             {c.checkedAt && <span>Checked {formatDateTime(c.checkedAt)}</span>}
           </div>
           <Verdict connection={c} />
-          <Title level="H4">Spaces</Title>
+          <Title level="H2" size="H4">Spaces</Title>
           <SpaceResults connection={c} />
         </section>
       )}

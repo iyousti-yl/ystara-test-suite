@@ -13,7 +13,7 @@ export function emailDelivery(alert: { status: AlertStatus; recipients: number; 
     case "no_watchers":
       return "Nobody watches this pipeline, so no email went out.";
     case "no_mail_server":
-      return "No email went out: this Ystara has no mail server (SMTP_URL) set.";
+      return "No email went out: this Ystara has no mail server yet.";
   }
 }
 

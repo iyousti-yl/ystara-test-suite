@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Button, Dialog, Input, Label, MessageStrip, Panel } from "@ui5/webcomponents-react";
 import { DATABASE_HOST_HINT, databaseUserProblem, databaseUserSpace, isDatabaseHost } from "@ystara/shared";
 import { useCan, useCheckDatabaseUser, useDatabaseUsers, useRemoveDatabaseUser, useSetDatabaseUser, type DatabaseUserJson } from "../api";
+import { EmptyState } from "../components/EmptyState";
 import { ConnectionStatusTag, ErrorStrip, Loading } from "../components/Feedback";
+import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
 import { useAddressTenant } from "../tenantScope";
@@ -38,8 +40,9 @@ export function DatabaseUsersPage() {
         subtitle="Snapshots measure the data of a space with SQL, through a database user of that space with read access only."
         actions={
           host &&
-          can("tenant.connect") && (
-            <Button design={users.data?.length === 0 ? "Emphasized" : "Default"} icon="add" disabled={users.isPending} onClick={() => setEditing("new")}>
+          can("tenant.connect") &&
+          !!users.data?.length && (
+            <Button icon="add" onClick={() => setEditing("new")}>
               Add database user
             </Button>
           )
@@ -49,18 +52,28 @@ export function DatabaseUsersPage() {
         <p className="muted page-intro">Such a user sees only the views exposed for consumption, so those are the steps a snapshot can measure.</p>
       ) : (
         <MessageStrip design="Information" hideCloseButton>
-          This tenant has no Datasphere URL: it only has imported scans, so there is no database to read.
+          This tenant only has imported scans, so there is no database to read.
         </MessageStrip>
       )}
       <ErrorStrip error={users.error ?? check.error ?? remove.error} />
       {!host ? null : users.isPending ? (
         <Loading />
       ) : users.data?.length === 0 ? (
-        <MessageStrip design="Information" hideCloseButton className="block">
+        <EmptyState
+          icon="database"
+          title="No database users yet"
+          action={
+            can("tenant.connect") && (
+              <Button design="Emphasized" icon="add" onClick={() => setEditing("new")}>
+                Add database user
+              </Button>
+            )
+          }
+        >
           {can("tenant.connect")
-            ? "No database user yet. Add one for each space whose views snapshots should measure."
-            : "No database user yet. An admin adds one for each space whose views snapshots should measure."}
-        </MessageStrip>
+            ? "Add one for each space whose views snapshots should measure."
+            : "An admin adds one for each space whose views snapshots should measure."}
+        </EmptyState>
       ) : (
         <ul className="item-list">
           {users.data?.map((u) => (
@@ -95,11 +108,10 @@ export function DatabaseUsersPage() {
                     Check again
                   </Button>
                 )}
-                {can("tenant.connect") && (
-                  <Button design="Transparent" icon="delete" disabled={remove.isPending} onClick={() => confirmRemove(u)}>
-                    Remove
-                  </Button>
-                )}
+                <MoreActions
+                  label={`More for ${u.user}`}
+                  actions={[can("tenant.connect") && { text: "Remove database user", icon: "delete", disabled: remove.isPending, onClick: () => confirmRemove(u) }]}
+                />
               </div>
             </li>
           ))}

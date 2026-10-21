@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Button, Dialog, Input, Label, MessageStrip, Title } from "@ui5/webcomponents-react";
 import { TEAMS_WEBHOOK_HINT, teamsWebhookHost } from "@ystara/shared";
 import { useCan, useRemoveTeamsChannel, useSetTeamsChannel, useTeamsChannel, useTestTeamsChannel } from "../api";
+import { EmptyState } from "../components/EmptyState";
 import { ErrorStrip, Loading } from "../components/Feedback";
+import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
 
@@ -33,14 +35,14 @@ export function AlertsPage() {
     <div className="page">
       <PageHeader title="Alerts" subtitle="Where Ystara tells people that a scheduled snapshot found a change, or that a scenario broke after a scan." />
       <section className="block">
-        <Title level="H4">Email</Title>
+        <Title level="H2" size="H4">Email</Title>
         <p className="muted section-intro">
           Each alert is emailed to the people who watch its pipeline. Anyone who can see a pipeline starts or stops watching it with Watch, at the top of the pipeline's page.
         </p>
       </section>
       <section className="block">
         <div className="list-toolbar section-toolbar">
-          <Title level="H4">Microsoft Teams channel</Title>
+          <Title level="H2" size="H4">Microsoft Teams channel</Title>
           {channel.data && (
             <>
               <Button icon="paper-plane" disabled={test.isPending} onClick={() => test.mutate()}>
@@ -49,16 +51,18 @@ export function AlertsPage() {
               <Button icon="edit" onClick={() => setEditing(true)}>
                 Change
               </Button>
-              <Button
-                design="Transparent"
-                icon="delete"
-                disabled={remove.isPending}
-                onClick={() => {
-                  if (window.confirm("Stop posting alerts in this Teams channel? Watchers still get them by email.")) remove.mutate();
-                }}
-              >
-                Remove
-              </Button>
+              <MoreActions
+                actions={[
+                  {
+                    text: "Remove the channel",
+                    icon: "delete",
+                    disabled: remove.isPending,
+                    onClick: () => {
+                      if (window.confirm("Stop posting alerts in this Teams channel? Watchers still get them by email.")) remove.mutate();
+                    },
+                  },
+                ]}
+              />
             </>
           )}
         </div>
@@ -78,15 +82,18 @@ export function AlertsPage() {
           </p>
         ) : (
           channel.isSuccess && (
-            <div className="empty-state">
-              <p className="muted">
-                No channel yet: alerts only go by email. In Teams, add the workflow &quot;Post to a channel when a webhook request is received&quot; to
-                the channel, copy the address it gives, and paste it here.
-              </p>
-              <Button design="Emphasized" icon="add" onClick={() => setEditing(true)}>
-                Connect a channel
-              </Button>
-            </div>
+            <EmptyState
+              icon="bell"
+              title="No Teams channel yet"
+              action={
+                <Button design="Emphasized" icon="add" onClick={() => setEditing(true)}>
+                  Connect a channel
+                </Button>
+              }
+            >
+              Alerts only go by email for now. In Teams, add the workflow &quot;Post to a channel when a webhook request is received&quot; to the channel,
+              then paste the address it gives here.
+            </EmptyState>
           )
         )}
       </section>

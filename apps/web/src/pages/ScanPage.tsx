@@ -116,7 +116,7 @@ function ObjectList({ scanId, graph }: { scanId: string; graph: ScanGraph }) {
   return (
     <section className="block">
       <div className="list-toolbar">
-        <Title level="H4">Objects</Title>
+        <Title level="H2" size="H4">Objects</Title>
         <SegmentedButton onSelectionChange={(e) => setFilter(e.detail.selectedItems[0]?.dataset.filter as Filter)}>
           <SegmentedButtonItem data-filter="outputs" selected={filter === "outputs"}>
             Likely outputs ({outputs.length})
@@ -171,12 +171,15 @@ function ObjectList({ scanId, graph }: { scanId: string; graph: ScanGraph }) {
             <TableCell className="mono">{r.technicalName}</TableCell>
             {businessNames && <TableCell>{r.businessName || "–"}</TableCell>}
             <TableCell>
-              <span className="type-dot" style={{ background: typeColor(r.type) }} />
-              {typeLabel(r.type)}
+              {/* In a span: the cell lays its children out in a row, and the dot sits on the text's line only inside one. */}
+              <span>
+                <span className="type-dot" style={{ background: typeColor(r.type) }} />
+                {typeLabel(r.type)}
+              </span>
             </TableCell>
             {multiSpace && <TableCell className="mono">{r.space}</TableCell>}
-            <TableCell horizontalAlign="End">{r.upstream}</TableCell>
-            <TableCell horizontalAlign="End">{r.downstream}</TableCell>
+            <TableCell horizontalAlign="End" className="mono">{r.upstream}</TableCell>
+            <TableCell horizontalAlign="End" className="mono">{r.downstream}</TableCell>
           </TableRow>
         ))}
       </Table>

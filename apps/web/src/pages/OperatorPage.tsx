@@ -14,6 +14,7 @@ import {
 } from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { LinkToSend } from "../components/LinkToSend";
+import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
 import { RenameAccountDialog } from "../components/RenameAccountDialog";
 import { formatDateTime } from "../format";
@@ -60,7 +61,7 @@ export function OperatorPage() {
       <ErrorStrip error={accounts.error ?? users.error} />
 
       <section className="block">
-        <Title level="H4">Accounts</Title>
+        <Title level="H2" size="H4">Accounts</Title>
         {accounts.isPending ? (
           <Loading />
         ) : (
@@ -98,9 +99,9 @@ export function OperatorPage() {
                     </Tag>
                   )}
                 </TableCell>
-                <TableCell horizontalAlign="End">{a.members}</TableCell>
-                <TableCell horizontalAlign="End">{a.tenants}</TableCell>
-                <TableCell horizontalAlign="End">{a.openInvitations || "–"}</TableCell>
+                <TableCell horizontalAlign="End" className="mono">{a.members}</TableCell>
+                <TableCell horizontalAlign="End" className="mono">{a.tenants}</TableCell>
+                <TableCell horizontalAlign="End" className="mono">{a.openInvitations || "–"}</TableCell>
                 <TableCell>{formatDateTime(a.createdAt)}</TableCell>
                 <TableCell horizontalAlign="End">
                   <Button design="Transparent" onClick={() => setDialog({ kind: "rename", accountId: a.id, name: a.name })}>
@@ -120,7 +121,7 @@ export function OperatorPage() {
       </section>
 
       <section className="block">
-        <Title level="H4">Users</Title>
+        <Title level="H2" size="H4">Users</Title>
         {users.isPending ? (
           <Loading />
         ) : (
@@ -192,7 +193,7 @@ function ClaudeSection() {
   const s = setting.data;
   return (
     <section className="block">
-      <Title level="H4">Drafting scenarios with Claude</Title>
+      <Title level="H2" size="H4">Drafting scenarios with Claude</Title>
       <p className="muted section-intro">
         With an Anthropic API key, the scenario builder drafts test rows and checks from a scenario&apos;s description. Each draft sends the description and
         the pipeline&apos;s definitions (object and column names, types and each step&apos;s SQL) to Anthropic, never tenant data, and is paid on this key.
@@ -216,25 +217,21 @@ function ClaudeSection() {
         <Label for="claude-key">{s?.operatorKey ? "Replace the key" : "Anthropic API key"}</Label>
         <div className="claude-key-row">
           <Input id="claude-key" type="Password" value={apiKey} placeholder="sk-ant-…" onInput={(e) => setApiKey(e.target.value)} />
-          <Button
-            design="Emphasized"
-            disabled={!apiKey.trim() || setKey.isPending}
-            onClick={() => setKey.mutate(apiKey.trim(), { onSuccess: () => setApiKey("") })}
-          >
+          <Button disabled={!apiKey.trim() || setKey.isPending} onClick={() => setKey.mutate(apiKey.trim(), { onSuccess: () => setApiKey("") })}>
             {setKey.isPending && setKey.variables !== null ? "Checking…" : "Check and save"}
           </Button>
-          {s?.operatorKey && (
-            <Button
-              design="Transparent"
-              icon="delete"
-              disabled={setKey.isPending}
-              onClick={() => {
-                if (window.confirm("Remove the Anthropic API key? The builder stops offering drafting, unless the server has its own key.")) setKey.mutate(null);
-              }}
-            >
-              Remove
-            </Button>
-          )}
+          <MoreActions
+            actions={[
+              s?.operatorKey && {
+                text: "Remove the key",
+                icon: "delete",
+                disabled: setKey.isPending,
+                onClick: () => {
+                  if (window.confirm("Remove the Anthropic API key? The builder stops offering drafting, unless the server has its own key.")) setKey.mutate(null);
+                },
+              },
+            ]}
+          />
         </div>
       </div>
     </section>

@@ -1,8 +1,10 @@
 import type { ObjectType } from "@ystara/shared";
 
 /**
- * How each Datasphere object type is named and coloured in the app. Colours
- * come from the UI5 theme's chart palette, so they follow light and dark mode.
+ * How each Datasphere object type is named and coloured in the app: views in
+ * sapphire, flows in amethyst, tables in grey, analytic models in amber (the
+ * brand tokens of brand.ts, so they follow light and dark mode). The colour
+ * marks a node's left edge or a dot, never text.
  */
 export type Category = "table" | "flow" | "view" | "model" | "other";
 
@@ -21,11 +23,11 @@ export const OBJECT_TYPE: Record<ObjectType, { label: string; category: Category
 };
 
 export const CATEGORY_COLOR: Record<Category, string> = {
-  table: "var(--sapChart_OrderedColor_1)",
-  flow: "var(--sapChart_OrderedColor_6)",
-  view: "var(--sapChart_OrderedColor_3)",
-  model: "var(--sapChart_OrderedColor_2)",
-  other: "var(--sapNeutralElementColor)",
+  table: "var(--ystara-grey)",
+  flow: "var(--ystara-amethyst)",
+  view: "var(--ystara-sapphire)",
+  model: "var(--ystara-amber)",
+  other: "var(--ystara-border)",
 };
 
 export const typeLabel = (type: ObjectType) => OBJECT_TYPE[type]?.label ?? type;

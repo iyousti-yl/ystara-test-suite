@@ -1,6 +1,6 @@
 # @ystara/web
 
-The browser app: tenants, scans, the objects a scan found, the pipeline behind any object as a lineage picture, and snapshots of saved pipelines and their comparison. Built with Vite and React, UI5 Web Components for the Fiori look, React Flow for the picture and dagre to lay it out. It follows the system's light or dark mode.
+The browser app: tenants, scans, the objects a scan found, the pipeline behind any object as a lineage picture, and snapshots of saved pipelines and their comparison. Built with Vite and React, UI5 Web Components for the Fiori controls, React Flow for the picture and dagre to lay it out. It wears the youlytics brand (sapphire, amber for the one main action of a page, IBM Plex Sans and Mono, a 4px spacing scale) and follows the system's light or dark mode.
 
 ## Running it
 
@@ -20,10 +20,10 @@ The app only ever calls `/api` on its own origin and loads nothing from other se
 | `/operator` | The operator panel (operators only): every account and user, create an account, invite a new admin, reset someone's sign-in | `src/pages/OperatorPage.tsx` |
 | `/` | Opens Home of the tenant picked last in this browser, or of the first tenant; Tenants when there is none | `src/App.tsx` |
 | `/tenants` | Tenants (menu, bottom): every tenant of the account; add one by its Datasphere URL, then its Connect wizard opens | `src/pages/TenantsPage.tsx` |
-| `/tenants/:id` | Home: the tenant at a glance (a card per app), the one next step that applies, Delete for admins | `src/pages/TenantHomePage.tsx` |
+| `/tenants/:id` | Home: the tenant at a glance (a card per app), the one next step that applies, Delete tenant in "…" for admins | `src/pages/TenantHomePage.tsx` |
 | `/tenants/:id/discovery` | Discovery: the scans (refreshed while one runs) and Scan spaces (picks from the spaces the client reads; `?scan=1` opens it) | `src/pages/DiscoveryPage.tsx` |
 | `/tenants/:id/pipelines` | Pipelines: the saved pipelines | `src/pages/PipelinesPage.tsx` |
-| `/tenants/:id/connection` | Connection › Technical client: Connect, Change client, Change spaces, Check again, Remove; each space readable or not (`?connect=1` opens Connect) | `src/pages/TenantConnection.tsx` |
+| `/tenants/:id/connection` | Connection › Technical client: Connect, Check again, Change spaces, and Change client and Remove client in "…"; each space readable or not (`?connect=1` opens Connect) | `src/pages/TenantConnection.tsx` |
 | `/tenants/:id/database-users` | Connection › Database users: one per space for snapshots, with what each sees | `src/pages/DatabaseUsers.tsx` |
 | `/scans/:id` | A scan's status and warnings, and its objects; likely outputs first | `src/pages/ScanPage.tsx` |
 | `/scans/:id/pipeline?output=SPACE.NAME&excludeWriter=...` | The pipeline behind one object on that scan; exclude writers, save it | `src/pages/PipelinePages.tsx` |
@@ -41,14 +41,15 @@ Every page works as a link: the API answers these paths with `index.html` and `s
 - `src/api.ts`: every API call, as hooks on TanStack Query (caching, refetching while a scan runs). Response types come from `packages/shared/src/api.ts`, the same types the API sends. `useMe()` is who is signed in; `useCan()` hides buttons the role can't use (the API checks every call anyway). A 401 on any call sends the browser back to sign-in (`src/main.tsx`).
 - Sign-in fields are plain `<input>` elements styled like UI5's (`src/components/AuthFrame.tsx`), so password managers and the browser's one-time-code fill find them. `src/components/SetUpSignIn.tsx` is the password-then-authenticator setup that invitation and reset links share, and `src/components/LinkToSend.tsx` shows a new link once, with a Copy button.
 - `src/lineage/`: the picture. `model.ts` turns a pipeline into nodes and edges with what to mark on them (output, entry table, excluded writer, several writers, loop); `layout.ts` sizes each node to its names and places them left to right; `viewport.ts` picks the first view and places the hover card; `LineageGraph.tsx` and `ObjectNode.tsx` draw them; `ObjectPanel.tsx` shows the selected object; `PipelineView.tsx` puts it together. The first three are plain functions with tests.
-- `src/objectTypes.ts`: names and colours per object type (theme colours, so dark mode works).
+- `src/objectTypes.ts`: names and colours per object type (views sapphire, flows amethyst, tables grey, analytic models amber; brand tokens, so dark mode works).
+- **The brand** (`src/brand.ts`): UI5 draws with its theme's parameters (`--sap…` CSS variables), so the brand takes the Horizon and Horizon Dark parameters, swaps each SAP colour for its youlytics colour, sets the ones that need a decision (the amber primary button with ink text, calm status tags, 40px controls, 10px corners, Plex for every font) and adds `--ystara-…` tokens for what `app.css` draws itself. `src/brand.test.ts` checks that no SAP blue, green or yellow is left and that every text colour reads on its ground (4.5:1). `app.css` keeps to the 4px scale (`--space-1` to `--space-8`): a page's blocks are 24px apart, a section is a white card with 24px inside. Pages follow the same pattern: `PageHeader` (breadcrumbs as a caption, a 34px title, a muted line), one amber action at most (`design="Emphasized"`), and rarely used actions such as Delete in a "…" menu (`components/MoreActions.tsx`); an empty list shows `components/EmptyState.tsx` with the one action that fills it. The mark in `components/Logo.tsx` is a stand-in until the brand's own files are in the project.
 - `src/columns.ts`: how wide a table column of technical names must be (`monoColumnWidth`, given to a `TableHeaderCell`'s `minWidth`): as wide as its longest name, up to the table's width. The other columns shrink, then move under the row (`overflowMode="Popin"`, by `importance`), before a name breaks; only a name wider than a phone's screen wraps. Every table with technical names uses it; `npm run db:demo` adds names of up to 50 characters to look at.
-- `src/theme.ts`, `src/fonts.ts`, `src/locale.ts`, `src/icons.ts`: UI5 setup (light or dark theme, the bundled 72 font and English locale data instead of UI5's CDN downloads). UI5 draws only icons that are imported in `icons.ts`.
+- `src/theme.ts`, `src/fonts.ts`, `src/locale.ts`, `src/icons.ts`: UI5 setup (light or dark theme, the bundled IBM Plex fonts and English locale data instead of UI5's CDN downloads). UI5 draws only icons that are imported in `icons.ts`.
 
 ## Dependencies
 
-All packages are `devDependencies`: Vite bundles them into `dist/` at build time and nothing is needed at run time, so the Docker image prunes them. The UI5 packages move together (`~2.27`), and `@sap-theming/theming-base-content` must match the font files UI5 expects (`src/fontFaces.test.ts` checks).
+All packages are `devDependencies`: Vite bundles them into `dist/` at build time and nothing is needed at run time, so the Docker image prunes them. The UI5 packages move together (`~2.27`); after an update, `src/brand.test.ts` says which new SAP colours the brand map lacks. The fonts come from `@fontsource/ibm-plex-sans` and `@fontsource/ibm-plex-mono` (weights 400, 500 and 600, latin and latin-ext; `src/fontFaces.test.ts` checks the faces).
 
 ## Tests
 
-`npm test -w @ystara/web`: the lineage model and layout, the column widths, and the font check. Pages are checked by clicking through them; there are no browser tests in CI yet.
+`npm test -w @ystara/web`: the lineage model and layout, the column widths, the brand's colours and contrast, and the font faces. Pages are checked by clicking through them; there are no browser tests in CI yet.

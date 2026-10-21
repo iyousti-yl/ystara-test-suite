@@ -25,10 +25,11 @@ export function ObjectPanel(props: {
 
   return (
     <aside className="object-panel" aria-label={`Details of ${ref.technicalName}`}>
-      <div className="object-panel-type" style={{ color: typeColor(ref.type) }}>
+      <div className="caption">
+        <span className="type-dot" style={{ background: typeColor(ref.type) }} />
         {typeLabel(ref.type)} · {ref.space}
       </div>
-      <Title level="H4" wrappingType="Normal">
+      <Title level="H2" size="H5" wrappingType="Normal" className="object-panel-name">
         <span className="mono">{ref.technicalName}</span>
       </Title>
       {ref.businessName && <Text>{ref.businessName}</Text>}
@@ -53,7 +54,7 @@ export function ObjectPanel(props: {
 
       <div className="object-panel-actions">
         {onExclude && node.competingWriter && !node.excluded && (
-          <Button design="Emphasized" icon="hide" onClick={onExclude}>
+          <Button icon="hide" onClick={onExclude}>
             Exclude this writer
           </Button>
         )}
@@ -93,7 +94,9 @@ function Links({ title, refs }: { title: string; refs: DspObjectRef[] }) {
   if (refs.length === 0) return null;
   return (
     <section className="object-panel-links">
-      <Title level="H6">{title}</Title>
+      <Title level="H3" size="H6">
+        {title}
+      </Title>
       <ul>
         {refs.map((r) => (
           <li key={refKey(r)}>

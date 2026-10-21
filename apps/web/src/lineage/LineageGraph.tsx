@@ -13,7 +13,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { OBJECT_TYPE, typeColor, typeLabel } from "../objectTypes";
+import { OBJECT_TYPE, typeLabel } from "../objectTypes";
 import { layoutLeftToRight, nodeWidth } from "./layout";
 import type { LineageEdge, LineageNode } from "./model";
 import { hasCutOffText, ObjectNode, type ObjectNodeType } from "./ObjectNode";
@@ -107,6 +107,8 @@ export function LineageGraph(props: {
       nodesConnectable={false}
       minZoom={0.1}
       colorMode={dark ? "dark" : "light"}
+      // React Flow is MIT-licensed; its small link in the corner is left out.
+      proOptions={{ hideAttribution: true }}
     >
       <Background gap={20} />
       <Controls showInteractive={false} />
@@ -230,7 +232,7 @@ function HoverCard({ node, cutOff, multiSpace }: { node: LineageNode; cutOff: bo
   const { ref } = node;
   return (
     <div ref={card} className="lineage-card" role="tooltip">
-      <div className="lineage-node-type" style={{ color: typeColor(ref.type) }}>
+      <div className="lineage-node-type">
         {typeLabel(ref.type)}
         {multiSpace && <span className="lineage-node-space"> · {ref.space}</span>}
       </div>

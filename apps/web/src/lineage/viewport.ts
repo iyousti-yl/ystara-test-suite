@@ -15,12 +15,12 @@ export interface Viewport {
   zoom: number;
 }
 
-/** Down to this zoom the whole pipeline is shown; names are small but still readable. */
-export const MIN_FIT_ZOOM = 0.45;
+/** Down to this zoom the whole pipeline is shown, so its shape reads at a glance; hovering a node shows its names. */
+export const MIN_FIT_ZOOM = 0.35;
 /** When the whole pipeline needs less than MIN_FIT_ZOOM, the output end is shown at least this large. */
 export const READABLE_ZOOM = 0.6;
 /** Space kept between the picture and the edges of the canvas, in pixels. */
-export const MARGIN = 24;
+export const MARGIN = 32;
 
 /**
  * The whole pipeline when it fits at MIN_FIT_ZOOM or more. Otherwise as many

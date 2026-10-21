@@ -16,6 +16,7 @@ import {
   useWatch,
 } from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
+import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTime } from "../format";
 import { PipelineView } from "../lineage/PipelineView";
@@ -132,7 +133,8 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
           <>
             {can("runs.execute") && (
               <Button
-                design="Emphasized"
+                // The page's one primary action, except on Scenarios, where it is New scenario.
+                design={tab === "scenarios" ? "Default" : "Emphasized"}
                 icon="camera"
                 disabled={!measurable || takeSnapshot.isPending}
                 tooltip={measurable ? "Measure the steps the database users can see" : (whyNot ?? "No step can be measured with SQL yet")}
@@ -142,26 +144,25 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
               </Button>
             )}
             <WatchButton pipelineId={definition.id} />
-            <Button
-              icon="chain-link"
-              onClick={() => navigate(`/scans/${result.data.scanId}/pipeline?${pipelineQuery(output, definition.excludeWriters)}`)}
-            >
-              Change exclusions
-            </Button>
-            {can("pipelines.write") && (
-              <Button
-                design="Transparent"
-                icon="delete"
-                disabled={remove.isPending}
-                onClick={() => {
-                  if (window.confirm(`Delete the saved pipeline "${definition.name}"? Nothing changes in Datasphere.`)) {
-                    remove.mutate(definition, { onSuccess: () => navigate(`/tenants/${definition.tenantId}/pipelines`) });
-                  }
-                }}
-              >
-                Delete
-              </Button>
-            )}
+            <MoreActions
+              actions={[
+                {
+                  text: "Change exclusions",
+                  icon: "chain-link",
+                  onClick: () => navigate(`/scans/${result.data.scanId}/pipeline?${pipelineQuery(output, definition.excludeWriters)}`),
+                },
+                can("pipelines.write") && {
+                  text: "Delete pipeline",
+                  icon: "delete",
+                  disabled: remove.isPending,
+                  onClick: () => {
+                    if (window.confirm(`Delete the saved pipeline "${definition.name}"? Nothing changes in Datasphere.`)) {
+                      remove.mutate(definition, { onSuccess: () => navigate(`/tenants/${definition.tenantId}/pipelines`) });
+                    }
+                  },
+                },
+              ]}
+            />
           </>
         }
       />

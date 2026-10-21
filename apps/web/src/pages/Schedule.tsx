@@ -21,6 +21,7 @@ import {
   type ScheduleJson,
 } from "../api";
 import { ErrorStrip } from "../components/Feedback";
+import { MoreActions } from "../components/MoreActions";
 import { formatDateTime } from "../format";
 
 interface Example {
@@ -71,24 +72,25 @@ export function ScheduleSection({ pipelineId, whyNot }: { pipelineId: string; wh
   return (
     <section className="block">
       <div className="list-toolbar section-toolbar">
-        <Title level="H4">Schedule</Title>
+        <Title level="H2" size="H4">Schedule</Title>
         {canSet && (
           <Button icon="date-time" disabled={!!whyNot} tooltip={whyNot ?? "Take snapshots on a schedule"} onClick={() => setEditing(true)}>
             {current ? "Change" : "Set schedule"}
           </Button>
         )}
-        {canSet && current && (
-          <Button
-            design="Transparent"
-            icon="delete"
-            disabled={remove.isPending}
-            onClick={() => {
-              if (window.confirm("Remove the schedule? Snapshots already taken stay, and you can still take one by hand.")) remove.mutate();
-            }}
-          >
-            Remove
-          </Button>
-        )}
+        <MoreActions
+          actions={[
+            canSet &&
+              current && {
+                text: "Remove the schedule",
+                icon: "delete",
+                disabled: remove.isPending,
+                onClick: () => {
+                  if (window.confirm("Remove the schedule? Snapshots already taken stay, and you can still take one by hand.")) remove.mutate();
+                },
+              },
+          ]}
+        />
       </div>
       <ErrorStrip error={schedule.error ?? remove.error} />
       {current ? <ScheduleSummary schedule={current} fetchedAt={schedule.dataUpdatedAt} /> : schedule.isSuccess && <p className="muted">No schedule: snapshots are only taken by hand.</p>}
@@ -270,24 +272,25 @@ export function ScanScheduleSection({ tenantId, spaces, whyNot }: { tenantId: st
   return (
     <section className="block">
       <div className="list-toolbar section-toolbar">
-        <Title level="H4">Scan schedule</Title>
+        <Title level="H2" size="H4">Scan schedule</Title>
         {canSet && (
           <Button icon="date-time" disabled={!!whyNot} tooltip={whyNot ?? "Scan the tenant on a schedule"} onClick={() => setEditing(true)}>
             {current ? "Change" : "Set schedule"}
           </Button>
         )}
-        {canSet && current && (
-          <Button
-            design="Transparent"
-            icon="delete"
-            disabled={remove.isPending}
-            onClick={() => {
-              if (window.confirm("Remove the scan schedule? Scans already made stay, and you can still scan by hand.")) remove.mutate();
-            }}
-          >
-            Remove
-          </Button>
-        )}
+        <MoreActions
+          actions={[
+            canSet &&
+              current && {
+                text: "Remove the scan schedule",
+                icon: "delete",
+                disabled: remove.isPending,
+                onClick: () => {
+                  if (window.confirm("Remove the scan schedule? Scans already made stay, and you can still scan by hand.")) remove.mutate();
+                },
+              },
+          ]}
+        />
       </div>
       <ErrorStrip error={schedule.error ?? remove.error} />
       {current ? (

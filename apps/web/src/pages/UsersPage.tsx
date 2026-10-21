@@ -17,6 +17,7 @@ import { ROLES, type Role } from "@ystara/shared";
 import { useCan, useChangeRole, useInvite, useMe, useRemoveMember, useRenameAccount, useTeam, useWithdrawInvitation } from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { LinkToSend } from "../components/LinkToSend";
+import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
 import { RenameAccountDialog } from "../components/RenameAccountDialog";
 import { formatDateTime } from "../format";
@@ -62,11 +63,7 @@ export function UsersPage() {
             <Button design="Emphasized" icon="add" onClick={() => setInviting(true)}>
               Invite
             </Button>
-            {can("account.manage") && (
-              <Button design="Transparent" icon="edit" onClick={() => setRenaming(true)}>
-                Rename account
-              </Button>
-            )}
+            <MoreActions actions={[can("account.manage") && { text: "Rename account", icon: "edit", onClick: () => setRenaming(true) }]} />
           </>
         }
       />
@@ -76,7 +73,7 @@ export function UsersPage() {
       ) : (
         <>
           <section className="block">
-            <Title level="H4">Members</Title>
+            <Title level="H2" size="H4">Members</Title>
             <Table
               overflowMode="Popin"
               headerRow={
@@ -141,7 +138,7 @@ export function UsersPage() {
           </section>
 
           <section className="block">
-            <Title level="H4">Open invitations</Title>
+            <Title level="H2" size="H4">Open invitations</Title>
             <Table
               noDataText="No open invitations."
               overflowMode="Popin"
@@ -174,7 +171,7 @@ export function UsersPage() {
           </section>
 
           <section className="block">
-            <Title level="H4">What each role can do</Title>
+            <Title level="H2" size="H4">What each role can do</Title>
             <dl className="roles">
               {ROLES.map((r) => (
                 <div key={r}>

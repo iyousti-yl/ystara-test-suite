@@ -6,7 +6,7 @@ import "@ui5/webcomponents/dist/generated/json-imports/Themes.js";
 import "@ui5/webcomponents-fiori/dist/generated/json-imports/Themes.js";
 
 /**
- * Light or dark, with SAP's Horizon themes: light unless the person picks Dark,
+ * Light or dark, with SAP's Horizon themes in the youlytics colours (brand.ts): light unless the person picks Dark,
  * or "Same as the system" (the operating system's setting, followed live), in
  * the account menu. The pick is kept in this browser (localStorage), and other
  * tabs follow it.
@@ -39,6 +39,8 @@ const isDark = () => preference === "dark" || (preference === "system" && query.
 
 function apply() {
   const dark = isDark();
+  // brand.ts recolours each theme; this says which one its colours are for.
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
   setTheme(dark ? "sap_horizon_dark" : "sap_horizon");
   // The browser's own parts (scrollbars, date pickers, plain inputs) follow too.
   document.documentElement.style.colorScheme = dark ? "dark" : "light";

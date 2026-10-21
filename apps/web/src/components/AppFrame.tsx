@@ -22,6 +22,7 @@ import type { Me } from "@ystara/shared";
 import { useLocation, useNavigate } from "react-router";
 import { useSignOut, useSwitchAccount, useTenants } from "../api";
 import { ROLE_LABEL } from "../roles";
+import { Mark } from "./Logo";
 import { useTenantScope } from "../tenantScope";
 import { setThemePreference, THEME_PREFERENCES, useThemePreference, type ThemePreference } from "../theme";
 
@@ -130,13 +131,19 @@ function TopBar(props: { me: Me; slot?: string; onMenu: () => void; onTenantMenu
       startButton={<Button icon="menu2" design="Transparent" tooltip="Menu" accessibleName="Menu" onClick={onMenu} />}
       branding={
         <ShellBarBranding
+          // A slot takes HTML elements only, so the SVG goes in a span.
+          logo={
+            <span className="shell-mark">
+              <Mark size={28} />
+            </span>
+          }
           href="/"
           onClick={(e) => {
             e.preventDefault();
             navigate("/");
           }}
         >
-          Ystara Test Suite
+          Ystara
         </ShellBarBranding>
       }
       content={
