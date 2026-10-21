@@ -315,3 +315,38 @@ describe("access", () => {
     expect((await post("/tenants", { name: "Private", host: "https://synthetic.eu10.hcs.cloud.sap" }, outsider)).statusCode).toBe(201);
   });
 });
+
+describe("a scan schedule", () => {
+  const put = (url: string, payload: object, as = admin) => app.inject({ method: "PUT", url: `/api${url}`, payload, headers: { cookie: as.cookie } });
+
+  it("is set once the technical client can read a space, with runs at least four hours apart, and removed again", async () => {
+    const tenant = (await post("/tenants", { name: "Nightly", host: "https://synthetic.eu10.hcs.cloud.sap" })).json();
+    const url = `/tenants/${tenant.id}/scan-schedule`;
+    expect((await get(url)).json()).toEqual({ schedule: null });
+    const nightly = { cron: "0 2 * * *", timeZone: "Europe/Brussels" };
+    const unconnected = await put(url, nightly);
+    expect(unconnected.statusCode).toBe(409);
+    expect(unconnected.json().error).toMatch(/^Scheduled scans read the spaces the tenant's technical client can read/);
+
+    await setConnection(db, { tenantId: tenant.id, clientId: "sb-synthetic", sealedSecret: "v1.sealed", tokenUrl, spaces: ["SALES"], updatedBy: null });
+    await recordConnectionCheck(db, (await getConnectionLogin(db, tenant.id))!, { spaces: [{ space: "SALES", readable: true, error: null }] });
+    const hourly = await put(url, { cron: "0 * * * *", timeZone: "Europe/Brussels" });
+    expect(hourly.statusCode).toBe(400);
+    expect(hourly.json().error).toMatch(/^Runs must be at least 4 hours apart/);
+
+    const res = await put(url, { cron: " 0  2 * * * ", timeZone: "Europe/Brussels" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().schedule).toMatchObject({ tenantId: tenant.id, cron: "0 2 * * *", timeZone: "Europe/Brussels" });
+    expect((await get(url)).json().schedule.cron).toBe("0 2 * * *");
+    expect((await del(url)).statusCode).toBe(204);
+    expect((await get(url)).json()).toEqual({ schedule: null });
+  });
+
+  it("isn't offered for a tenant that only has imported scans, nor to another account", async () => {
+    const { tenant } = await tenantWithScan("Imported only");
+    await db.query("update tenants set host = null where id = $1", [tenant.id]);
+    expect((await put(`/tenants/${tenant.id}/scan-schedule`, { cron: "0 2 * * *", timeZone: "UTC" })).statusCode).toBe(409);
+    const stranger = await testUser(db, { account: "Elsewhere", email: "admin@elsewhere.example.com", role: "admin" });
+    expect((await get(`/tenants/${tenant.id}/scan-schedule`, stranger)).statusCode).toBe(404);
+  });
+});

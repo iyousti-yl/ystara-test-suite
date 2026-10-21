@@ -6,10 +6,12 @@ import {
   createScan,
   createTenant,
   deletePipeline,
+  deleteScanSchedule,
   deleteTenant,
   getConnection,
   getPipeline,
   getScan,
+  getScanSchedule,
   getTenant,
   latestSucceededScan,
   listDatabaseUsers,
@@ -18,14 +20,17 @@ import {
   listTenants,
   loadGraph,
   loadObject,
+  setScanSchedule,
   watchPipeline,
   type Db,
 } from "@ystara/db";
 import {
+  checkSchedule,
   DATASPHERE_URL_HINT,
   isDatasphereUrl,
   JOBS,
   measurability,
+  MIN_MINUTES_BETWEEN_SCANS,
   readableSpaces,
   refKey,
   type PipelineResult,
@@ -66,6 +71,7 @@ export const spaceIds = z
   .max(20)
   .transform((spaces) => [...new Set(spaces)]);
 const ScanInput = z.object({ spaces: spaceIds });
+const ScanScheduleBody = z.object({ cron: z.string().max(200), timeZone: z.string().max(100) });
 const PipelineInput = z.object({
   name: z.string().trim().min(1).max(100),
   output: objectRef.refine((o) => o.includes("."), "Use SPACE.NAME"),
@@ -132,6 +138,37 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
       const scan = await createScan(db, tenant.id, spaces);
       await queue.send(JOBS.scan, { scanId: scan.id } satisfies ScanJobData);
       return reply.code(202).send(scan);
+    });
+
+    // The tenant's scan schedule, or null when it is only scanned by hand.
+    app.get("/tenants/:id/scan-schedule", { config: read }, async (req, reply) => {
+      const tenant = await ownTenant(req, id.parse(req.params).id);
+      if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
+      return { schedule: (await getScanSchedule(db, tenant.id)) ?? null };
+    });
+
+    // Set or replace it. Each run scans the spaces the technical client could read at its last check, so a
+    // tenant needs a connected client first (409); runs must be MIN_MINUTES_BETWEEN_SCANS apart (400).
+    app.put("/tenants/:id/scan-schedule", { config: { access: "discovery.run" } }, async (req, reply) => {
+      const tenant = await ownTenant(req, id.parse(req.params).id);
+      if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
+      if (!tenant.host) return reply.code(409).send({ error: "This tenant has no Datasphere URL; it only has imported scans." });
+      const body = ScanScheduleBody.parse(req.body);
+      const check = checkSchedule(body.cron, body.timeZone, new Date(), 5, MIN_MINUTES_BETWEEN_SCANS);
+      if (!check.ok) return reply.code(400).send({ error: check.error });
+      const connection = await getConnection(db, tenant.id);
+      if (!connection || !readableSpaces(connection).length) {
+        return reply.code(409).send({ error: "Scheduled scans read the spaces the tenant's technical client can read, and it has none yet. Connect it under Connection › Technical client first." });
+      }
+      const schedule = await setScanSchedule(db, { tenantId: tenant.id, cron: check.cron, timeZone: body.timeZone, nextRunAt: check.next[0], updatedBy: signedIn(req).userId });
+      return { schedule };
+    });
+
+    app.delete("/tenants/:id/scan-schedule", { config: { access: "discovery.run" } }, async (req, reply) => {
+      const tenant = await ownTenant(req, id.parse(req.params).id);
+      if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
+      await deleteScanSchedule(db, tenant.id);
+      return reply.code(204).send();
     });
 
     app.get("/scans/:id", { config: read }, async (req, reply) => {

@@ -156,6 +156,6 @@ A key the format doesn't know, or a misspelt one, makes the file invalid, so a t
 
 ## What it doesn't do yet
 
-- Scenarios don't run on a schedule yet.
+- Scenarios have no schedule of their own: in the app they run again after a scan that changes their pipeline, so a nightly scan of the tenant (Discovery › Set schedule) checks them each night the definitions change.
 - Transformation flows run as a full load: a flow that reads its own target sees it empty.
 - `CURRENT_DATE` and other session values aren't fixed, so a step that uses them gives a result that depends on the day.

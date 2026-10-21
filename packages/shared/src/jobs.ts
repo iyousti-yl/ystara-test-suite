@@ -11,12 +11,16 @@ export const JOBS = {
   databaseCheck: "database-check",
   /** Measure the steps of a pipeline with SQL (SELECT only) and store the measures, never rows. */
   snapshot: "snapshot-capture",
-  /** Queue the snapshots whose pipeline schedule has come (every minute). */
+  /** Queue the snapshots and scans whose schedule has come (every minute; the name is from before scans had schedules). */
   scheduleTick: "snapshot-schedule-tick",
   /** After a scheduled snapshot: compare it with the previous one and email the watchers when it calls for an alert. */
   snapshotAlert: "snapshot-alert",
   /** Compile a pipeline over a scenario's rows and send each check as one SELECT that reads only those rows. */
   scenarioRun: "scenario-run",
+  /** Run every scenario of a pipeline, one after the other through one sign-in. */
+  scenarioSuite: "scenario-suite",
+  /** After a suite a scan queued: email the watchers (and post in Teams) when scenarios broke. */
+  scenarioAlert: "scenario-alert",
 } as const;
 
 export interface ScanJobData {
@@ -52,8 +56,8 @@ export interface SnapshotJobData {
 export const SNAPSHOT_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 60 * 60 };
 
 /**
- * Once a minute (pg-boss's own cron): take a snapshot of every pipeline whose
- * schedule has come. No data. A tick that fails is not retried, and one left
+ * Once a minute (pg-boss's own cron): take a snapshot of every pipeline, and
+ * scan every tenant, whose schedule has come. No data. A tick that fails is not retried, and one left
  * waiting more than 5 minutes is dropped: the next tick finds the same
  * schedules still due.
  */
@@ -76,3 +80,17 @@ export interface ScenarioRunJobData {
 
 /** A run is a sign-in and one SELECT per check over the scenario's own rows. No retries: a person runs it again. */
 export const SCENARIO_RUN_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 30 * 60 };
+
+export interface ScenarioSuiteJobData {
+  suiteId: string;
+}
+
+/** A suite is one sign-in and the runs of every scenario of a pipeline. No retries: a person runs it again, or the next scan does. */
+export const SCENARIO_SUITE_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 2 * 60 * 60 };
+
+export interface ScenarioAlertJobData {
+  suiteId: string;
+}
+
+/** As for snapshot alerts: a failed email or Teams post is tried again three times; what went out is never sent twice. */
+export const SCENARIO_ALERT_QUEUE_OPTIONS = SNAPSHOT_ALERT_QUEUE_OPTIONS;

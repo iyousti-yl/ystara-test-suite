@@ -58,15 +58,15 @@ export function AppFrame({ me, children }: { me: Me; children: ReactNode }) {
   );
 }
 
-/** The apps, and which one an address belongs to: scans are Discovery's, pipelines and snapshots Pipelines'. */
-type App = "home" | "discovery" | "pipelines" | "connection" | "database-users" | "tenants" | "users" | "operator";
+/** The apps, and which one an address belongs to: scans are Discovery's; pipelines, snapshots, scenarios and their runs Pipelines'. */
+type App = "home" | "discovery" | "pipelines" | "connection" | "database-users" | "tenants" | "users" | "alerts" | "operator";
 
 function appOf(pathname: string): App | undefined {
   const [first, , app] = pathname.split("/").filter(Boolean);
   if (first === "tenants") return pathname === "/tenants" ? "tenants" : ((app as App | undefined) ?? "home");
   if (first === "scans") return "discovery";
-  if (first === "pipelines" || first === "snapshots") return "pipelines";
-  if (first === "users" || first === "operator") return first;
+  if (first === "pipelines" || first === "snapshots" || first === "scenarios" || first === "scenario-runs" || first === "scenario-suites") return "pipelines";
+  if (first === "users" || first === "alerts" || first === "operator") return first;
   return undefined;
 }
 
@@ -100,6 +100,7 @@ function AppMenu({ me, slot }: { me: Me; slot?: string }) {
         <>
           <SideNavigationItem icon="it-system" text="Tenants" data-to="/tenants" selected={app === "tenants"} />
           {me.permissions.includes("users.manage") && <SideNavigationItem icon="group" text="Users and roles" data-to="/users" selected={app === "users"} />}
+          {me.permissions.includes("account.manage") && <SideNavigationItem icon="bell" text="Alerts" data-to="/alerts" selected={app === "alerts"} />}
           {me.operator && <SideNavigationItem icon="action-settings" text="Operator" data-to="/operator" selected={app === "operator"} />}
         </>
       }
@@ -244,7 +245,7 @@ function TenantMenu({ opener, onClose }: { opener?: HTMLElement; onClose: () => 
         if (!picked) return;
         const app = appOf(pathname);
         // The admin pages show no tenant: the pick only changes the menu. Every other page opens on the picked tenant, which picks it.
-        if (app === "users" || app === "operator") pick(picked);
+        if (app === "users" || app === "alerts" || app === "operator") pick(picked);
         else navigate(appPath(app === undefined || app === "tenants" ? "home" : app, picked));
       }}
     >

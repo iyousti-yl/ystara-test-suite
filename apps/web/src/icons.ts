@@ -23,6 +23,7 @@ import "@ui5/webcomponents-icons/dist/list.js";
 import "@ui5/webcomponents-icons/dist/media-play.js";
 import "@ui5/webcomponents-icons/dist/menu2.js";
 import "@ui5/webcomponents-icons/dist/palette.js";
+import "@ui5/webcomponents-icons/dist/paper-plane.js";
 import "@ui5/webcomponents-icons/dist/process.js";
 import "@ui5/webcomponents-icons/dist/refresh.js";
 import "@ui5/webcomponents-icons/dist/save.js";

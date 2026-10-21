@@ -3,6 +3,7 @@ import {
   Button,
   Input,
   Label,
+  Link,
   MessageStrip,
   Option,
   Panel,
@@ -29,6 +30,7 @@ import {
   type ScenarioInputs,
   type ScenarioSpec,
   type ScenarioStepNote,
+  type ChangedStep,
 } from "@ystara/shared";
 import { useBeforeUnload, useBlocker, useNavigate, useParams } from "react-router";
 import {
@@ -36,6 +38,7 @@ import {
   useDatabaseUsers,
   useDeleteScenario,
   useDraftScenario,
+  useRunAllScenarios,
   useRunScenario,
   useSavedPipeline,
   useSaveScenario,
@@ -45,11 +48,14 @@ import {
   useScenarioRun,
   useScenarioRuns,
   useScenarios,
+  useScenarioSuite,
+  useScenarioSuites,
   useTenant,
   type ScenarioDraft,
   type ScenarioJson,
   type ScenarioRunJson,
 } from "../api";
+import { emailDelivery, teamsDelivery } from "../alerts";
 import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
@@ -100,77 +106,137 @@ const CHECK_STATUS = {
 
 const checkCount = (spec: ScenarioSpec) => spec.expect.reduce((n, e) => n + e.assertions.length, 0);
 
-/** The Scenarios tab of a saved pipeline: its scenarios by name, with the latest run of each. */
-export function ScenariosSection({ pipelineId }: { pipelineId: string }) {
+/**
+ * The Scenarios tab of a saved pipeline: its scenarios by name, with the
+ * latest run of each, Run all, and the latest runs of all of them together
+ * (suites: by hand, or after a scan that changed the pipeline).
+ */
+export function ScenariosSection({ pipelineId, tenantId }: { pipelineId: string; tenantId: string }) {
   const navigate = useNavigate();
   const can = useCan();
   const scenarios = useScenarios(pipelineId);
+  const suites = useScenarioSuites(pipelineId);
+  const runAll = useRunAllScenarios(pipelineId);
+  const tenant = useTenant(tenantId);
+  const databaseUsers = useDatabaseUsers(tenantId);
+  const whyNoRun = tenant.data && databaseUsers.data ? whyNoScenarioRun(databaseUsers.data, tenant.data.host !== null) : undefined;
+  const running = suites.data?.find((s) => s.status === "queued" || s.status === "running");
+  const whyNotRunAll = !scenarios.data?.length ? "Make a scenario first" : (whyNoRun ?? (running ? "Its scenarios are running" : undefined));
   return (
-    <section className="block">
-      <div className="list-toolbar section-toolbar">
-        <Title level="H4">{scenarios.data ? counted(scenarios.data.length, "scenario") : "Scenarios"}</Title>
-        {can("scenarios.write_visual") && (
-          <Button design="Emphasized" icon="add" onClick={() => navigate(`/pipelines/${pipelineId}/scenarios/new`)}>
-            New scenario
-          </Button>
-        )}
-      </div>
-      <p className="muted section-intro">
-        A scenario gives test rows to the pipeline&apos;s tables and says what to expect at its steps. It runs on those rows only, compiled from the
-        definitions of the latest scan: nothing is written to the tenant and none of its data is read.
-      </p>
-      <ErrorStrip error={scenarios.error} />
-      <Table
-        loading={scenarios.isPending}
-        noDataText={can("scenarios.write_visual") ? "No scenarios yet. Make one with New scenario." : "No scenarios yet."}
-        overflowMode="Popin"
-        onRowClick={(e) => navigate(`/scenarios/${e.detail.row.rowKey}`)}
-        headerRow={
-          <TableHeaderRow>
-            <TableHeaderCell minWidth="14rem" importance={1}>
-              Scenario
-            </TableHeaderCell>
-            <TableHeaderCell minWidth="6rem">Kind</TableHeaderCell>
-            <TableHeaderCell minWidth="5rem">Checks</TableHeaderCell>
-            <TableHeaderCell minWidth="12rem" importance={1}>
-              Latest run
-            </TableHeaderCell>
-            <TableHeaderCell minWidth="12rem">Saved</TableHeaderCell>
-          </TableHeaderRow>
-        }
-      >
-        {scenarios.data?.map((s) => (
-          <TableRow key={s.id} rowKey={s.id} interactive>
-            <TableCell>
-              <span>
-                {s.name}
-                {s.spec.description && <span className="muted scenario-description">{s.spec.description}</span>}
-              </span>
-            </TableCell>
-            <TableCell>{kindLabel(s.spec.kind)}</TableCell>
-            <TableCell>{checkCount(s.spec)}</TableCell>
-            <TableCell>
-              {s.lastRun ? (
-                <span className="facts">
-                  <RunStatusTag status={s.lastRun.status} />
-                  {s.lastRun.total !== null && (
-                    <span>
-                      {s.lastRun.passed} of {s.lastRun.total} passed
-                    </span>
-                  )}
+    <>
+      <section className="block">
+        <div className="list-toolbar section-toolbar">
+          <Title level="H4">{scenarios.data ? counted(scenarios.data.length, "scenario") : "Scenarios"}</Title>
+          {can("runs.execute") && (
+            <Button
+              icon="media-play"
+              disabled={!!whyNotRunAll || runAll.isPending}
+              tooltip={whyNotRunAll ?? "Run every scenario of this pipeline, one after the other"}
+              onClick={() => runAll.mutate(undefined, { onSuccess: (suite) => navigate(`/scenario-suites/${suite.id}`) })}
+            >
+              Run all
+            </Button>
+          )}
+          {can("scenarios.write_visual") && (
+            <Button design="Emphasized" icon="add" onClick={() => navigate(`/pipelines/${pipelineId}/scenarios/new`)}>
+              New scenario
+            </Button>
+          )}
+        </div>
+        <p className="muted section-intro">
+          A scenario gives test rows to the pipeline&apos;s tables and says what to expect at its steps. It runs on those rows only, compiled from the
+          definitions of the latest scan: nothing is written to the tenant and none of its data is read.
+        </p>
+        <ErrorStrip error={scenarios.error ?? runAll.error} />
+        <Table
+          loading={scenarios.isPending}
+          noDataText={can("scenarios.write_visual") ? "No scenarios yet. Make one with New scenario." : "No scenarios yet."}
+          overflowMode="Popin"
+          onRowClick={(e) => navigate(`/scenarios/${e.detail.row.rowKey}`)}
+          headerRow={
+            <TableHeaderRow>
+              <TableHeaderCell minWidth="14rem" importance={1}>
+                Scenario
+              </TableHeaderCell>
+              <TableHeaderCell minWidth="6rem">Kind</TableHeaderCell>
+              <TableHeaderCell minWidth="5rem">Checks</TableHeaderCell>
+              <TableHeaderCell minWidth="12rem" importance={1}>
+                Latest run
+              </TableHeaderCell>
+              <TableHeaderCell minWidth="12rem">Saved</TableHeaderCell>
+            </TableHeaderRow>
+          }
+        >
+          {scenarios.data?.map((s) => (
+            <TableRow key={s.id} rowKey={s.id} interactive>
+              <TableCell>
+                <span>
+                  {s.name}
+                  {s.spec.description && <span className="muted scenario-description">{s.spec.description}</span>}
                 </span>
-              ) : (
-                <span className="muted">Never run</span>
-              )}
-            </TableCell>
-            <TableCell>
-              {formatDateTime(s.updatedAt)}
-              {s.updatedBy && <span className="muted"> by {s.updatedBy}</span>}
-            </TableCell>
-          </TableRow>
-        ))}
-      </Table>
-    </section>
+              </TableCell>
+              <TableCell>{kindLabel(s.spec.kind)}</TableCell>
+              <TableCell>{checkCount(s.spec)}</TableCell>
+              <TableCell>
+                {s.lastRun ? (
+                  <span className="facts">
+                    <RunStatusTag status={s.lastRun.status} />
+                    {s.lastRun.total !== null && (
+                      <span>
+                        {s.lastRun.passed} of {s.lastRun.total} passed
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="muted">Never run</span>
+                )}
+              </TableCell>
+              <TableCell>
+                {formatDateTime(s.updatedAt)}
+                {s.updatedBy && <span className="muted"> by {s.updatedBy}</span>}
+              </TableCell>
+            </TableRow>
+          ))}
+        </Table>
+      </section>
+      {!!suites.data?.length && (
+        <section className="block">
+          <Title level="H4">All scenarios together</Title>
+          <p className="muted section-intro">
+            Each time Run all was clicked, or a scan changed a step of this pipeline and its scenarios ran again on their own.
+          </p>
+          <Table
+            overflowMode="Popin"
+            onRowClick={(e) => navigate(`/scenario-suites/${e.detail.row.rowKey}`)}
+            headerRow={
+              <TableHeaderRow>
+                <TableHeaderCell minWidth="12rem" importance={1}>
+                  Asked for
+                </TableHeaderCell>
+                <TableHeaderCell minWidth="8rem">Why</TableHeaderCell>
+                <TableHeaderCell minWidth="8rem" importance={1}>
+                  Status
+                </TableHeaderCell>
+                <TableHeaderCell minWidth="10rem" horizontalAlign="End">
+                  Scenarios passed
+                </TableHeaderCell>
+              </TableHeaderRow>
+            }
+          >
+            {suites.data.map((s) => (
+              <TableRow key={s.id} rowKey={s.id} interactive>
+                <TableCell>{formatDateTime(s.requestedAt)}</TableCell>
+                <TableCell>{s.cause === "scan" ? "After a scan" : "Run all"}</TableCell>
+                <TableCell>
+                  <RunStatusTag status={s.status} />
+                </TableCell>
+                <TableCell horizontalAlign="End">{s.passed === null || s.total === null ? "–" : `${s.passed} of ${s.total}`}</TableCell>
+              </TableRow>
+            ))}
+          </Table>
+        </section>
+      )}
+    </>
   );
 }
 
@@ -904,6 +970,7 @@ function RunsSection({ scenarioId }: { scenarioId: string }) {
 export function ScenarioRunPage() {
   const { runId = "" } = useParams();
   const run = useScenarioRun(runId);
+  const navigate = useNavigate();
   useInTenant(run.data?.tenantId);
 
   if (run.isPending) return <Loading />;
@@ -929,6 +996,7 @@ export function ScenarioRunPage() {
               </span>
             )}
             {r.requestedBy && <span>Asked for by {r.requestedBy}</span>}
+            {r.suiteId && <Link onClick={() => navigate(`/scenario-suites/${r.suiteId}`)}>Ran with the pipeline&apos;s other scenarios</Link>}
           </span>
         }
       />
@@ -981,6 +1049,138 @@ export function ScenarioRunPage() {
           <StepsTable steps={r.steps} />
         </section>
       )}
+    </div>
+  );
+}
+
+const CHANGE: Record<ChangedStep["change"], string> = { definition: "Definition changed", added: "New in the pipeline", removed: "No longer in the pipeline" };
+
+/**
+ * A suite: every scenario of a pipeline run together, by hand (Run all) or
+ * after a scan that changed the pipeline, with what that scan changed, each
+ * run, and the alert it raised. Refreshes while it runs.
+ */
+export function ScenarioSuitePage() {
+  const { suiteId = "" } = useParams();
+  const suite = useScenarioSuite(suiteId);
+  const navigate = useNavigate();
+  useInTenant(suite.data?.tenantId);
+
+  if (suite.isPending) return <Loading />;
+  if (!suite.data) return <ErrorStrip error={suite.error} />;
+  const s = suite.data;
+  const busy = s.status === "queued" || s.status === "running";
+  const errors = s.runs.some((r) => r.error);
+
+  return (
+    <div className="page">
+      <PageHeader
+        crumbs={[
+          { label: "Pipelines", to: `/tenants/${s.tenantId}/pipelines` },
+          { label: s.pipelineName, to: `/pipelines/${s.pipelineId}/scenarios` },
+        ]}
+        title={`All scenarios, ${formatDateTime(s.requestedAt)}`}
+        subtitle={
+          <span className="facts">
+            <RunStatusTag status={s.status} />
+            {s.runs.length > 0 && s.status !== "queued" && (
+              <span>
+                {s.runs.filter((r) => r.status === "passed").length} of {counted(s.runs.length, "scenario")} passed
+              </span>
+            )}
+            {s.cause === "scan" ? (
+              <span>
+                After{" "}
+                {s.scanId ? <Link onClick={() => navigate(`/scans/${s.scanId}`)}>a scan</Link> : "a scan"} that changed the pipeline
+              </span>
+            ) : (
+              s.requestedBy && <span>Asked for by {s.requestedBy}</span>
+            )}
+          </span>
+        }
+      />
+      {s.error && (
+        <MessageStrip design="Negative" hideCloseButton className="block">
+          {s.error}
+        </MessageStrip>
+      )}
+      {s.alert && (
+        <MessageStrip design="Critical" hideCloseButton className="block wrap-anywhere">
+          <strong>{counted(s.alert.broken.length, "scenario")} that passed before {s.alert.broken.length === 1 ? "doesn't" : "don't"} now.</strong>{" "}
+          {emailDelivery(s.alert)} {teamsDelivery(s.alert.teams)}
+        </MessageStrip>
+      )}
+      {busy && (
+        <p className="muted">
+          The worker runs the scenarios one after the other, each on its own test rows, signing in to the database once. This page refreshes on its own.
+        </p>
+      )}
+      {s.changed.length > 0 && (
+        <section className="block">
+          <Title level="H4">What the scan changed</Title>
+          <Table
+            overflowMode="Popin"
+            headerRow={
+              <TableHeaderRow>
+                <TableHeaderCell minWidth={monoColumnWidth(s.changed.map((c) => c.technicalName))} importance={1}>
+                  Step
+                </TableHeaderCell>
+                <TableHeaderCell minWidth="8rem">Type</TableHeaderCell>
+                <TableHeaderCell minWidth="12rem" importance={1}>
+                  Change
+                </TableHeaderCell>
+              </TableHeaderRow>
+            }
+          >
+            {s.changed.map((c) => (
+              <TableRow key={refKey(c)} rowKey={refKey(c)}>
+                <TableCell>
+                  <span className="mono">{c.technicalName}</span>
+                </TableCell>
+                <TableCell>{typeLabel(c.type)}</TableCell>
+                <TableCell>{CHANGE[c.change]}</TableCell>
+              </TableRow>
+            ))}
+          </Table>
+        </section>
+      )}
+      <section className="block">
+        <Title level="H4">Scenarios</Title>
+        <Table
+          overflowMode="Popin"
+          noDataText="This suite has no scenarios."
+          onRowClick={(e) => navigate(`/scenario-runs/${e.detail.row.rowKey}`)}
+          headerRow={
+            <TableHeaderRow>
+              <TableHeaderCell minWidth="14rem" importance={1}>
+                Scenario
+              </TableHeaderCell>
+              <TableHeaderCell minWidth="8rem" importance={1}>
+                Status
+              </TableHeaderCell>
+              <TableHeaderCell minWidth="8rem" horizontalAlign="End">
+                Checks passed
+              </TableHeaderCell>
+              {errors && <TableHeaderCell minWidth="14rem">Why it couldn&apos;t run</TableHeaderCell>}
+            </TableHeaderRow>
+          }
+        >
+          {s.runs.map((r) => (
+            <TableRow key={r.id} rowKey={r.id} interactive>
+              <TableCell>{r.scenarioName}</TableCell>
+              <TableCell>
+                <RunStatusTag status={r.status} />
+              </TableCell>
+              <TableCell horizontalAlign="End">{r.total === null ? "–" : `${r.passed} of ${r.total}`}</TableCell>
+              {errors && (
+                <TableCell>
+                  <span className="wrap-anywhere">{r.error ?? ""}</span>
+                </TableCell>
+              )}
+            </TableRow>
+          ))}
+        </Table>
+      </section>
     </div>
   );
 }

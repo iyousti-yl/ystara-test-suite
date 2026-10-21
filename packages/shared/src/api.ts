@@ -1,4 +1,4 @@
-import type { SnapshotAlert } from "./alerts.js";
+import type { ScenarioAlert, SnapshotAlert } from "./alerts.js";
 import type { Measurability } from "./database-users.js";
 import type { DspEdge, DspObject, DspObjectRef, Pipeline } from "./objects.js";
 import type { Permission, Role } from "./roles.js";
@@ -117,6 +117,8 @@ export interface Scan {
   edgeCount: number | null;
   warnings: string[];
   error: string | null;
+  /** Started by the tenant's scan schedule rather than by a person. */
+  scheduled: boolean;
 }
 
 /**
@@ -319,6 +321,8 @@ export interface ScenarioRun extends ScenarioRunSummary {
   pipelineName: string;
   /** The scan whose definitions were compiled. */
   scanId: string | null;
+  /** The suite it ran in, when it ran with the pipeline's other scenarios. */
+  suiteId: string | null;
   /** The scenario as it was when the run was asked for. */
   spec: ScenarioSpec;
   startedAt: Date | null;
@@ -397,6 +401,69 @@ export interface ScenarioCompile {
   /** Each check in order, with why it can't run when it can't. */
   checks: { checkpoint: string; label: string; problem: string | null }[];
   steps: ScenarioStepNote[];
+}
+
+/** A step of a pipeline whose definition differs between two scans, or that only one of them has. */
+export interface ChangedStep extends DspObjectRef {
+  change: "definition" | "added" | "removed";
+}
+
+/**
+ * A suite (phase 3c): every scenario of a pipeline, run one after the other
+ * through one sign-in. Asked for with "Run all" ("manual"), or queued by the
+ * worker after a scan in which a step of the pipeline changed ("scan"); the
+ * pipeline's watchers get an alert when such a suite finds a scenario that
+ * passed before and doesn't now.
+ *
+ * Lifecycle as for a run: queued -> running -> passed (every run passed) |
+ * failed (a run failed or couldn't run) | error (the suite couldn't start).
+ */
+export type ScenarioSuiteCause = "manual" | "scan";
+
+/** A suite in a list. `passed` and `total` count runs, not checks. */
+export interface ScenarioSuiteSummary {
+  id: string;
+  pipelineId: string;
+  cause: ScenarioSuiteCause;
+  status: ScenarioRunStatus;
+  requestedAt: Date;
+  finishedAt: Date | null;
+  passed: number | null;
+  total: number | null;
+}
+
+/** One scenario's run in a suite. `passed` and `total` count its checks. */
+export interface SuiteRun extends ScenarioRunSummary {
+  scenarioId: string;
+  scenarioName: string;
+  error: string | null;
+}
+
+/** GET /api/scenario-suites/:id */
+export interface ScenarioSuite extends ScenarioSuiteSummary {
+  tenantId: string;
+  pipelineName: string;
+  /** The scan that queued it (cause "scan"). */
+  scanId: string | null;
+  /** The pipeline's steps that changed in that scan, against the scan its scenarios last ran on. */
+  changed: ChangedStep[];
+  startedAt: Date | null;
+  error: string | null;
+  requestedBy: string | null;
+  runs: SuiteRun[];
+  /** The alert it raised, if it found scenarios that broke (alerts.ts). */
+  alert: ScenarioAlert | null;
+}
+
+/**
+ * GET, PUT and DELETE /api/account/teams-channel: the Microsoft Teams channel
+ * the account's alerts are also posted in, through a webhook an admin made in
+ * Teams. The address itself is a secret and never comes back: only its host.
+ */
+export interface TeamsChannel {
+  host: string;
+  updatedAt: Date;
+  updatedBy: string | null;
 }
 
 /**

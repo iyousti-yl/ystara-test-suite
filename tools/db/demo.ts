@@ -5,21 +5,27 @@ import {
   createScan,
   createScenario,
   createScenarioRun,
+  createScenarioSuite,
   createSnapshot,
   createTenant,
   deleteTenant,
   finishScenarioRun,
+  finishScenarioSuite,
   finishSnapshot,
   findTenantByName,
   getScenarioRun,
+  getScenarioSuite,
   getSnapshot,
   saveScanResult,
+  saveScenarioAlert,
   getSnapshotDetails,
   saveSnapshotAlert,
   saveSnapshotObject,
   setSchedule,
   startScenarioRun,
+  startScenarioSuite,
   startSnapshot,
+  suiteRunIds,
   type Db,
 } from "@ystara/db";
 import {
@@ -32,6 +38,7 @@ import {
   type PipelineDefinition,
   type Scan,
   type ScenarioRun,
+  type ScenarioSuite,
   type Snapshot,
   type Tenant,
 } from "@ystara/shared";
@@ -61,6 +68,12 @@ import {
  * The run is made up too, since the tenant has no database to send its checks
  * to; what each check gave back is what a database gives for these rows
  * (checked on PostgreSQL), and the steps are compiled for real.
+ *
+ * Then a suite, as if a scan had changed the enrichment flow and its scenarios
+ * had run again on their own (the worker never queues one for this tenant,
+ * which has no database): the flow now counts the event in transit too, so
+ * the output's rows check fails and the suite raised an alert, which nobody
+ * got either.
  */
 /** "Synthetic" in the name keeps the tenant-content check from taking it for a real tenant's, as it does with the demo's object names. */
 export const DEMO_TENANT = "Synthetic demo";
@@ -192,6 +205,8 @@ export const DEMO_SCENARIO = ScenarioSpec.parse({
 });
 /** What each check of DEMO_SCENARIO gives back, in order. */
 const DEMO_SCENARIO_DETAILS = ["2 rows", "every value appears once", "1 row", "the 1 row expected"];
+/** And in the suite's run, where the output counts all three shipments: the runner's words for that (compareRows). */
+const DEMO_BROKEN_DETAIL = '1 different: routeSegmentId "R1": deliveredShipments 3, 2 expected';
 
 /** A made-up value hash: the snapshot stores min and max only as hashes. */
 const hash = (...parts: (string | number)[]) => createHash("sha256").update(parts.join("|")).digest("hex");
@@ -275,7 +290,7 @@ function measures(technicalName: string, version: 1 | 2): { rows: number; column
 export async function loadDemo(
   db: Db,
   accountId: string,
-): Promise<{ tenant: Tenant; scan: Scan; pipeline: PipelineDefinition; snapshots: Snapshot[]; scenarioRun: ScenarioRun }> {
+): Promise<{ tenant: Tenant; scan: Scan; pipeline: PipelineDefinition; snapshots: Snapshot[]; scenarioRun: ScenarioRun; suite: ScenarioSuite }> {
   if (await findTenantByName(db, accountId, DEMO_TENANT)) throw new Error(`The account already has the tenant "${DEMO_TENANT}". To load it again, delete it from its Home first.`);
   const tenant = await createTenant(db, { accountId, name: DEMO_TENANT, host: null });
   try {
@@ -324,7 +339,23 @@ export async function loadDemo(
       checks: plan.checks.map((check, i) => ({ checkpoint: check.checkpoint, label: check.label, status: "pass", detail: DEMO_SCENARIO_DETAILS[i] })),
     });
     const scenarioRun = (await getScenarioRun(db, run.id))!;
-    return { tenant, scan, pipeline, snapshots, scenarioRun };
+
+    const flow = steps.find((step) => step.technicalName === n.enrichFlow)!;
+    const changed = [{ space: flow.space, technicalName: flow.technicalName, type: flow.type, change: "definition" as const }];
+    const created = await createScenarioSuite(db, { tenantId: tenant.id, pipelineId: pipeline.id, cause: "scan", scanId: scan.id, changed, requestedBy: null });
+    await startScenarioSuite(db, created.id);
+    const [suiteRunId] = await suiteRunIds(db, created.id);
+    await startScenarioRun(db, suiteRunId, scan.id);
+    const checks = plan.checks.map((check, i) => {
+      const broken = i === plan.checks.length - 1;
+      return { checkpoint: check.checkpoint, label: check.label, status: broken ? ("fail" as const) : ("pass" as const), detail: broken ? DEMO_BROKEN_DETAIL : DEMO_SCENARIO_DETAILS[i] };
+    });
+    await finishScenarioRun(db, suiteRunId, { status: "failed", steps: stepNotes(plan.simulation), checks });
+    await finishScenarioSuite(db, created.id);
+    const failedChecks = checks.filter((c) => c.status === "fail").map((c) => c.label);
+    await saveScenarioAlert(db, created.id, { broken: [{ scenarioId: scenario.id, runId: suiteRunId, name: scenario.name, status: "failed", failedChecks }], status: "no_watchers" });
+    const suite = (await getScenarioSuite(db, created.id))!;
+    return { tenant, scan, pipeline, snapshots, scenarioRun, suite };
   } catch (e) {
     await deleteTenant(db, tenant.id);
     throw e;

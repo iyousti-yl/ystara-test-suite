@@ -27,6 +27,29 @@ export interface PipelineSchedule {
   updatedAt: Date;
 }
 
+/**
+ * Scans closer together than this are refused: each one lists and reads every
+ * object of the tenant's spaces through its technical client, which takes a
+ * while on a large tenant (a scan job may run up to 4 hours).
+ */
+export const MIN_MINUTES_BETWEEN_SCANS = 240;
+
+/** A tenant's scan schedule (migration 013): each run scans the spaces its technical client could read at its last check. */
+export interface TenantScanSchedule {
+  tenantId: string;
+  cron: string;
+  timeZone: string;
+  nextRunAt: Date;
+  updatedBy: string | null;
+  updatedAt: Date;
+}
+
+/** A number of minutes as a person says it: "15 minutes", "an hour", "4 hours". */
+export function describeMinutes(minutes: number): string {
+  if (minutes % 60) return `${minutes} minutes`;
+  return minutes === 60 ? "an hour" : `${minutes / 60} hours`;
+}
+
 export type ScheduleCheck = { ok: true; cron: string; next: Date[] } | { ok: false; error: string };
 
 export function isTimeZone(name: string): boolean {
@@ -41,9 +64,10 @@ export function isTimeZone(name: string): boolean {
 /**
  * Whether a cron line and time zone make a schedule Ystara runs, and if so the
  * cron line as stored (single spaces) and its next `count` runs after `from`.
- * The error is a sentence for the person who typed it.
+ * The error is a sentence for the person who typed it. `minMinutes`: how far
+ * apart runs must be (MIN_MINUTES_BETWEEN_SCANS for scans).
  */
-export function checkSchedule(cron: string, timeZone: string, from = new Date(), count = 5): ScheduleCheck {
+export function checkSchedule(cron: string, timeZone: string, from = new Date(), count = 5, minMinutes = MIN_MINUTES_BETWEEN_RUNS): ScheduleCheck {
   const fields = cron.trim().split(/\s+/).filter(Boolean);
   if (fields.length !== 5) {
     return { ok: false, error: 'A schedule has five fields: minute, hour, day of the month, month and weekday, as in "30 7 * * 1-5".' };
@@ -59,10 +83,10 @@ export function checkSchedule(cron: string, timeZone: string, from = new Date(),
   if (runs.length === 0) return { ok: false, error: "This schedule never runs: no date matches it." };
   // The next 50 runs show any pattern within a day or a week.
   for (let i = 1; i < runs.length; i++) {
-    if (runs[i].getTime() - runs[i - 1].getTime() < MIN_MINUTES_BETWEEN_RUNS * 60_000) {
+    if (runs[i].getTime() - runs[i - 1].getTime() < minMinutes * 60_000) {
       return {
         ok: false,
-        error: `Runs must be at least ${MIN_MINUTES_BETWEEN_RUNS} minutes apart, and this schedule runs at ${describeRun(runs[i - 1], timeZone)} and ${describeRun(runs[i], timeZone)}.`,
+        error: `Runs must be at least ${describeMinutes(minMinutes)} apart, and this schedule runs at ${describeRun(runs[i - 1], timeZone)} and ${describeRun(runs[i], timeZone)}.`,
       };
     }
   }

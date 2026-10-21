@@ -29,6 +29,16 @@ export const DEFAULT_ROW_DROP_PERCENT = 20;
 /** Whether an alert's email went out, and if not, why. */
 export type AlertStatus = "sending" | "sent" | "failed" | "no_watchers" | "no_mail_server";
 
+/**
+ * Whether an alert was also posted in the account's Microsoft Teams channel
+ * (migration 013); null when the account has no channel, or had none then.
+ */
+export interface TeamsDelivery {
+  status: "sending" | "sent" | "failed";
+  /** Why posting failed: what Teams answered, or that it couldn't be reached. */
+  error: string | null;
+}
+
 /** The alert raised by a scheduled snapshot (migration 009); none when nothing called for one. */
 export interface SnapshotAlert {
   reasons: AlertReason[];
@@ -40,6 +50,7 @@ export interface SnapshotAlert {
   /** Why sending failed (the mail server's answer). */
   error: string | null;
   sentAt: Date | null;
+  teams: TeamsDelivery | null;
 }
 
 /**
@@ -129,4 +140,69 @@ export function alertSubject(pipelineName: string, reasons: AlertReason[]): stri
     steps_changed: "Pipeline steps changed",
   };
   return `[Ystara] ${first ? what[first.kind] : "Snapshot"}: ${pipelineName}`;
+}
+
+/**
+ * Alerts on suites after a scan (decided by Issam, 2026-10-21): when a scan
+ * changes a step of a pipeline, its scenarios run again, and the watchers get
+ * an email when a scenario that passed its run before fails or can't run now,
+ * or one that never ran before doesn't pass. A scenario that was already
+ * failing raises no new alert. A suite someone started by hand raises none:
+ * they see its result.
+ *
+ * Only scenario names and check labels: a check's label repeats the scenario's
+ * own expected value, typed in by a person, never data read from the tenant.
+ */
+export interface BrokenScenario {
+  scenarioId: string;
+  runId: string;
+  name: string;
+  status: "failed" | "error";
+  /** The labels of the checks that didn't pass, as the run prints them (e.g. "row_count = 2"). */
+  failedChecks: string[];
+}
+
+/** The alert raised by a suite after a scan (migration 013). */
+export interface ScenarioAlert {
+  broken: BrokenScenario[];
+  status: AlertStatus;
+  recipients: number;
+  error: string | null;
+  sentAt: Date | null;
+  teams: TeamsDelivery | null;
+}
+
+/**
+ * The scenarios of a finished suite that broke: those whose run failed or
+ * couldn't run while their run before it passed, or that had no run before.
+ * `before`: each scenario's latest finished run before the suite, by scenario id.
+ */
+export function brokenScenarios(
+  runs: { id: string; scenarioId: string; scenarioName: string; status: string; checks: { label: string; status: string }[] | null }[],
+  before: Map<string, string>,
+): BrokenScenario[] {
+  return runs
+    .filter((r): r is typeof r & { status: "failed" | "error" } => r.status === "failed" || r.status === "error")
+    .filter((r) => (before.get(r.scenarioId) ?? "passed") === "passed")
+    .map((r) => ({
+      scenarioId: r.scenarioId,
+      runId: r.id,
+      name: r.scenarioName,
+      status: r.status,
+      failedChecks: (r.checks ?? []).filter((c) => c.status !== "pass").map((c) => c.label),
+    }));
+}
+
+/** A broken scenario as one sentence, for the email, Teams and the suite page. */
+export function describeBrokenScenario(b: BrokenScenario): string {
+  if (b.status === "error") return `"${b.name}" couldn't run.`;
+  const shown = b.failedChecks.slice(0, 5);
+  const more = b.failedChecks.length - shown.length;
+  const checks = shown.length ? `: ${shown.join("; ")}${more > 0 ? `; and ${more} more` : ""}` : "";
+  return `"${b.name}" failed ${b.failedChecks.length === 1 ? "a check" : `${b.failedChecks.length} checks`}${checks}.`;
+}
+
+/** A subject line naming how many scenarios broke. */
+export function scenarioAlertSubject(pipelineName: string, broken: BrokenScenario[]): string {
+  return `[Ystara] ${broken.length === 1 ? "A scenario broke" : `${broken.length} scenarios broke`}: ${pipelineName}`;
 }

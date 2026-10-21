@@ -4,15 +4,18 @@ import { buildPipeline, pipelineLogic, planScenario, scenarioInputs, stepNotes }
 import {
   createScenario,
   createScenarioRun,
+  createScenarioSuite,
   deleteScenario,
   getPipeline,
   getScenario,
   getScenarioRun,
+  getScenarioSuite,
   getTenant,
   latestSucceededScan,
   listDatabaseUsers,
   listScenarioRuns,
   listScenarios,
+  listScenarioSuites,
   loadGraph,
   ScenarioNameTaken,
   updateScenario,
@@ -31,6 +34,7 @@ import {
   type ScenarioDrafted,
   type ScenarioInputs,
   type ScenarioRunJobData,
+  type ScenarioSuiteJobData,
   type Scan,
 } from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
@@ -47,8 +51,10 @@ import type { JobQueue } from "../server.js";
  * ("runs.execute") queues a job, and the worker sends each check as a SELECT
  * that reads only the scenario's rows. Drafting one from its description
  * ("scenarios.write_visual") sends the pipeline's definitions to Claude when
- * the server has an Anthropic API key (drafting.ts, operator.ts). As everywhere, another
- * account's pipeline, scenario or run answers 404.
+ * the server has an Anthropic API key (drafting.ts, operator.ts). "Run all"
+ * ("runs.execute") queues a suite of every scenario of the pipeline, which the
+ * worker also queues on its own after a scan that changed the pipeline. As
+ * everywhere, another account's pipeline, scenario, run or suite answers 404.
  */
 const id = z.object({ id: z.string().uuid() });
 /** A scenario as the builder sends it: the pipeline comes from the saved pipeline, never from the body. */
@@ -241,6 +247,35 @@ export function scenarioRoutes(db: Db, queue: JobQueue, drafter: ScenarioDrafter
       const run = await getScenarioRun(db, id.parse(req.params).id);
       if (!run || !(await ownPipeline(req, run.pipelineId))) return reply.code(404).send({ error: "Run not found" });
       return run;
+    });
+
+    // Run every scenario of the pipeline, one after the other. Refused (409) when it has none, when the
+    // tenant has no database user to run them with, or when the pipeline isn't in the latest scan. A
+    // scenario with problems doesn't stop the others: its own run is an error, saying why.
+    app.post("/pipelines/:id/scenario-suites", { config: { access: "runs.execute" } }, async (req, reply) => {
+      const pipeline = await ownPipeline(req, id.parse(req.params).id);
+      if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
+      if (!(await listScenarios(db, pipeline.id)).length) return reply.code(409).send({ error: "This pipeline has no scenarios yet" });
+      const tenant = (await getTenant(db, pipeline.tenantId))!;
+      const why = whyNoScenarioRun(await listDatabaseUsers(db, tenant.id), tenant.host !== null);
+      if (why) return reply.code(409).send({ error: why });
+      const b = await built(pipeline);
+      if ("error" in b) return reply.code(409).send({ error: b.error });
+      const suite = await createScenarioSuite(db, { tenantId: tenant.id, pipelineId: pipeline.id, cause: "manual", requestedBy: signedIn(req).userId });
+      await queue.send(JOBS.scenarioSuite, { suiteId: suite.id } satisfies ScenarioSuiteJobData);
+      return reply.code(202).send(suite);
+    });
+
+    app.get("/pipelines/:id/scenario-suites", { config: { access: "runs.read" } }, async (req, reply) => {
+      const pipeline = await ownPipeline(req, id.parse(req.params).id);
+      if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
+      return listScenarioSuites(db, pipeline.id);
+    });
+
+    app.get("/scenario-suites/:id", { config: { access: "runs.read" } }, async (req, reply) => {
+      const suite = await getScenarioSuite(db, id.parse(req.params).id);
+      if (!suite || !(await ownPipeline(req, suite.pipelineId))) return reply.code(404).send({ error: "Suite not found" });
+      return suite;
     });
   };
 }

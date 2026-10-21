@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import PgBoss from "pg-boss";
 import { ZodError } from "zod";
 import { assertYstaraDatabase, connect, databaseUrl, type Db } from "@ystara/db";
-import { ROLES } from "@ystara/shared";
+import { postToTeams, ROLES, type PostToTeams } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 import { masterKeyFromEnv, secretBox, type SecretBox } from "@ystara/shared/secrets";
 import { installAccess } from "./auth/access.js";
@@ -21,6 +21,7 @@ import { operatorRoutes } from "./routes/operator.js";
 import { scenarioRoutes } from "./routes/scenarios.js";
 import { snapshotRoutes } from "./routes/snapshots.js";
 import { teamRoutes } from "./routes/team.js";
+import { teamsRoutes } from "./routes/teams.js";
 
 /**
  * API entry point. Every route is under /api; anything else is the web app
@@ -90,10 +91,11 @@ const requestForLog = (req: FastifyRequest) => ({
 
 /**
  * `claude` says where drafting with Claude gets its key (by default only the
- * operator's, from the database); `drafter` replaces the drafting itself in tests.
+ * operator's, from the database); `drafter` replaces the drafting itself in tests,
+ * and `teams` the posts to Microsoft Teams.
  */
 export async function buildServer(
-  deps: { db: Db; queue: JobQueue; secrets: SecretBox; claude?: ClaudeAccess; drafter?: ScenarioDrafter },
+  deps: { db: Db; queue: JobQueue; secrets: SecretBox; claude?: ClaudeAccess; drafter?: ScenarioDrafter; teams?: PostToTeams },
   opts: ServerOptions = {},
 ) {
   const claude = deps.claude ?? { check: checkClaudeKey };
@@ -146,6 +148,7 @@ export async function buildServer(
       await api.register(databaseUserRoutes(deps.db, deps.queue, deps.secrets));
       await api.register(snapshotRoutes(deps.db, deps.queue));
       await api.register(scenarioRoutes(deps.db, deps.queue, drafter));
+      await api.register(teamsRoutes(deps.db, deps.secrets, deps.teams ?? postToTeams));
     },
     { prefix: "/api" },
   );

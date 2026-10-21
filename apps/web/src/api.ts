@@ -25,6 +25,8 @@ import type {
   ScenarioRun,
   ScenarioRunSummary,
   ScenarioSpec,
+  ScenarioSuite,
+  ScenarioSuiteSummary,
   Snapshot,
   SnapshotComparison,
   SnapshotDetails,
@@ -33,7 +35,9 @@ import type {
   StoredScenario,
   Team,
   Tenant,
+  TeamsChannel,
   TenantConnection,
+  TenantScanSchedule,
   UserOverview,
   WatchState,
 } from "@ystara/shared";
@@ -64,6 +68,10 @@ export type ScheduleJson = Json<PipelineSchedule>;
 export type ScenarioJson = Json<StoredScenario>;
 export type ScenarioRunJson = Json<ScenarioRun>;
 export type ScenarioRunSummaryJson = Json<ScenarioRunSummary>;
+export type ScenarioSuiteJson = Json<ScenarioSuite>;
+export type ScenarioSuiteSummaryJson = Json<ScenarioSuiteSummary>;
+export type ScanScheduleJson = Json<TenantScanSchedule>;
+export type TeamsChannelJson = Json<TeamsChannel>;
 /** A scenario as the builder sends it: the API adds the pipeline and the version. */
 export type ScenarioDraft = Omit<ScenarioSpec, "pipeline" | "version">;
 
@@ -346,6 +354,35 @@ export function useStartScan(tenantId: string) {
   });
 }
 
+// --- Scan schedules
+
+const scanScheduleKey = (tenantId: string) => ["tenants", tenantId, "scan-schedule"];
+
+/** The tenant's scan schedule, or null. Refetched every minute while there is one, as its next run moves on. */
+export const useScanSchedule = (tenantId: string) =>
+  useQuery({
+    queryKey: scanScheduleKey(tenantId),
+    queryFn: async () => (await request<{ schedule: ScanScheduleJson | null }>("GET", `/tenants/${tenantId}/scan-schedule`)).schedule,
+    refetchInterval: (q) => (q.state.data ? 60_000 : false),
+  });
+
+export function useSetScanSchedule(tenantId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { cron: string; timeZone: string }) =>
+      (await request<{ schedule: ScanScheduleJson }>("PUT", `/tenants/${tenantId}/scan-schedule`, input)).schedule,
+    onSuccess: (schedule) => client.setQueryData(scanScheduleKey(tenantId), schedule),
+  });
+}
+
+export function useRemoveScanSchedule(tenantId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => request<void>("DELETE", `/tenants/${tenantId}/scan-schedule`),
+    onSuccess: () => client.setQueryData(scanScheduleKey(tenantId), null),
+  });
+}
+
 /** Only asked for once the scan has succeeded; a stored graph never changes, so it is never refetched. */
 export const useScanGraph = (id: string, ready: boolean) =>
   useQuery({ queryKey: ["scans", id, "graph"], queryFn: () => request<ScanGraph>("GET", `/scans/${id}/graph`), enabled: ready, staleTime: Infinity });
@@ -576,3 +613,59 @@ export const useScenarioRun = (id: string) =>
     queryFn: () => request<ScenarioRunJson>("GET", `/scenario-runs/${id}`),
     refetchInterval: (q) => pollWhile(q.state.data ? runActive(q.state.data.status) : false),
   });
+
+// --- Suites: all of a pipeline's scenarios at once
+
+const suitesKey = (pipelineId: string) => ["pipelines", pipelineId, "scenario-suites"];
+
+/** A pipeline's suites, newest first. Refetches every few seconds while one is queued or running. */
+export const useScenarioSuites = (pipelineId: string) =>
+  useQuery({
+    queryKey: suitesKey(pipelineId),
+    queryFn: () => request<ScenarioSuiteSummaryJson[]>("GET", `/pipelines/${pipelineId}/scenario-suites`),
+    refetchInterval: (q) => pollWhile(q.state.data?.some((s) => runActive(s.status)) ?? false),
+  });
+
+export const useScenarioSuite = (id: string) =>
+  useQuery({
+    queryKey: ["scenario-suites", id],
+    queryFn: () => request<ScenarioSuiteJson>("GET", `/scenario-suites/${id}`),
+    refetchInterval: (q) => pollWhile(q.state.data ? runActive(q.state.data.status) : false),
+  });
+
+export function useRunAllScenarios(pipelineId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => request<ScenarioSuiteJson>("POST", `/pipelines/${pipelineId}/scenario-suites`),
+    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: suitesKey(pipelineId) }), client.invalidateQueries({ queryKey: scenariosKey(pipelineId) })]),
+  });
+}
+
+// --- The account's Teams channel (admins)
+
+const TEAMS = ["account", "teams-channel"];
+
+export const useTeamsChannel = (allowed: boolean) =>
+  useQuery({
+    queryKey: TEAMS,
+    queryFn: async () => (await request<{ channel: TeamsChannelJson | null }>("GET", "/account/teams-channel")).channel,
+    enabled: allowed,
+  });
+
+export function useSetTeamsChannel() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (url: string) => (await request<{ channel: TeamsChannelJson }>("PUT", "/account/teams-channel", { url })).channel,
+    onSuccess: (channel) => client.setQueryData(TEAMS, channel),
+  });
+}
+
+export const useTestTeamsChannel = () => useMutation({ mutationFn: () => request<void>("POST", "/account/teams-channel/test") });
+
+export function useRemoveTeamsChannel() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => request<void>("DELETE", "/account/teams-channel"),
+    onSuccess: () => client.setQueryData(TEAMS, null),
+  });
+}

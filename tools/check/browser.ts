@@ -43,7 +43,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { connect, createSession, databaseUrl, deleteSession, findUserByEmail, listUserOverviews, membershipsOf } from "@ystara/db";
-import type { PipelineDefinition, Scan, ScenarioRunSummary, Snapshot, StoredScenario, Tenant } from "@ystara/shared";
+import type { PipelineDefinition, Scan, ScenarioRunSummary, ScenarioSuiteSummary, Snapshot, StoredScenario, Tenant } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -354,9 +354,12 @@ async function discoverPages(cookie: string, who: { role: string; operator: bool
         const [run] = await get<ScenarioRunSummary[]>(`/scenarios/${scenario.id}/runs`);
         if (run) add("scenario-run", `/scenario-runs/${run.id}`);
       }
+      const [suite] = await get<ScenarioSuiteSummary[]>(`/pipelines/${pipeline.id}/scenario-suites`);
+      if (suite) add("scenario-suite", `/scenario-suites/${suite.id}`);
     }
   }
   if (who.role === "admin") pages.push({ label: "users", path: "/users", signedIn: true });
+  if (who.role === "admin") pages.push({ label: "alerts", path: "/alerts", signedIn: true });
   if (who.operator) pages.push({ label: "operator", path: "/operator", signedIn: true });
   return pages;
 }

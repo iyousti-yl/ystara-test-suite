@@ -9,3 +9,4 @@ export * from "./database-users.js";
 export * from "./compare.js";
 export * from "./schedule.js";
 export * from "./alerts.js";
+export * from "./teams.js";

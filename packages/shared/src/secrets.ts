@@ -31,6 +31,9 @@ export const databaseUserSecretContext = (tenantId: string, space: string) => `d
 /** The context a secret of the server itself (an operator's setting, such as the Anthropic API key) is sealed and opened with. */
 export const serverSecretContext = (name: string) => `server-secret:${name}`;
 
+/** The context an account's Microsoft Teams webhook address is sealed and opened with: anyone who has the address can post in the channel. */
+export const teamsChannelSecretContext = (accountId: string) => `teams-channel:${accountId}`;
+
 /** The context a tenant's snapshot salt (the secret mixed into every hashed min, max and small sum) is sealed and opened with. */
 export const snapshotSaltContext = (tenantId: string) => `snapshot-salt:${tenantId}`;
 

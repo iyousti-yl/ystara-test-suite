@@ -225,3 +225,39 @@ describe("scenarios", () => {
     expect(sent).toEqual([]);
   });
 });
+
+describe("running all of a pipeline's scenarios", () => {
+  it("queues a suite with a run of each scenario, which those who may run them start and everyone reads", async () => {
+    const pipeline = await pipelineOf("Run all", true);
+    expect((await call("POST", `/pipelines/${pipeline.id}/scenario-suites`, coordinator)).json()).toEqual({ error: "This pipeline has no scenarios yet" });
+    for (const name of ["Open rows", "Closed rows"]) expect((await call("POST", `/pipelines/${pipeline.id}/scenarios`, coordinator, draft(name))).statusCode).toBe(201);
+
+    sent.length = 0;
+    const res = await call("POST", `/pipelines/${pipeline.id}/scenario-suites`, coordinator);
+    expect(res.statusCode).toBe(202);
+    const suite = res.json();
+    expect(suite).toMatchObject({ cause: "manual", status: "queued", total: 2, requestedBy: "coordinator@customer.example.com", changed: [], alert: null });
+    expect(suite.runs.map((r: { scenarioName: string; status: string }) => [r.scenarioName, r.status])).toEqual([
+      ["Closed rows", "queued"],
+      ["Open rows", "queued"],
+    ]);
+    expect(sent).toEqual([{ name: JOBS.scenarioSuite, data: { suiteId: suite.id } }]);
+
+    expect((await call("GET", `/pipelines/${pipeline.id}/scenario-suites`, viewer)).json()).toEqual([expect.objectContaining({ id: suite.id, cause: "manual", total: 2 })]);
+    expect((await call("GET", `/scenario-suites/${suite.id}`, viewer)).json()).toMatchObject({ id: suite.id, pipelineName: "Run all" });
+    // Each run says which suite it ran in.
+    expect((await call("GET", `/scenario-runs/${suite.runs[0].id}`, viewer)).json()).toMatchObject({ suiteId: suite.id });
+
+    expect((await call("POST", `/pipelines/${pipeline.id}/scenario-suites`, viewer)).statusCode).toBe(403);
+    expect((await call("GET", `/scenario-suites/${suite.id}`, stranger)).statusCode).toBe(404);
+    expect((await call("POST", `/pipelines/${pipeline.id}/scenario-suites`, stranger)).statusCode).toBe(404);
+  });
+
+  it("is refused without a database user to run the checks with", async () => {
+    const pipeline = await pipelineOf("Run all without a user");
+    await call("POST", `/pipelines/${pipeline.id}/scenarios`, coordinator, draft("Open rows"));
+    const res = await call("POST", `/pipelines/${pipeline.id}/scenario-suites`, coordinator);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/^A scenario runs its checks through a database user/);
+  });
+});

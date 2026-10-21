@@ -3,6 +3,7 @@ import { createBrowserRouter, isRouteErrorResponse, Navigate, Outlet, useLocatio
 import { isUnauthorized, useMe, useTenants } from "./api";
 import { AppFrame } from "./components/AppFrame";
 import { ErrorStrip, Loading } from "./components/Feedback";
+import { AlertsPage } from "./pages/AlertsPage";
 import { ComparePage } from "./pages/ComparePage";
 import { DiscoveryPage } from "./pages/DiscoveryPage";
 import { InvitePage } from "./pages/InvitePage";
@@ -11,7 +12,7 @@ import { PipelineOnScanPage, SavedPipelinePage } from "./pages/PipelinePages";
 import { PipelinesPage } from "./pages/PipelinesPage";
 import { ResetPage } from "./pages/ResetPage";
 import { ScanPage } from "./pages/ScanPage";
-import { ScenarioPage, ScenarioRunPage } from "./pages/Scenarios";
+import { ScenarioPage, ScenarioRunPage, ScenarioSuitePage } from "./pages/Scenarios";
 import { SignInPage } from "./pages/SignInPage";
 import { SnapshotPage } from "./pages/Snapshots";
 import { DatabaseUsersPage } from "./pages/DatabaseUsers";
@@ -27,7 +28,7 @@ import { TenantScopeProvider, useTenantScope } from "./tenantScope";
  * Everything under Layout needs a signed-in user; sign-in, invitation and
  * reset links work without one. The tenant apps live under /tenants/:tenantId,
  * so a link opens on its tenant; scans, pipelines, snapshots, scenarios and
- * their runs keep their own addresses and pick their tenant themselves.
+ * their runs and suites keep their own addresses and pick their tenant themselves.
  */
 export const router = createBrowserRouter([
   { path: "/sign-in", element: <SignInPage /> },
@@ -54,8 +55,10 @@ export const router = createBrowserRouter([
       { path: "pipelines/:pipelineId/compare", element: <ComparePage /> },
       { path: "scenarios/:scenarioId", element: <ScenarioPage /> },
       { path: "scenario-runs/:runId", element: <ScenarioRunPage /> },
+      { path: "scenario-suites/:suiteId", element: <ScenarioSuitePage /> },
       { path: "snapshots/:snapshotId", element: <SnapshotPage /> },
       { path: "users", element: <UsersPage /> },
+      { path: "alerts", element: <AlertsPage /> },
       { path: "operator", element: <OperatorPage /> },
       { path: "*", element: <NotFound /> },
     ],
