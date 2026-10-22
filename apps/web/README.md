@@ -16,7 +16,9 @@ The app only ever calls `/api` on its own origin and loads nothing from other se
 | `/sign-in` | Email and password, then the code from the authenticator app | `src/pages/SignInPage.tsx` |
 | `/invite/:token` | An invitation link: choose a password and set up the authenticator app, or join with an existing sign-in | `src/pages/InvitePage.tsx` |
 | `/reset/:token` | A reset link from the operator: choose a new password and set up the authenticator app again | `src/pages/ResetPage.tsx` |
-| `/users` | Users and roles (admins): members, roles, open invitations, invite someone | `src/pages/UsersPage.tsx` |
+| `/users` | Users and roles (admins): members with their role and spaces, open invitations, invite someone (a role other than admin can be limited to some spaces) | `src/pages/UsersPage.tsx` |
+| `/alerts` | Alerts (admins): the account's Teams channel | `src/pages/AlertsPage.tsx` |
+| `/audit` | Audit log (admins): every change and sign-in in the account, filtered by person, kind and days, and as CSV | `src/pages/AuditPage.tsx` |
 | `/operator` | The operator panel (operators only): every account and user, create an account, invite a new admin, reset someone's sign-in | `src/pages/OperatorPage.tsx` |
 | `/` | Opens Home of the tenant picked last in this browser, or of the first tenant; Tenants when there is none | `src/App.tsx` |
 | `/tenants` | Tenants (menu, bottom): every tenant of the account; add one by its Datasphere URL, then its Connect wizard opens | `src/pages/TenantsPage.tsx` |
@@ -31,6 +33,10 @@ The app only ever calls `/api` on its own origin and loads nothing from other se
 | `/pipelines/:id/snapshots` | Its Snapshots tab: the schedule, the snapshots, and Compare | `src/pages/PipelinePages.tsx`, `src/pages/Schedule.tsx`, `src/pages/Snapshots.tsx` |
 | `/pipelines/:id/compare?from=&to=` | Two snapshots compared, the latest two by default | `src/pages/ComparePage.tsx` |
 | `/snapshots/:id` | One snapshot: the measures of each step | `src/pages/Snapshots.tsx` |
+| `/pipelines/:id/scenarios`, `/pipelines/:id/scenarios/new`, `/scenarios/:id` | Its Scenarios tab, Run all, and the builder | `src/pages/PipelinePages.tsx`, `src/pages/Scenarios.tsx` |
+| `/scenario-runs/:id`, `/scenario-suites/:id` | One scenario's run, and one run of all of a pipeline's scenarios | `src/pages/Scenarios.tsx` |
+| `/pipelines/:id/history` | Its History tab: the sign-off (Sign off for test coordinators and admins), two charts (scenarios passing per suite, output rows per snapshot) and the timeline, as CSV too | `src/pages/History.tsx`, `src/components/Charts.tsx` |
+| `/pipelines/:id/report` | The pipeline's report, without the app's menu, to print or save as PDF | `src/pages/ReportPage.tsx` |
 
 Every page works as a link: the API answers these paths with `index.html` and `src/App.tsx` picks the page. Every page except sign-in, invitation and reset links needs a signed-in user: `App.tsx` sends anyone else to `/sign-in?next=<the page>` and back after signing in. The user menu (top right) shows the account and role, switches accounts and signs out.
 

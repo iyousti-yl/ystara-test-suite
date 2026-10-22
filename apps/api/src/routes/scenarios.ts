@@ -7,7 +7,6 @@ import {
   createScenarioSuite,
   deleteScenario,
   getPipeline,
-  getScenario,
   getScenarioRun,
   getScenarioSuite,
   getTenant,
@@ -38,6 +37,7 @@ import {
   type Scan,
 } from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
+import { scope } from "../scope.js";
 import { DraftFailed, type ScenarioDrafter } from "../drafting.js";
 import type { JobQueue } from "../server.js";
 
@@ -81,17 +81,8 @@ export function scenarioRoutes(db: Db, queue: JobQueue, drafter: ScenarioDrafter
     return graph;
   };
 
-  /** The pipeline, when its tenant belongs to the signed-in account. */
-  async function ownPipeline(req: FastifyRequest, pipelineId: string) {
-    const pipeline = await getPipeline(db, pipelineId);
-    if (!pipeline) return undefined;
-    const tenant = await getTenant(db, pipeline.tenantId);
-    return tenant?.accountId === signedIn(req).accountId ? pipeline : undefined;
-  }
-  async function ownScenario(req: FastifyRequest, scenarioId: string) {
-    const scenario = await getScenario(db, scenarioId);
-    return scenario && (await ownPipeline(req, scenario.pipelineId)) ? scenario : undefined;
-  }
+  // The pipeline or scenario, when the signed-in user may reach it (scope.ts).
+  const { pipeline: ownPipeline, scenario: ownScenario } = scope(db);
 
   /** The pipeline built on the tenant's latest successful scan, or why it can't be (409). */
   async function built(pipeline: PipelineDefinition): Promise<{ scan: Scan; graph: LineageGraph; steps: Pipeline } | { error: string }> {

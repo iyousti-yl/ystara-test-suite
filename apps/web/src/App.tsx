@@ -4,12 +4,14 @@ import { isUnauthorized, useMe, useTenants } from "./api";
 import { AppFrame } from "./components/AppFrame";
 import { ErrorStrip, Loading } from "./components/Feedback";
 import { AlertsPage } from "./pages/AlertsPage";
+import { AuditPage } from "./pages/AuditPage";
 import { ComparePage } from "./pages/ComparePage";
 import { DiscoveryPage } from "./pages/DiscoveryPage";
 import { InvitePage } from "./pages/InvitePage";
 import { OperatorPage } from "./pages/OperatorPage";
 import { PipelineOnScanPage, SavedPipelinePage } from "./pages/PipelinePages";
 import { PipelinesPage } from "./pages/PipelinesPage";
+import { ReportPage } from "./pages/ReportPage";
 import { ResetPage } from "./pages/ResetPage";
 import { ScanPage } from "./pages/ScanPage";
 import { ScenarioPage, ScenarioRunPage, ScenarioSuitePage } from "./pages/Scenarios";
@@ -26,7 +28,7 @@ import { TenantScopeProvider, useTenantScope } from "./tenantScope";
  * The pages and their URLs. Every page can be opened by its link: the API
  * answers these paths with index.html and the router picks the page.
  * Everything under Layout needs a signed-in user; sign-in, invitation and
- * reset links work without one. The tenant apps live under /tenants/:tenantId,
+ * reset links work without one, and a pipeline's report has no frame. The tenant apps live under /tenants/:tenantId,
  * so a link opens on its tenant; scans, pipelines, snapshots, scenarios and
  * their runs and suites keep their own addresses and pick their tenant themselves.
  */
@@ -34,6 +36,8 @@ export const router = createBrowserRouter([
   { path: "/sign-in", element: <SignInPage /> },
   { path: "/invite/:token", element: <InvitePage /> },
   { path: "/reset/:token", element: <ResetPage /> },
+  // Without the app's frame, so that it prints as a report; it checks the sign-in itself.
+  { path: "/pipelines/:pipelineId/report", element: <ReportPage /> },
   {
     path: "/",
     element: <Layout />,
@@ -51,6 +55,7 @@ export const router = createBrowserRouter([
       { path: "pipelines/:pipelineId", element: <SavedPipelinePage tab="lineage" /> },
       { path: "pipelines/:pipelineId/snapshots", element: <SavedPipelinePage tab="snapshots" /> },
       { path: "pipelines/:pipelineId/scenarios", element: <SavedPipelinePage tab="scenarios" /> },
+      { path: "pipelines/:pipelineId/history", element: <SavedPipelinePage tab="history" /> },
       { path: "pipelines/:pipelineId/scenarios/new", element: <ScenarioPage /> },
       { path: "pipelines/:pipelineId/compare", element: <ComparePage /> },
       { path: "scenarios/:scenarioId", element: <ScenarioPage /> },
@@ -59,6 +64,7 @@ export const router = createBrowserRouter([
       { path: "snapshots/:snapshotId", element: <SnapshotPage /> },
       { path: "users", element: <UsersPage /> },
       { path: "alerts", element: <AlertsPage /> },
+      { path: "audit", element: <AuditPage /> },
       { path: "operator", element: <OperatorPage /> },
       { path: "*", element: <NotFound /> },
     ],

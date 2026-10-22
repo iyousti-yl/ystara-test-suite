@@ -13,19 +13,19 @@ function pipeline(columns: number[][]): { nodes: Box[]; output: Box } {
 
 const onCanvas = (b: Box, v: Viewport) => ({ left: v.x + b.x * v.zoom, right: v.x + (b.x + b.width) * v.zoom });
 
-// Eight columns of 240px nodes: about 2.5 times the width of a 1000px canvas.
+// Eight columns of 240px nodes, 2480px wide in all: at 78% on a 2000px canvas.
 const eight = pipeline([[240, 240], [240], [240, 240, 240], [240], [240, 240], [240], [240], [240]]);
 
 describe("opening view", () => {
 
   it("shows the whole pipeline when it fits at MIN_FIT_ZOOM or more", () => {
-    const v = openingViewport(eight.nodes, eight.output, { width: 1200, height: 700 });
+    const v = openingViewport(eight.nodes, eight.output, { width: 2000, height: 700 });
     expect(v.zoom).toBeGreaterThanOrEqual(MIN_FIT_ZOOM);
     expect(v.zoom).toBeLessThan(READABLE_ZOOM);
     for (const n of eight.nodes) {
       const { left, right } = onCanvas(n, v);
       expect(left).toBeGreaterThanOrEqual(0);
-      expect(right).toBeLessThanOrEqual(1200);
+      expect(right).toBeLessThanOrEqual(2000);
     }
   });
 

@@ -79,10 +79,10 @@ import { useInTenant } from "../tenantScope";
  * and Claude can draft the rows and checks from the description (phase 3c).
  */
 
-const KINDS: { kind: ScenarioSpec["kind"]; label: string }[] = [
-  { kind: "golden", label: "Golden: the normal case, with known results" },
-  { kind: "common", label: "Common: a frequent variation" },
-  { kind: "outlying", label: "Outlying: an edge case" },
+const KINDS: { kind: ScenarioSpec["kind"]; label: string; hint: string }[] = [
+  { kind: "golden", label: "Golden", hint: "The normal case, with known results." },
+  { kind: "common", label: "Common", hint: "A frequent variation." },
+  { kind: "outlying", label: "Outlying", hint: "An edge case." },
 ];
 const kindLabel = (kind: string) => kind[0].toUpperCase() + kind.slice(1);
 
@@ -609,11 +609,12 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
           <Label for="scenario-kind">Kind</Label>
           <Select id="scenario-kind" readonly={!editable} onChange={(e) => setKind(e.detail.selectedOption.value as ScenarioSpec["kind"])}>
             {KINDS.map((k) => (
-              <Option key={k.kind} value={k.kind} selected={k.kind === kind}>
+              <Option key={k.kind} value={k.kind} selected={k.kind === kind} additionalText={k.hint}>
                 {k.label}
               </Option>
             ))}
           </Select>
+          <span className="muted">{KINDS.find((k) => k.kind === kind)?.hint}</span>
         </div>
         <div className="scenario-field scenario-field-wide">
           <Label for="scenario-description">Description</Label>
@@ -820,7 +821,15 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
             {dirty && editable ? (
               <Tag design="Critical">{saved ? "Unsaved changes" : "Not saved yet"}</Tag>
             ) : (
-              <span className="muted">{saved ? `Saved ${formatDateTime(saved.updatedAt)}${saved.updatedBy ? ` by ${saved.updatedBy}` : ""}` : "Not saved yet"}</span>
+              <span className="muted">
+                {saved ? (
+                  <>
+                    Saved<span className="action-bar-detail">{` ${formatDateTime(saved.updatedAt)}${saved.updatedBy ? ` by ${saved.updatedBy}` : ""}`}</span>
+                  </>
+                ) : (
+                  "Not saved yet"
+                )}
+              </span>
             )}
           </span>
           {saved && can("runs.execute") && (

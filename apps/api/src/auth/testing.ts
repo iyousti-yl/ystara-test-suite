@@ -23,10 +23,13 @@ export interface TestUser {
   cookie: string;
 }
 
-/** A user with `role` in `account` (both created when missing), signed in there; Ystara's operator when asked. */
-export async function testUser(db: Db, input: { account: string; email: string; role: Role; operator?: boolean }): Promise<TestUser> {
+/** A user with `role` in `account` (both created when missing), signed in there, limited to `spaces` when given; Ystara's operator when asked. */
+export async function testUser(
+  db: Db,
+  input: { account: string; email: string; role: Role; spaces?: string[] | null; operator?: boolean },
+): Promise<TestUser> {
   const account = (await findAccountByName(db, input.account)) ?? (await createAccount(db, input.account));
-  const { token } = await createInvitation(db, { accountId: account.id, email: input.email, role: input.role });
+  const { token } = await createInvitation(db, { accountId: account.id, email: input.email, role: input.role, spaces: input.spaces ?? null });
   const existing = await findUserByEmail(db, input.email);
   const totpSecret = existing ? testSecrets.open(existing.totpSecret) : newTotpSecret();
   const joined = await acceptInvitation(

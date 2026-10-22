@@ -14,3 +14,5 @@ export * from "./alerts.js";
 export * from "./scenarios.js";
 export * from "./server-secrets.js";
 export * from "./suites.js";
+export * from "./audit.js";
+export * from "./history.js";

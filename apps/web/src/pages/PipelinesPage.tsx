@@ -5,6 +5,7 @@ import { monoColumnWidth } from "../columns";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
+import { SpacesNote } from "../components/SpacesPicker";
 import { useAddressTenant } from "../tenantScope";
 
 /** Pipelines: the tenant's saved pipelines. One opens on its lineage, with its snapshots in the next tab. */
@@ -18,7 +19,8 @@ export function PipelinesPage() {
 
   return (
     <div className="page">
-      <PageHeader title="Pipelines" subtitle="Saved pipelines, worked out again from each new scan. Open one for its lineage and its snapshots." />
+      <PageHeader title="Pipelines" subtitle="Saved pipelines, worked out again from each new scan. Open one for its lineage, snapshots, scenarios and history." />
+      <SpacesNote what="you see the pipelines whose output is in one of these spaces, with all their steps." />
       <ErrorStrip error={pipelines.error} />
       {pipelines.data?.length === 0 ? (
         <EmptyState

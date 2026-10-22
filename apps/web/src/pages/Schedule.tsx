@@ -11,6 +11,7 @@ import {
 import { useState } from "react";
 import {
   useCan,
+  useMe,
   useRemoveScanSchedule,
   useRemoveSchedule,
   useScanSchedule,
@@ -263,11 +264,13 @@ function ScheduleDialog({ pipelineId, current, onClose }: { pipelineId: string; 
  */
 export function ScanScheduleSection({ tenantId, spaces, whyNot }: { tenantId: string; spaces: string[]; whyNot: string | undefined }) {
   const can = useCan();
+  const me = useMe().data;
   const schedule = useScanSchedule(tenantId);
   const remove = useRemoveScanSchedule(tenantId);
   const [editing, setEditing] = useState(false);
   const current = schedule.data;
-  const canSet = can("discovery.run");
+  // Each run scans every space the client reads, so it is for those who see every space (the API checks it too).
+  const canSet = can("discovery.run") && me?.spaces === null;
 
   return (
     <section className="block">

@@ -135,6 +135,33 @@ describe("members", () => {
     expect((await listMembers(db, account.id)).map((m) => [m.email, m.role])).toEqual([["second@example.com", "admin"]]);
     expect(await changeMember(db, account.id, adminId, "admin")).toBe("not-found");
   });
+
+  it("can be limited to some spaces, which an admin never is", async () => {
+    const { account } = await accountWithAdmin("Limited", "admin@limited.example.com");
+    const { token } = await createInvitation(db, { accountId: account.id, email: "sales@limited.example.com", role: "developer", spaces: ["SALES"] });
+    expect((await listInvitations(db, account.id))[0].spaces).toEqual(["SALES"]);
+    const { userId } = (await acceptInvitation(db, token, newUser(9)))!;
+    const spacesOf = async () => (await listMembers(db, account.id)).find((m) => m.userId === userId)!.spaces;
+    expect(await spacesOf()).toEqual(["SALES"]);
+    const session = await createSession(db, { userId, accountId: account.id, verified: true, minutes: 60 });
+    expect((await findSession(db, session))!.spaces).toEqual(["SALES"]);
+
+    // A new role alone keeps the spaces; new spaces replace them; null is every space.
+    expect(await changeMember(db, account.id, userId, "viewer")).toBe("done");
+    expect(await spacesOf()).toEqual(["SALES"]);
+    expect(await changeMember(db, account.id, userId, "viewer", ["SALES", "STOCK"])).toBe("done");
+    expect(await spacesOf()).toEqual(["SALES", "STOCK"]);
+    expect(await changeMember(db, account.id, userId, "viewer", null)).toBe("done");
+    expect(await spacesOf()).toBeNull();
+
+    // Made admin, the list goes: an admin sees every space, and stays so when made something else again.
+    await changeMember(db, account.id, userId, "developer", ["SALES"]);
+    expect(await changeMember(db, account.id, userId, "admin", ["SALES"])).toBe("done");
+    expect(await spacesOf()).toBeNull();
+    expect((await db.query("select spaces from memberships where user_id = $1", [userId])).rows).toEqual([{ spaces: null }]);
+    await changeMember(db, account.id, userId, "developer");
+    expect(await spacesOf()).toBeNull();
+  });
 });
 
 describe("sessions", () => {
@@ -147,6 +174,7 @@ describe("sessions", () => {
       email: "session@example.com",
       accountId: account.id,
       role: "admin",
+      spaces: null,
       verified: true,
       operator: false,
     });

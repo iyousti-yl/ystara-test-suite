@@ -20,14 +20,19 @@ export async function unwatchPipeline(db: Queryable, pipelineId: string, userId:
 export async function watchState(db: Queryable, pipelineId: string, userId: string, accountId: string): Promise<WatchState> {
   const { rows } = await db.query<{ watching: boolean; watchers: number }>(
     `select coalesce(bool_or(w.user_id = $2), false) as watching, count(*)::int as watchers
-       from pipeline_watchers w join memberships m on m.user_id = w.user_id and m.account_id = $3
-      where w.pipeline_id = $1`,
+       from pipeline_watchers w
+       join pipelines p on p.id = w.pipeline_id
+       join memberships m on m.user_id = w.user_id and m.account_id = $3
+      where w.pipeline_id = $1 and (m.role = 'admin' or m.spaces is null or p.output_space = any(m.spaces))`,
     [pipelineId, userId, accountId],
   );
   return rows[0];
 }
 
-/** The email addresses of the pipeline's watchers who are still members of its account; nobody else ever gets its mail. */
+/**
+ * The email addresses of the pipeline's watchers who are still members of its account and still see its output's
+ * space (an admin, or a member not limited to other spaces); nobody else ever gets its mail.
+ */
 export async function watcherEmails(db: Queryable, pipelineId: string): Promise<string[]> {
   const { rows } = await db.query<{ email: string }>(
     `select u.email
@@ -36,7 +41,7 @@ export async function watcherEmails(db: Queryable, pipelineId: string): Promise<
        join tenants t on t.id = p.tenant_id
        join memberships m on m.user_id = w.user_id and m.account_id = t.account_id
        join users u on u.id = w.user_id
-      where w.pipeline_id = $1
+      where w.pipeline_id = $1 and (m.role = 'admin' or m.spaces is null or p.output_space = any(m.spaces))
       order by u.email`,
     [pipelineId],
   );

@@ -69,6 +69,7 @@ export function PipelineView(props: {
               key={node.key}
               scanId={result.scanId}
               node={node}
+              within={refKey(pipeline.output)}
               onExclude={onExclusionsChange && (() => exclude(exclusionFor(node.ref, pipeline)))}
               onFollow={onExclusionsChange && (() => follow(node.key))}
               onShowPipeline={onShowPipeline && (() => onShowPipeline(node.key))}

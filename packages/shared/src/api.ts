@@ -1,7 +1,8 @@
 import type { ScenarioAlert, SnapshotAlert } from "./alerts.js";
+import type { Verdict } from "./compare.js";
 import type { Measurability } from "./database-users.js";
 import type { DspEdge, DspObject, DspObjectRef, Pipeline } from "./objects.js";
-import type { Permission, Role } from "./roles.js";
+import type { Permission, Role, SpaceScope } from "./roles.js";
 import type { ScenarioSpec } from "./scenario.js";
 
 /**
@@ -489,6 +490,8 @@ export interface Me {
   accounts: (Account & { role: Role })[];
   /** Ystara's operator: sees the operator panel. */
   operator: boolean;
+  /** The spaces the user sees in this account: null for every space (roles.ts). */
+  spaces: SpaceScope;
 }
 
 /** A user's membership of the signed-in account (GET /api/members). */
@@ -496,6 +499,8 @@ export interface Member {
   userId: string;
   email: string;
   role: Role;
+  /** The spaces they see: null for every space. Always null for an admin. */
+  spaces: SpaceScope;
   joinedAt: Date;
   /**
    * The sign-in reset links Ystara's operator made for them in the last 30 days, newest first: when each was made,
@@ -509,6 +514,8 @@ export interface Invitation {
   id: string;
   email: string;
   role: Role;
+  /** The spaces the new member will see: null for every space. */
+  spaces: SpaceScope;
   createdAt: Date;
   expiresAt: Date;
 }
@@ -571,6 +578,110 @@ export interface InvitationOffer {
   role: Role;
   /** The email already has a Ystara user (from another account): sign in and accept. */
   existingUser: boolean;
+}
+
+/** A sign-off's verdict on a pipeline (results.sign_off). */
+export type SignOffVerdict = "approved" | "rejected";
+
+/**
+ * A pipeline signed off as it stood (migration 014): the scan its steps came
+ * from, and its latest finished suite and latest successful snapshot then.
+ */
+export interface SignOff {
+  id: string;
+  pipelineId: string;
+  verdict: SignOffVerdict;
+  comment: string;
+  /** Who signed, by email as it was then. */
+  signedBy: string;
+  signedAt: Date;
+  scan: { id: string; finishedAt: Date | null } | null;
+  suite: { id: string; status: ScenarioRunStatus; passed: number | null; total: number | null; finishedAt: Date | null } | null;
+  snapshot: { id: string; finishedAt: Date | null } | null;
+}
+
+/** What a sign-off made now would cover: the same three as on SignOff. */
+export type SignOffBasis = Pick<SignOff, "scan" | "suite" | "snapshot">;
+
+/** GET /api/pipelines/:id/signoffs */
+export interface SignOffState {
+  /** The newest sign-off, if any. */
+  latest: SignOff | null;
+  /**
+   * The pipeline's steps that a later scan changed since the latest sign-off
+   * (changedSteps in the connector): empty while it still holds, null when
+   * there is no sign-off or the scan it covered is gone.
+   */
+  changedSince: ChangedStep[] | null;
+  /** What signing off now would cover. */
+  basis: SignOffBasis;
+  /** Every sign-off, newest first. */
+  all: SignOff[];
+}
+
+/** One line of a pipeline's history (GET /api/pipelines/:id/history), newest first. */
+export type HistoryEvent =
+  | {
+      kind: "suite";
+      id: string;
+      at: Date;
+      cause: ScenarioSuiteCause;
+      status: ScenarioRunStatus;
+      /** Scenarios that passed, of all in the suite, once it finished. */
+      passed: number | null;
+      total: number | null;
+      /** How many of the pipeline's steps the scan behind it changed (cause "scan"). */
+      changed: number;
+    }
+  | {
+      /** A scenario run on its own, outside a suite. */
+      kind: "run";
+      id: string;
+      at: Date;
+      scenarioId: string;
+      scenarioName: string;
+      status: ScenarioRunStatus;
+      /** Checks that passed, of all its checks. */
+      passed: number | null;
+      total: number | null;
+    }
+  | {
+      kind: "snapshot";
+      id: string;
+      at: Date;
+      status: SnapshotStatus;
+      scheduled: boolean;
+      /** The output's row count, when the snapshot measured it. */
+      outputRows: number | null;
+      /** It raised an alert. */
+      alert: boolean;
+    }
+  | { kind: "signoff"; id: string; at: Date; verdict: SignOffVerdict; by: string; comment: string };
+
+export interface PipelineHistory {
+  events: HistoryEvent[];
+}
+
+/** GET /api/pipelines/:id/report: what an auditor reads, printed or saved as PDF from the web app. */
+export interface PipelineReport {
+  generatedAt: Date;
+  generatedBy: string;
+  tenant: { id: string; name: string; host: string | null };
+  pipeline: PipelineDefinition;
+  /** The steps on the tenant's latest successful scan, upstream first; null when it has none or lacks the output. */
+  steps: { scanId: string; finishedAt: Date | null; steps: DspObjectRef[] } | null;
+  signOff: Omit<SignOffState, "all" | "basis">;
+  /** The latest finished suite, with each scenario's checks. */
+  suite: (ScenarioSuiteSummary & { runs: Pick<ScenarioRun, "id" | "scenarioId" | "scenarioName" | "status" | "passed" | "total" | "error" | "checks">[] }) | null;
+  /** The latest two successful snapshots compared: the verdict and the steps that changed. */
+  comparison: {
+    before: { id: string; finishedAt: Date | null };
+    after: { id: string; finishedAt: Date | null };
+    verdict: Verdict;
+    /** Steps measured in both whose definition or data changed, and steps added or removed between the two. */
+    changed: { space: string; technicalName: string; type: string; verdict: Verdict | "added" | "removed" }[];
+  } | null;
+  history: HistoryEvent[];
 }
 
 /** A value as it arrives over HTTP (JSON): dates become ISO strings. */

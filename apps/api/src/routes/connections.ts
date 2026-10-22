@@ -1,9 +1,10 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { deleteConnection, getConnection, getTenant, markConnectionChecking, setConnection, setConnectionSpaces, type Db } from "@ystara/db";
+import { deleteConnection, getConnection, markConnectionChecking, setConnection, setConnectionSpaces, type Db } from "@ystara/db";
 import { isTokenUrl, JOBS, TOKEN_URL_HINT, type ConnectionCheckJobData, type ConnectionState } from "@ystara/shared";
 import { connectionSecretContext, type SecretBox } from "@ystara/shared/secrets";
 import { signedIn } from "../auth/access.js";
+import { scope } from "../scope.js";
 import type { JobQueue } from "../server.js";
 import { spaceIds } from "./discovery.js";
 
@@ -34,11 +35,9 @@ const SpacesInput = z.object({ spaces: spaceIds });
 const id = z.object({ id: z.string().uuid() });
 
 export function connectionRoutes(db: Db, queue: JobQueue, secrets: SecretBox) {
-  /** The tenant, when it belongs to the signed-in account (as in discovery.ts). */
-  async function ownTenant(req: FastifyRequest) {
-    const tenant = await getTenant(db, id.parse(req.params).id);
-    return tenant?.accountId === signedIn(req).accountId ? tenant : undefined;
-  }
+  /** The tenant, when it belongs to the signed-in account (scope.ts). */
+  const tenants = scope(db);
+  const ownTenant = (req: FastifyRequest) => tenants.tenant(req, id.parse(req.params).id);
   const check = (tenantId: string) => queue.send(JOBS.connectionCheck, { tenantId } satisfies ConnectionCheckJobData);
 
   return async (app: FastifyInstance) => {
