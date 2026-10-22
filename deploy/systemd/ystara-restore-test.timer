@@ -1,0 +1,11 @@
+# Every Sunday at 05:00, after that night's backup.
+[Unit]
+Description=Ystara: weekly restore test of the latest backup
+
+[Timer]
+OnCalendar=Sun *-*-* 05:00:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

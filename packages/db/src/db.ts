@@ -1,4 +1,5 @@
 import pg from "pg";
+import { settingFromEnv } from "@ystara/shared/env";
 
 /**
  * The one way the platform talks to its own Postgres database.
@@ -25,9 +26,9 @@ export interface Db extends Queryable {
 /** Host port of the Postgres in docker-compose.yml. Uncommon on purpose, so it doesn't meet another Postgres. */
 export const DEFAULT_DB_PORT = "55432";
 
-/** DATABASE_URL, or the Docker Compose database on YSTARA_DB_PORT (default 55432). */
+/** DATABASE_URL (or the file DATABASE_URL_FILE names, on a server), or the Docker Compose database on YSTARA_DB_PORT (default 55432). */
 export function databaseUrl(): string {
-  return process.env.DATABASE_URL ?? `postgres://ystara:ystara@localhost:${process.env.YSTARA_DB_PORT ?? DEFAULT_DB_PORT}/ystara`;
+  return settingFromEnv("DATABASE_URL") ?? `postgres://ystara:ystara@localhost:${process.env.YSTARA_DB_PORT ?? DEFAULT_DB_PORT}/ystara`;
 }
 
 export function connect(connectionString = databaseUrl()): Db {

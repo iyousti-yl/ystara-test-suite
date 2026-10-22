@@ -1,0 +1,9 @@
+#!/bin/sh
+# Docker Compose with the server's files and settings, from any folder:
+#   deploy/compose up -d --build      start, or update after `git pull`
+#   deploy/compose ps                 what runs
+#   deploy/compose logs -f api        follow the API's log
+# YSTARA_SETTINGS names another settings file than /etc/ystara/ystara.env (for a trial run).
+set -eu
+cd "$(dirname "$0")/.."
+exec docker compose --project-name ystara -f docker-compose.yml -f deploy/docker-compose.prod.yml --env-file "${YSTARA_SETTINGS:-/etc/ystara/ystara.env}" "$@"

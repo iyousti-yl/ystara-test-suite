@@ -26,6 +26,7 @@ tools/
   check/      `npm run check:tenant-content`: tenant names in what is about to be pushed
               `npm run check:browser`: the local web app in Chromium at several widths, with screenshots
   spike/      One-off feasibility scripts (not shipped)
+deploy/       Running it on a server: Caddy, backups, restore, the runbook (deploy/README.md)
 ```
 
 Read [docs/architecture/overview.md](docs/architecture/overview.md) first.
@@ -151,6 +152,10 @@ expect:
 **Regression runs.** **Run all** on a pipeline's Scenarios tab runs every scenario of the pipeline one after the other, signing in to the database once, and shows them together on one page. **Set schedule** under Discovery scans the tenant on a cron line, at least 4 hours apart (every night at 02:00 is `0 2 * * *`), in the spaces its technical client can read. After any scan that changes a step of a saved pipeline (its definition, or a step added or gone), that pipeline's scenarios run again on their own, and its watchers get an email when a scenario that passed before doesn't now. **Alerts** (admins, at the bottom of the menu) connects a Microsoft Teams channel: in Teams, add the workflow "Post to a channel when a webhook request is received" to the channel and paste the address it gives. Ystara posts a test card, keeps the address encrypted, and then posts snapshot and scenario alerts there as well as emailing them. `npm run db:demo` adds a suite that broke after a scan to the demo, with its alert.
 
 **Audit log, sign-off and access per space.** The **Audit log** (admins, at the bottom of the menu) lists every change anyone made in the account and every sign-in: who, what, on what, when and from which address, filtered by person, kind and days, and as CSV. Nobody can change or delete an entry in the app. On **Users and roles**, an admin can limit a developer, test coordinator or viewer to some spaces (ticked from the scanned spaces, or typed): they then see the pipelines whose output is in one of those spaces, with every step, and only those spaces of a scan. A pipeline's **History** tab shows its sign-off, a chart of scenarios passing per run of all scenarios, a chart of output rows per snapshot, and every suite, run, snapshot and sign-off on one timeline (Download CSV). Test coordinators and admins **Sign off** a pipeline: approve, or reject with a reason; the sign-off covers the scan, suite and snapshot it was given on, and reads "Approval outdated" once a later scan changes a step. **Report** opens the pipeline's report on a page of its own, to print or save as PDF. The demo tenant comes with an approved sign-off.
+
+## Hosting
+
+`deploy/` runs Ystara on one EU server: Caddy in front for HTTPS (Let's Encrypt), Postgres and the API with no published port, every password in a file under `/etc/ystara/secrets`, nightly backups encrypted with restic to object storage at another provider, and a weekly test that restores the latest backup into a throwaway database. [deploy/README.md](deploy/README.md) is the runbook: what to buy, first setup, updates, restore after losing the server, and a trial run on your own machine.
 
 ## Read-only guarantee
 

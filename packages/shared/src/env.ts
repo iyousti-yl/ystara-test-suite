@@ -38,6 +38,19 @@ export function loadLocalEnv(root: string): void {
   if (!process.env.MASTER_KEY_FILE && existsSync(keyFile)) process.env.MASTER_KEY_FILE = keyFile;
 }
 
+/**
+ * A setting that may come from a file: NAME_FILE names the file (Docker
+ * Compose mounts secrets as files under /run/secrets, so a password never
+ * sits in a container's environment), otherwise NAME itself. The file holds
+ * the value alone; a final line break is dropped.
+ */
+export function settingFromEnv(name: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const file = env[`${name}_FILE`]?.trim();
+  if (!file) return env[name];
+  if (!existsSync(file)) throw new Error(`${name}_FILE names ${file}, which doesn't exist.`);
+  return readFileSync(file, "utf8").replace(/^\uFEFF/, "").replace(/\r?\n$/, "");
+}
+
 /** The variable names in a dotenv text. Values are never looked at, so they can't end up in an error. */
 export function envKeys(text: string): string[] {
   return text

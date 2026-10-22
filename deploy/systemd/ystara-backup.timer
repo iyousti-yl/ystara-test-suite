@@ -1,0 +1,11 @@
+# Every night at 03:30 (the server's time zone), and at the next start when the server was off then.
+[Unit]
+Description=Ystara: nightly database backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

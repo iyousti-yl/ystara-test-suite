@@ -19,7 +19,8 @@
  * Everything stays read-only.
  *
  * Alert emails go through the mail server in SMTP_URL (smtp://user:password@host:587,
- * or smtps:// on port 465), from SMTP_FROM, with links to YSTARA_PUBLIC_URL. Without
+ * or smtps:// on port 465; or in the file SMTP_URL_FILE names, as on a server), from
+ * SMTP_FROM, with links to YSTARA_PUBLIC_URL. Without
  * SMTP_URL, alerts are only recorded. Docker Compose points it at Mailpit, a local inbox.
  * Alerts are also posted in an account's Microsoft Teams channel when its admin set one
  * (its webhook address is sealed in the database, like the tenants' secrets).
@@ -41,7 +42,7 @@ import {
   type SnapshotAlertJobData,
   type SnapshotJobData,
 } from "@ystara/shared";
-import { loadLocalEnv } from "@ystara/shared/env";
+import { loadLocalEnv, settingFromEnv } from "@ystara/shared/env";
 import { masterKeyFromEnv, secretBox, teamsChannelSecretContext } from "@ystara/shared/secrets";
 import { queueSuitesAfterScan } from "./jobs/after-scan.js";
 import { runConnectionCheck } from "./jobs/connection-check.js";
@@ -60,7 +61,8 @@ loadLocalEnv(fileURLToPath(new URL("../../../", import.meta.url)));
 const secrets = secretBox(masterKeyFromEnv()); // before anything else, so a missing key stops the start at once
 const login: LoginOptions = { bin: process.env.DSP_CLI_BIN, machineLogin: process.env.YSTARA_WORKER_MACHINE_LOGIN === "1" };
 const appUrl = process.env.YSTARA_PUBLIC_URL ?? `http://127.0.0.1:${process.env.YSTARA_API_PORT ?? 4000}`;
-const mailer = process.env.SMTP_URL ? createTransport(process.env.SMTP_URL, { from: process.env.SMTP_FROM ?? "Ystara <ystara@localhost>" }) : undefined;
+const smtpUrl = settingFromEnv("SMTP_URL");
+const mailer = smtpUrl ? createTransport(smtpUrl, { from: process.env.SMTP_FROM ?? "Ystara <ystara@localhost>" }) : undefined;
 const send: SendMail | null = mailer ? async (mail) => void (await mailer.sendMail(mail)) : null;
 
 const url = databaseUrl();

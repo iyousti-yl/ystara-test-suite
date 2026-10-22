@@ -1,0 +1,11 @@
+# Copy to /etc/systemd/system/ (deploy/README.md, step 7). Run by ystara-restore-test.timer.
+[Unit]
+Description=Ystara: restore the latest backup into a throwaway database and check it
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ystara/deploy/restore-test.sh
+Nice=10

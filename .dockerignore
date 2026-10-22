@@ -1,12 +1,16 @@
-# Never send secrets, tenant notes or scan output into an image.
-.env
-.env.*
-.master-key
-*.local.md
-*.local.json
+# Never send secrets, tenant notes, scans, scenarios or screenshots into an image.
+# Patterns start with **/ to match in every folder, not only the top one.
+**/.env
+**/.env.*
+**/.master-key
+**/*.local.*
 tools/scan/output
 tools/spike/output
+tools/check/output
+tools/check/drafts
 .git
+.claude
 **/node_modules
 **/dist
 **/*.tsbuildinfo
+**/coverage
