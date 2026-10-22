@@ -19,6 +19,7 @@ import type {
   PipelineReport,
   PipelineResult,
   PipelineSchedule,
+  PipelineSummary,
   ResetOffer,
   Role,
   SavedPipelineResult,
@@ -275,6 +276,9 @@ export function useRenameAccount() {
 
 const active = (status: Scan["status"]) => status === "queued" || status === "running";
 const pollWhile = (busy: boolean) => (busy ? 3000 : false);
+const runActive = (status: ScenarioRunSummary["status"]) => status === "queued" || status === "running";
+/** After a change to a pipeline's results, scenarios, schedule or sign-off: the Pipelines board and the pipeline's header ask again. */
+const refreshSummaries = (client: ReturnType<typeof useQueryClient>) => client.invalidateQueries({ predicate: (q) => q.queryKey[2] === "pipeline-summaries" });
 
 // --- Tenants
 
@@ -440,6 +444,22 @@ export function pipelineQuery(output: string, excludeWriters: string[]): string 
 export const usePipelines = (tenantId: string) =>
   useQuery({ queryKey: ["tenants", tenantId, "pipelines"], queryFn: () => request<PipelineDefinitionJson[]>("GET", `/tenants/${tenantId}/pipelines`) });
 
+export type PipelineSummaryJson = Json<PipelineSummary>;
+
+/**
+ * The latest results of each of the tenant's pipelines, for the Pipelines board
+ * and the pipeline's header (pipelineHealth reads them). Refetched every few
+ * seconds while something runs, and every minute anyway, as schedules move on.
+ */
+export const usePipelineSummaries = (tenantId: string) =>
+  useQuery({
+    queryKey: ["tenants", tenantId, "pipeline-summaries"],
+    queryFn: () => request<PipelineSummaryJson[]>("GET", `/tenants/${tenantId}/pipeline-summaries`),
+    enabled: tenantId !== "",
+    refetchInterval: (q) =>
+      pollWhile(q.state.data?.some((s) => (s.suite && runActive(s.suite.status)) || (s.snapshot && active(s.snapshot.status))) ?? false) || 60_000,
+  });
+
 export const useSavedPipeline = (id: string) =>
   useQuery({ queryKey: ["pipelines", id], queryFn: () => request<Json<SavedPipelineResult>>("GET", `/pipelines/${id}`), enabled: id !== "", retry: false });
 
@@ -448,7 +468,7 @@ export function useSavePipeline(tenantId: string) {
   return useMutation({
     mutationFn: (input: { name: string; output: string; excludeWriters: string[] }) =>
       request<PipelineDefinitionJson>("POST", `/tenants/${tenantId}/pipelines`, input),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["tenants", tenantId, "pipelines"] }),
+    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: ["tenants", tenantId, "pipelines"] }), refreshSummaries(client)]),
   });
 }
 
@@ -456,7 +476,7 @@ export function useDeletePipeline() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (pipeline: PipelineDefinitionJson) => request<void>("DELETE", `/pipelines/${pipeline.id}`),
-    onSuccess: (_done, pipeline) => client.invalidateQueries({ queryKey: ["tenants", pipeline.tenantId, "pipelines"] }),
+    onSuccess: (_done, pipeline) => Promise.all([client.invalidateQueries({ queryKey: ["tenants", pipeline.tenantId, "pipelines"] }), refreshSummaries(client)]),
   });
 }
 
@@ -494,7 +514,7 @@ export function useTakeSnapshot(pipelineId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: () => request<SnapshotJson>("POST", `/pipelines/${pipelineId}/snapshots`),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["pipelines", pipelineId, "snapshots"] }),
+    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: ["pipelines", pipelineId, "snapshots"] }), refreshSummaries(client)]),
   });
 }
 
@@ -515,7 +535,10 @@ export function useSetSchedule(pipelineId: string) {
   return useMutation({
     mutationFn: async (input: { cron: string; timeZone: string; rowDropPercent: number }) =>
       (await request<{ schedule: ScheduleJson }>("PUT", `/pipelines/${pipelineId}/schedule`, input)).schedule,
-    onSuccess: (schedule) => client.setQueryData(scheduleKey(pipelineId), schedule),
+    onSuccess: (schedule) => {
+      client.setQueryData(scheduleKey(pipelineId), schedule);
+      return refreshSummaries(client);
+    },
   });
 }
 
@@ -523,7 +546,10 @@ export function useRemoveSchedule(pipelineId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: () => request<void>("DELETE", `/pipelines/${pipelineId}/schedule`),
-    onSuccess: () => client.setQueryData(scheduleKey(pipelineId), null),
+    onSuccess: () => {
+      client.setQueryData(scheduleKey(pipelineId), null);
+      return refreshSummaries(client);
+    },
   });
 }
 
@@ -539,14 +565,16 @@ export function useSetWatching(pipelineId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (watching: boolean) => request<WatchState>(watching ? "PUT" : "DELETE", `/pipelines/${pipelineId}/watch`),
-    onSuccess: (state) => client.setQueryData(watchKey(pipelineId), state),
+    onSuccess: (state) => {
+      client.setQueryData(watchKey(pipelineId), state);
+      return refreshSummaries(client);
+    },
   });
 }
 
 // --- Scenarios (the builder)
 
 const scenariosKey = (pipelineId: string) => ["pipelines", pipelineId, "scenarios"];
-const runActive = (status: ScenarioRunSummary["status"]) => status === "queued" || status === "running";
 
 /** A pipeline's scenarios, by name. Refetches every few seconds while one of their latest runs is queued or running. */
 export const useScenarios = (pipelineId: string) =>
@@ -598,7 +626,7 @@ export function useSaveScenario(pipelineId: string, scenarioId: string | undefin
       scenarioId ? request<ScenarioJson>("PUT", `/scenarios/${scenarioId}`, draft) : request<ScenarioJson>("POST", `/pipelines/${pipelineId}/scenarios`, draft),
     onSuccess: (saved) => {
       client.setQueryData(["scenarios", saved.id], saved);
-      return client.invalidateQueries({ queryKey: scenariosKey(pipelineId) });
+      return Promise.all([client.invalidateQueries({ queryKey: scenariosKey(pipelineId) }), refreshSummaries(client)]);
     },
   });
 }
@@ -607,7 +635,7 @@ export function useDeleteScenario(pipelineId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (scenarioId: string) => request<void>("DELETE", `/scenarios/${scenarioId}`),
-    onSuccess: () => client.invalidateQueries({ queryKey: scenariosKey(pipelineId) }),
+    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: scenariosKey(pipelineId) }), refreshSummaries(client)]),
   });
 }
 
@@ -659,7 +687,8 @@ export function useRunAllScenarios(pipelineId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: () => request<ScenarioSuiteJson>("POST", `/pipelines/${pipelineId}/scenario-suites`),
-    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: suitesKey(pipelineId) }), client.invalidateQueries({ queryKey: scenariosKey(pipelineId) })]),
+    onSuccess: () =>
+      Promise.all([client.invalidateQueries({ queryKey: suitesKey(pipelineId) }), client.invalidateQueries({ queryKey: scenariosKey(pipelineId) }), refreshSummaries(client)]),
   });
 }
 
@@ -709,6 +738,7 @@ export function useSignOff(pipelineId: string) {
         client.invalidateQueries({ queryKey: signOffsKey(pipelineId) }),
         client.invalidateQueries({ queryKey: ["pipelines", pipelineId, "history"] }),
         client.invalidateQueries({ queryKey: ["pipelines", pipelineId, "report"] }),
+        refreshSummaries(client),
       ]),
   });
 }

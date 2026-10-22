@@ -43,7 +43,7 @@ describe("fixtures", () => {
     expect(fixtureQuery("LT_EMP", columns, []).sql).toBe(
       'SELECT CAST(NULL AS NVARCHAR(10)) AS "EMP_ID", CAST(NULL AS DECIMAL(15, 2)) AS "SALARY", CAST(NULL AS DATE) AS "HIRED" FROM DUMMY WHERE 1 = 0',
     );
-    stopsWith(() => fixtureQuery("LT_EMP", columns, [{ EMP_ID: "E1", BONUS: 1 }]), /LT_EMP has columns the table doesn't have: BONUS/);
+    stopsWith(() => fixtureQuery("LT_EMP", columns, [{ EMP_ID: "E1", BONUS: 1 }]), /LT_EMP have columns the table doesn't have: BONUS/);
   });
 
   it("read a table's columns, types and keys from its CSN, skipping associations", () => {
@@ -195,8 +195,8 @@ describe("a pipeline simulation", () => {
     const note = (name: string) => sim.steps.find((s) => s.ref.technicalName === name)!;
 
     expect(sim.steps.filter((s) => s.problem)).toEqual([]);
-    expect(note("LT_EMPLOYEE_RAW").note).toMatch(/^fixture with 3 made-up rows, because 2 flows load it/);
-    expect(note("LT_ORG_RAW").note).toMatch(/because DF_SF_ORG loads it, and a data flow can't be expressed in SQL/);
+    expect(note("LT_EMPLOYEE_RAW").note).toMatch(/^3 made-up rows, because 2 flows load it/);
+    expect(note("LT_ORG_RAW").note).toMatch(/because it is loaded by DF_SF_ORG, a data flow Ystara can't run/);
     expect(note("V_ACTIVE_ORG_FILTER").note).toBe("compiled from its CSN query");
     expect(note("V_EMPLOYEE_CLEAN").note).toBe("compiled from its SQL");
     expect(note("TF_HEADCOUNT").note).toBe("compiled from its SQL step; its own target LT_HEADCOUNT starts empty (full load)");
@@ -224,7 +224,7 @@ describe("a pipeline simulation", () => {
     expect(step("V_EMPLOYEE_CLEAN").problem).toMatch(/calls LT_EMPLOYEE_RAW with parameters/);
     expect(step("TF_EMPLOYEE_ENRICH").problem).toBe("it reads V_EMPLOYEE_CLEAN, which can't be simulated");
     // Made-up rows don't stand in for the broken flow's logic: its table stops, and so does what reads it.
-    expect(step("LT_EMPLOYEE_ENRICHED").problem).toMatch(/TF_EMPLOYEE_ENRICH, which loads it, can't be compiled; give the table a fixture/);
+    expect(step("LT_EMPLOYEE_ENRICHED").problem).toMatch(/TF_EMPLOYEE_ENRICH, which loads it, can't be compiled; give the table test rows/);
     expect(step("V_HEADCOUNT_OUT").problem).toBe("it reads LT_HEADCOUNT, which can't be simulated");
     expect(sim.output).toBeUndefined();
 
@@ -232,7 +232,7 @@ describe("a pipeline simulation", () => {
     const given = simulatePipeline(graph, buildPipeline(graph, { space: "HR", technicalName: "V_HEADCOUNT_OUT" }), {
       fixtures: new Map([["LT_EMPLOYEE_ENRICHED", [{ EMP_ID: "E1", ORG_ID: "O1", TENURE: "2" }]]]),
     });
-    expect(given.steps.find((s) => s.ref.technicalName === "LT_EMPLOYEE_ENRICHED")!.note).toMatch(/^fixture with 1 given row, in place of TF_EMPLOYEE_ENRICH, which loads it/);
+    expect(given.steps.find((s) => s.ref.technicalName === "LT_EMPLOYEE_ENRICHED")!.note).toMatch(/^1 test row given, in place of TF_EMPLOYEE_ENRICH, which loads it/);
     expect(given.output).toBeDefined();
   });
 

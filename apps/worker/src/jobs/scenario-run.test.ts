@@ -96,7 +96,7 @@ describe("a scenario run", () => {
       { checkpoint: "V_OUT", label: "row_count = 2", status: "fail", detail: "1 row, 2 expected" },
     ]);
     expect(done?.steps?.map((s) => [s.technicalName, s.note])).toEqual([
-      ["LT_DATA", "fixture with 2 given rows"],
+      ["LT_DATA", "2 test rows given"],
       ["V_OUT", "compiled from its SQL"],
     ]);
     // One sign-in, as the output space's user with its password opened, closed at the end; every check reads only DUMMY.
@@ -118,7 +118,7 @@ describe("a scenario run", () => {
     const misplaced = await setUp("Misplaced", spec([{ table: "LT_NOPE", rows: [] }], [{ checkpoint: "V_OUT", assertions: [{ type: "row_count", equals: 0 }] }]));
     expect(await runScenarioRun(db, misplaced.run.id, secrets, fake.open)).toMatchObject({
       status: "error",
-      error: "The scenario can't run: The fixture for LT_NOPE names no table of the pipeline.",
+      error: "The scenario can't run: The test rows for LT_NOPE name no table of the pipeline.",
       checks: null,
     });
     const lonely = await setUp("No database user", spec(rows, [{ checkpoint: "V_OUT", assertions: [{ type: "row_count", equals: 1 }] }]), []);

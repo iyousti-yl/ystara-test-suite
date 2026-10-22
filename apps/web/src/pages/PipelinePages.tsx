@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label, MessageStrip, Tab, TabContainer, ToggleButton, Token, Tokenizer } from "@ui5/webcomponents-react";
-import { whyNothingMeasurable, type PipelineResult } from "@ystara/shared";
+import { Button, Dialog, Input, Label, Link, MessageStrip, Tab, TabContainer, ToggleButton, Token, Tokenizer } from "@ui5/webcomponents-react";
+import { refKey, whyNothingMeasurable, type PipelineResult } from "@ystara/shared";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   pipelineQuery,
   useCan,
   useDeletePipeline,
   usePipelineOnScan,
+  usePipelines,
+  usePipelineSummaries,
   useSavedPipeline,
   useSavePipeline,
   useScan,
@@ -14,8 +16,10 @@ import {
   useTakeSnapshot,
   useTenant,
   useWatch,
+  type PipelineSummaryJson,
 } from "../api";
-import { ErrorStrip, Loading } from "../components/Feedback";
+import { ErrorStrip, HealthTag, Loading, When } from "../components/Feedback";
+import { healthOf, NextStep } from "../components/Health";
 import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTime } from "../format";
@@ -82,7 +86,8 @@ export function PipelineOnScanPage() {
           tenantId={scan.data.tenantId}
           output={`${result.data.pipeline.output.space}.${result.data.pipeline.output.technicalName}`}
           excludeWriters={excludeWriters}
-          suggestedName={outputName}
+          // The output's business name, when the tenant gives one; otherwise the person names it.
+          suggestedName={result.data.graph.nodes.find((n) => refKey(n) === refKey(result.data.pipeline.output))?.businessName ?? ""}
           onClose={() => setSaving(false)}
           onSaved={(id) => navigate(`/pipelines/${id}`)}
         />
@@ -109,6 +114,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
   const takeSnapshot = useTakeSnapshot(pipelineId);
   const definition = result.data?.definition;
   const tenant = useTenant(definition?.tenantId ?? "");
+  const summary = usePipelineSummaries(definition?.tenantId ?? "").data?.find((s) => s.pipelineId === pipelineId);
   useInTenant(definition?.tenantId);
   const tabPath = (t: PipelineTab) => (t === "lineage" ? `/pipelines/${pipelineId}` : `/pipelines/${pipelineId}/${t}`);
 
@@ -127,8 +133,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
         subtitle={
           <span className="facts">
             <span className="mono wrap-anywhere">{output}</span>
-            <span>Computed on the latest successful scan</span>
-            <Summary result={result.data} />
+            <Summary result={result.data} saved />
             <SignOffTag pipelineId={definition.id} />
           </span>
         }
@@ -150,7 +155,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
             <MoreActions
               actions={[
                 {
-                  text: "Change exclusions",
+                  text: "Change ignored loaders",
                   icon: "chain-link",
                   onClick: () => navigate(`/scans/${result.data.scanId}/pipeline?${pipelineQuery(output, definition.excludeWriters)}`),
                 },
@@ -169,6 +174,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
           </>
         }
       />
+      {summary && <StatusLine pipelineId={definition.id} summary={summary} />}
       <TabContainer
         collapsed
         className="page-tabs"
@@ -229,23 +235,48 @@ function WatchButton({ pipelineId }: { pipelineId: string }) {
   );
 }
 
-function Summary({ result }: { result: PipelineResult | undefined }) {
+/** "4 steps, 1 input table, 2 measurable": a saved pipeline's steps are worked out again from the latest scan. */
+function Summary({ result, saved }: { result: PipelineResult | undefined; saved?: boolean }) {
   if (!result) return null;
   const { pipeline } = result;
   const measurable = Object.values(result.measurement).filter((m) => m.measurable).length;
   return (
-    <span>
-      {counted(pipeline.steps.length, "step")}, {counted(pipeline.entryPoints.length, "entry table")}, {measurable} measurable by snapshots
+    <span title={saved ? "Worked out again from the tenant's latest successful scan" : undefined}>
+      {counted(pipeline.steps.length, "step")}
+      {saved && " from the latest scan"}, {counted(pipeline.entryPoints.length, "input table")}, {measurable} measurable by snapshots
     </span>
   );
 }
 
-/** Writers left out because they belong to other processes. Removable while trying a pipeline. */
+/** What the pipeline's latest results say, in a word and a sentence, with the next step and when its snapshots ran and will run. */
+function StatusLine({ pipelineId, summary }: { pipelineId: string; summary: PipelineSummaryJson }) {
+  const health = healthOf(summary);
+  return (
+    <div className="status-line" role="status">
+      <HealthTag state={health.state} />
+      <span>{health.sentence}</span>
+      <NextStep pipelineId={pipelineId} next={health.next} />
+      <span className="muted">
+        Last snapshot <When iso={summary.snapshot ? (summary.snapshot.finishedAt ?? summary.snapshot.requestedAt) : null} />
+        {" · "}
+        {summary.schedule ? (
+          <>
+            Next <When iso={summary.schedule.nextRunAt} />
+          </>
+        ) : (
+          "No schedule"
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** Loaders (writers) left out because they belong to other processes. Removable while trying a pipeline. */
 function Exclusions({ patterns, onRemove }: { patterns: string[]; onRemove?: (pattern: string) => void }) {
   if (patterns.length === 0) return null;
   return (
     <div className="exclusions">
-      <Label>Excluded writers</Label>
+      <Label>Ignored loaders</Label>
       <Tokenizer readonly={!onRemove} onTokenDelete={(e) => e.detail.tokens.forEach((t) => t.text && onRemove?.(t.text))}>
         {patterns.map((p) => (
           <Token key={p} text={p} />
@@ -263,8 +294,11 @@ function SaveDialog(props: {
   onClose: () => void;
   onSaved: (id: string) => void;
 }) {
+  const navigate = useNavigate();
   const save = useSavePipeline(props.tenantId);
+  const saved = usePipelines(props.tenantId);
   const [name, setName] = useState(props.suggestedName);
+  const same = saved.data?.filter((p) => `${p.output.space}.${p.output.technicalName}` === props.output) ?? [];
   const submit = () =>
     save.mutate({ name: name.trim(), output: props.output, excludeWriters: props.excludeWriters }, { onSuccess: (p) => props.onSaved(p.id) });
 
@@ -288,12 +322,33 @@ function SaveDialog(props: {
         <Label for="pipeline-name" required>
           Name
         </Label>
-        <Input id="pipeline-name" value={name} onInput={(e) => setName(e.target.value)} />
+        <Input id="pipeline-name" value={name} placeholder="What it delivers, e.g. Monthly sales by region" onInput={(e) => setName(e.target.value)} />
         <p className="muted">
-          Saves the output <span className="mono">{props.output}</span>
-          {props.excludeWriters.length > 0 && <> and the excluded writers</>}. The steps are worked out again from each new scan, so the pipeline
+          A name the business knows it by. It tests the output <span className="mono">{props.output}</span>
+          {props.excludeWriters.length > 0 && <>, without the ignored loaders</>}. The steps are worked out again from each new scan, so the pipeline
           follows the tenant as it changes.
         </p>
+        {same.length > 0 && (
+          <MessageStrip design="Critical" hideCloseButton>
+            {same.length === 1 ? (
+              <>
+                <Link
+                  href={`/pipelines/${same[0].id}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate(`/pipelines/${same[0].id}`);
+                  }}
+                >
+                  {same[0].name}
+                </Link>{" "}
+                already tests this output.
+              </>
+            ) : (
+              <>{same.length} saved pipelines already test this output: {same.map((p) => p.name).join(", ")}.</>
+            )}{" "}
+            Save another only to test it with other loaders ignored.
+          </MessageStrip>
+        )}
         <ErrorStrip error={save.error} />
       </div>
     </Dialog>

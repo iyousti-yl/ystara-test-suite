@@ -79,7 +79,7 @@ describe("scenarios", () => {
     expect(await startScenarioRun(db, first.id, null)).toBe(false); // another worker has it
     await finishScenarioRun(db, first.id, {
       status: "failed",
-      steps: [{ space: "SALES", technicalName: "LT_ORDERS", type: "local_table", note: "fixture with 1 given row" }],
+      steps: [{ space: "SALES", technicalName: "LT_ORDERS", type: "local_table", note: "1 test row given" }],
       checks: [
         { checkpoint: "V_REGION_OUT", label: "row_count = 1", status: "pass", detail: "1 row" },
         { checkpoint: "V_REGION_OUT", label: "unique REGION", status: "fail", detail: "1 value appears more than once" },

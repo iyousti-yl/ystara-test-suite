@@ -168,7 +168,7 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
       return { note: "compiled from its CSN query", query: compileCsnQuery(query, (parts) => standIn(node, step, parts)) };
     }
     if (node.type === "transformation_flow") return { note: "compiled from its SQL step", query: inlineFor(node, step, flowSql(node)) };
-    if (FLOW_TYPES.has(node.type)) return { note: `not simulated: a ${node.type.replace(/_/g, " ")} can't be expressed in SQL, so the table it loads gets a fixture` };
+    if (FLOW_TYPES.has(node.type)) return { note: `not simulated: Ystara can't run a ${node.type.replace(/_/g, " ")}, so the table it loads takes test rows` };
     throw new SimulationStop(`a ${node.type.replace(/_/g, " ")} can't be simulated yet`);
   };
 
@@ -187,7 +187,7 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
       step.fixture = { columns };
       // Given rows win, also over the flow that loads the table, so a scenario can start in the middle of a pipeline.
       const instead = flow ? `, in place of ${flow.technicalName}, which loads it` : "";
-      return { note: `fixture with ${rowsOf(given.length, "given")}${instead}${unknown}`, query: fixtureQuery(node.technicalName, columns, given) };
+      return { note: `${rowsOf(given.length, "test")} given${instead}${unknown}`, query: fixtureQuery(node.technicalName, columns, given) };
     }
     let why = "nothing in the pipeline loads it";
     if (flow) {
@@ -197,9 +197,9 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
         return { note: `the SELECT of ${loaded.ref.technicalName} (full load)`, query: loaded.query };
       }
       // Made-up or no rows would pass off the flow's logic as tested: only rows given for the table stand in for it.
-      throw new SimulationStop(`${loaded.ref.technicalName}, which loads it, can't be compiled; give the table a fixture to test the steps after it`);
+      throw new SimulationStop(`${loaded.ref.technicalName}, which loads it, can't be compiled; give the table test rows to test the steps after it`);
     } else if (writers.length === 1) {
-      why = `${writers[0].technicalName} loads it, and a ${writers[0].type.replace(/_/g, " ")} can't be expressed in SQL`;
+      why = `it is loaded by ${writers[0].technicalName}, a ${writers[0].type.replace(/_/g, " ")} Ystara can't run`;
     } else if (writers.length > 1) {
       why = `${writers.length} flows load it`;
     }
@@ -207,7 +207,7 @@ export function simulatePipeline(graph: LineageGraph, pipeline: Pipeline, opts: 
     step.fixture = { columns, why };
     if (opts.withoutFixture === "empty") return { note: `empty, because no rows are given for it (${why})${unknown}`, query: fixtureQuery(node.technicalName, columns, []) };
     const rows = sampleRows(columns, opts.sampleRows ?? 3);
-    return { note: `fixture with ${rowsOf(rows.length, "made-up")}, because ${why}${unknown}`, query: fixtureQuery(node.technicalName, columns, rows) };
+    return { note: `${rowsOf(rows.length, "made-up")}, because ${why}${unknown}`, query: fixtureQuery(node.technicalName, columns, rows) };
   };
 
   const steps = pipeline.steps.map((s) => build(refKey(s)));

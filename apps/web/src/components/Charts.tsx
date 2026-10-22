@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { appLocale } from "../format";
 
 /**
  * Two small charts in the brand's colours, drawn as SVG at the size of their
@@ -39,7 +40,7 @@ export function ticksFor(max: number): number[] {
   return Number.isInteger(top / 2) ? [0, top / 2, top] : [0, top];
 }
 
-const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+const compact = new Intl.NumberFormat(appLocale(), { notation: "compact", maximumFractionDigits: 1 });
 export const formatCompact = (n: number) => compact.format(n);
 
 function Frame(props: {

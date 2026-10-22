@@ -53,7 +53,7 @@ describe("the demo tenant", () => {
 
     // The scenario compiles on the demo's scan, and its run has a result for every check.
     expect(scenarioRun).toMatchObject({ pipelineId: pipeline.id, scenarioName: DEMO_SCENARIO.name, status: "passed", passed: 4, total: 4 });
-    expect(scenarioRun.steps?.find((s) => s.technicalName === DEMO_NAMES.rawTable)?.note).toBe("fixture with 3 given rows");
+    expect(scenarioRun.steps?.find((s) => s.technicalName === DEMO_NAMES.rawTable)?.note).toBe("3 test rows given");
     expect(scenarioRun.checks?.map((c) => c.label)).toEqual(["row_count = 2", "unique shipmentId", "row_count = 1", "rows_equal on routeSegmentId (1 row)"]);
 
     // A suite after a scan that changed the enrichment flow: the scenario broke there, and the alert says which check.

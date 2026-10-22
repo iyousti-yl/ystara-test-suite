@@ -7,10 +7,12 @@ import {
   getScenarioSuite,
   getSnapshotDetails,
   latestSucceededScan,
+  listPipelines,
   listSignOffs,
   listSnapshots,
   loadGraph,
   pipelineHistory,
+  pipelineSummaries,
   signOffBasis,
   type Db,
 } from "@ystara/db";
@@ -23,14 +25,16 @@ import {
   type PipelineDefinition,
   type PipelineHistory,
   type PipelineReport,
+  type PipelineSummary,
   type SignOff,
   type SignOffState,
 } from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
-import { scope } from "../scope.js";
+import { scope, space } from "../scope.js";
 
 /**
- * A pipeline's results for whoever answers for them: its history (suites,
+ * A pipeline's results for whoever answers for them: the Pipelines board (each
+ * pipeline's latest results in one call), its history (suites,
  * scenario runs, snapshots and sign-offs on one timeline, also as CSV), its
  * sign-offs, and the report an auditor reads. Reading needs "runs.read" (every
  * role); signing off needs "results.sign_off" (admins and test coordinators).
@@ -60,6 +64,26 @@ export function resultRoutes(db: Db) {
   }
 
   return async (app: FastifyInstance) => {
+    // The Pipelines board: each pipeline's latest results (pipelineHealth in @ystara/shared reads them), for the spaces the user sees.
+    app.get("/tenants/:id/pipeline-summaries", { config: read }, async (req, reply) => {
+      const tenant = await own.tenant(req, id.parse(req.params).id);
+      if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
+      const pipelines = new Map((await listPipelines(db, tenant.id)).filter((p) => space(req, p.output.space)).map((p) => [p.id, p]));
+      const latest = await latestSucceededScan(db, tenant.id);
+      const graphs = new Map<string, ReturnType<typeof loadGraph>>();
+      const graph = (scanId: string) => graphs.get(scanId) ?? graphs.set(scanId, loadGraph(db, scanId)).get(scanId)!;
+      const summaries = (await pipelineSummaries(db, tenant.id, signedIn(req).userId)).filter((s) => pipelines.has(s.pipelineId));
+      return Promise.all(
+        summaries.map(async ({ signOff, ...s }): Promise<PipelineSummary> => {
+          if (!signOff) return { ...s, signOff: null };
+          const { scanId, ...kept } = signOff;
+          const later = signOff.verdict === "approved" && scanId && latest && latest.id !== scanId;
+          const outdated = later ? changedSteps(await graph(scanId), await graph(latest.id), pipelines.get(s.pipelineId)!).length > 0 : false;
+          return { ...s, signOff: { ...kept, outdated } };
+        }),
+      );
+    });
+
     app.get("/pipelines/:id/signoffs", { config: read }, async (req, reply) => {
       const pipeline = await own.pipeline(req, id.parse(req.params).id);
       if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });

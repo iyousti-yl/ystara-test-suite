@@ -98,7 +98,7 @@ describe("a scenario", () => {
       "\n  - checkpoint: V_REGION_OUT\n    assertions: [{ type: rows_equal, key: [REGION], rows: [{ REGION: WEST, TOTAL: 2.5 }] }]",
     );
     expect(planScenario(graph, pipeline, midway).simulation.steps.find((s) => s.ref.technicalName === "LT_REGION_TOTALS")!.note).toBe(
-      "fixture with 1 given row, in place of TF_REGION_LOAD, which loads it",
+      "1 test row given, in place of TF_REGION_LOAD, which loads it",
     );
     expect(summary(await run(midway))).toEqual(["pass V_REGION_OUT rows_equal on REGION (1 row): the 1 row expected"]);
   });
@@ -123,10 +123,10 @@ describe("a scenario", () => {
     );
     const plan = planScenario(graph, pipeline, spec);
     expect(plan.problems).toEqual([
-      "The fixture for LT_NOPE names no table of the pipeline.",
-      "V_OPEN_ORDERS is a sql view: fixtures stand in for tables, so give rows to the tables it reads.",
-      "The fixture for LT_CUSTOMERS reads a CSV file, which isn't supported yet: give its rows in the scenario.",
-      "The fixture for LT_REGION_TOTALS has columns the table doesn't have: COLOUR.",
+      "The test rows for LT_NOPE name no table of the pipeline.",
+      "V_OPEN_ORDERS is a sql view: test rows stand in for tables, so give rows to the tables it reads.",
+      "The test rows for LT_CUSTOMERS come from a CSV file, which isn't supported yet: give its rows in the scenario.",
+      "The test rows for LT_REGION_TOTALS have columns the table doesn't have: COLOUR.",
     ]);
     expect(plan.checks.map((c) => c.problem)).toEqual([
       "V_NOPE isn't a step of the pipeline.",

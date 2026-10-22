@@ -112,6 +112,19 @@ describe("the youlytics brand layer", () => {
     }
   });
 
+  it("keeps muted text readable on every ground it is written on", () => {
+    for (const [theme, css] of [
+      ["light", light],
+      ["dark", dark],
+    ] as const) {
+      const p = branded(css, theme);
+      for (const ground of ["--sapBackgroundColor", "--sapGroup_ContentBackground", "--ystara-card", "--ystara-tint"]) {
+        const ratio = contrast(full(p.get("--ystara-muted")!), full(p.get(ground)!));
+        expect(ratio, `${theme}: --ystara-muted ${p.get("--ystara-muted")} on ${ground} ${p.get(ground)}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
   it("outranks UI5's own parameters, light and dark apart", () => {
     const css = brandCss();
     expect(css).toContain(':root:root:not([data-theme="dark"]){');
