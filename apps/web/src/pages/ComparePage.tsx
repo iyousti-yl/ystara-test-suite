@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Label, MessageStrip, Option, Panel, Select, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Title } from "@ui5/webcomponents-react";
-import { refKey, type ColumnComparison, type StepNotCompared, type StepState, type Verdict } from "@ystara/shared";
+import { refKey, type ColumnComparison, type DspObjectRef, type StepNotCompared, type StepState, type Verdict } from "@ystara/shared";
 import { useParams, useSearchParams } from "react-router";
 import { useComparison, useSavedPipeline, useSnapshots, type SnapshotComparisonJson, type SnapshotJson } from "../api";
 import { monoColumnWidth } from "../columns";
@@ -117,6 +117,7 @@ function ComparisonView({ comparison: c, saved }: { comparison: SnapshotComparis
         <VerdictTag verdict={c.verdict} large />
         <span>{summary(c)}</span>
       </div>
+      <NextSentence comparison={c} steps={saved.pipeline.steps} />
       {c.measuredOnce.length > 0 && (
         <MessageStrip design="Information" hideCloseButton>
           {c.measuredOnce.length === 1 ? "One step was" : `${c.measuredOnce.length} steps were`} measured in only one of the two snapshots, so{" "}
@@ -221,6 +222,24 @@ function summary(c: SnapshotComparisonJson): string {
   if (c.measuredOnce.length) parts.push(`${c.measuredOnce.length} not compared`);
   const time = formatDateTimesApart([taken(c.before), taken(c.after)]);
   return `${parts.join(" · ")}. From ${time(taken(c.before))} to ${time(taken(c.after))}.`;
+}
+
+/**
+ * What to do about it, in a sentence: a change shows first at the most
+ * upstream step that changed (steps run upstream first), so that is where to look.
+ */
+function NextSentence({ comparison: c, steps }: { comparison: SnapshotComparisonJson; steps: DspObjectRef[] }) {
+  const changed = new Set(
+    [...c.compared.filter((o) => o.verdict !== "unchanged"), ...[...c.measuredOnce, ...c.definitionsOnly].filter((s) => s.definitionChanged)].map(refKey),
+  );
+  const first = steps.find((s) => changed.has(refKey(s)));
+  if (!first) return c.compared.length ? <p>Nothing to do: every step measured in both is as it was.</p> : null;
+  return (
+    <p>
+      The change starts at <span className="mono">{first.technicalName}</span>, the first changed step from upstream. If it was expected, such as newly
+      loaded data, nothing needs doing; if not, look there first.
+    </p>
+  );
 }
 
 /** When a snapshot was taken, as the list of snapshots shows it. */

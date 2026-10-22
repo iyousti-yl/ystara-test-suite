@@ -118,7 +118,7 @@ export function fixtureQuery(table: string, columns: FixtureColumn[], rows: Reco
   const names = new Set(columns.map((c) => c.name));
   for (const row of rows) {
     const extra = Object.keys(row).filter((k) => !names.has(k));
-    if (extra.length) throw new SimulationStop(`the fixture for ${table} has columns the table doesn't have: ${extra.join(", ")}`);
+    if (extra.length) throw new SimulationStop(`the test rows for ${table} have columns the table doesn't have: ${extra.join(", ")}`);
   }
   if (!rows.length) return fragment(`SELECT ${columns.map((c) => `CAST(NULL AS ${c.type}) AS ${quoteIdentifier(c.name)}`).join(", ")} FROM DUMMY WHERE 1 = 0`);
   const selects = rows.map((row) =>

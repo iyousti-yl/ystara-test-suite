@@ -61,13 +61,13 @@ export function planScenario(graph: LineageGraph, pipeline: Pipeline, spec: Scen
   for (const f of spec.fixtures) {
     const { step, problem } = find(f.table);
     if (!step) {
-      problems.push(problem ?? `The fixture for ${f.table} names no table of the pipeline.`);
+      problems.push(problem ?? `The test rows for ${f.table} name no table of the pipeline.`);
     } else if (!TABLE_TYPES.has(step.type)) {
-      problems.push(`${f.table} is a ${step.type.replace(/_/g, " ")}: fixtures stand in for tables, so give rows to the tables it reads.`);
+      problems.push(`${f.table} is a ${step.type.replace(/_/g, " ")}: test rows stand in for tables, so give rows to the tables it reads.`);
     } else if (f.csv) {
-      problems.push(`The fixture for ${f.table} reads a CSV file, which isn't supported yet: give its rows in the scenario.`);
+      problems.push(`The test rows for ${f.table} come from a CSV file, which isn't supported yet: give its rows in the scenario.`);
     } else if (fixtures.has(refKey(step))) {
-      problems.push(`${f.table} has more than one fixture.`);
+      problems.push(`${f.table} is given test rows twice.`);
     } else {
       fixtures.set(refKey(step), f.rows ?? []);
     }

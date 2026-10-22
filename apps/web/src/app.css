@@ -204,6 +204,10 @@ section.block > ui5-title,
 .text-negative {
   color: var(--sapNegativeTextColor);
 }
+/* Needs a look, short of a failure: a rejected or outdated sign-off. */
+.text-attention {
+  color: var(--sapCriticalTextColor);
+}
 .mono {
   font-family: var(--ystara-mono);
 }
@@ -262,6 +266,83 @@ ui5-tag {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+/* --- The Pipelines board (pages/PipelinesPage.tsx): a word, a sentence and the next step per pipeline. */
+.board-status,
+.board-name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.board-watching {
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-left: var(--space-2);
+  color: var(--ystara-muted);
+  vertical-align: -0.0625em;
+}
+/* A pipeline's status above its tabs (pages/PipelinePages.tsx). */
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+/* Home's setup checklist: what is done, and the one button for what comes next. */
+.setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.setup-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+}
+.setup-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.setup-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.setup-steps ui5-icon {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.1875rem;
+  color: var(--ystara-muted);
+}
+.setup-steps li.is-done ui5-icon {
+  color: var(--ystara-sapphire);
+}
+.setup-steps li.is-next ui5-icon {
+  color: var(--ystara-ink);
+}
+.setup-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.setup-steps li.is-next .setup-label {
+  font-weight: 600;
+}
+.setup-action,
+.setup-problem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
 }
 
 /* A measure kept only as a hash (pages/Snapshots.tsx). */
@@ -796,9 +877,19 @@ ui5-tag {
 .shell-mark {
   display: flex;
 }
-/* The top bar draws the divider before it. */
+/* "Account / Tenant" in the top bar: the account, then the tenant picker. The bar draws the divider before them. */
 .shell-account {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
   color: var(--sapShell_InteractiveTextColor);
+}
+.shell-separator {
+  margin-left: var(--space-3);
+  opacity: 0.6;
+}
+.shell-read-only {
+  margin-left: var(--space-2);
 }
 .you {
   margin-left: var(--space-1);

@@ -1,5 +1,7 @@
 import { BusyIndicator, MessageStrip, Tag } from "@ui5/webcomponents-react";
+import { HEALTH_LABEL, type HealthState } from "@ystara/shared";
 import type { ConnectionJson, ScanJson } from "../api";
+import { formatDateTime, formatRelative } from "../format";
 
 /** A failed request, in the API's own words. */
 export function ErrorStrip({ error }: { error: Error | null | undefined }) {
@@ -36,4 +38,27 @@ const CONNECTION_STATUS = {
 export function ConnectionStatusTag({ status }: { status: ConnectionJson["status"] }) {
   const s = CONNECTION_STATUS[status];
   return <Tag design={s.design}>{s.label}</Tag>;
+}
+
+/** A pipeline's health: ruby when it fails, amber when its data changed, sapphire when it is fine. */
+const HEALTH_DESIGN = {
+  failing: "Negative",
+  changed: "Critical",
+  untested: "Neutral",
+  running: "Information",
+  ok: "Positive",
+} as const;
+
+export function HealthTag({ state }: { state: HealthState }) {
+  return <Tag design={HEALTH_DESIGN[state]}>{HEALTH_LABEL[state]}</Tag>;
+}
+
+/** "3 hours ago" in a list, with the exact date and time on hover; a dash for none. */
+export function When({ iso }: { iso: string | null | undefined }) {
+  if (!iso) return <>–</>;
+  return (
+    <time dateTime={iso} title={formatDateTime(iso)}>
+      {formatRelative(iso)}
+    </time>
+  );
 }

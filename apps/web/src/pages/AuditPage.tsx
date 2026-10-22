@@ -18,6 +18,7 @@ import { ErrorStrip } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
 import { ROLE_LABEL } from "../roles";
+import { kindLabel } from "../scenario/model";
 
 /**
  * The account's audit log (/audit), for admins: every change anyone made in
@@ -160,7 +161,7 @@ const FIELD: Record<string, string> = {
   clientId: "client ID",
   tokenUrl: "token URL",
   output: "output",
-  excludeWriters: "excluded writers",
+  excludeWriters: "ignored loaders",
   cron: "schedule",
   timeZone: "time zone",
   rowDropPercent: "alert on a row drop of (%)",
@@ -169,10 +170,14 @@ const FIELD: Record<string, string> = {
   comment: "comment",
 };
 
-/** "role: viewer · spaces: SALES, STOCK": the fields kept with the event. */
+const ORDER = Object.keys(FIELD);
+const place = (key: string) => (ORDER.includes(key) ? ORDER.indexOf(key) : ORDER.length);
+
+/** "role: viewer · spaces: SALES, STOCK": the fields kept with the event, in FIELD's order (a verdict before its comment). */
 export function details(detail: Record<string, unknown> | null): string {
   if (!detail) return "";
   return Object.entries(detail)
+    .sort(([a], [b]) => place(a) - place(b))
     .map(([key, value]) => {
       const text =
         value === null
@@ -185,7 +190,9 @@ export function details(detail: Record<string, unknown> | null): string {
               ? JSON.stringify(value)
               : key === "role" && String(value) in ROLE_LABEL
                 ? ROLE_LABEL[value as keyof typeof ROLE_LABEL]
-                : String(value);
+                : key === "kind"
+                  ? kindLabel(String(value))
+                  : String(value);
       return `${FIELD[key] ?? key}: ${text}`;
     })
     .join(" · ");

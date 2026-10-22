@@ -38,14 +38,14 @@ export function ObjectPanel(props: {
 
       <div className="object-panel-flags">
         {node.output && <Tag design="Positive">Output of this pipeline</Tag>}
-        {node.entry && <Tag design="Information">Entry table: fixtures go here</Tag>}
-        {node.excluded && <Tag design="Neutral">Excluded writer</Tag>}
-        {node.measurement?.measurable && <Tag design="Information">Measurable by snapshots</Tag>}
+        {node.entry && <Tag design="Information">Input table: test rows go here</Tag>}
+        {node.excluded && <Tag design="Neutral">Ignored loader</Tag>}
+        {node.measurement?.measurable && <Tag design="Information">Snapshots can measure it</Tag>}
       </div>
       {node.measurement && !node.measurement.measurable && <Text className="muted">{whyNotMeasurable(node.measurement.reason, ref)}</Text>}
       {node.severalWriters && (
         <MessageStrip design="Critical" hideCloseButton>
-          Several flows write this table, and all of them were followed. Select the writer that belongs to another process and exclude it.
+          Several flows load this table, and all of them were followed. Select the loader that belongs to another process and ignore it.
         </MessageStrip>
       )}
       {node.inLoop && (
@@ -57,12 +57,12 @@ export function ObjectPanel(props: {
       <div className="object-panel-actions">
         {onExclude && node.competingWriter && !node.excluded && (
           <Button icon="hide" onClick={onExclude}>
-            Exclude this writer
+            Ignore this loader
           </Button>
         )}
         {onFollow && node.excluded && (
           <Button icon="show" onClick={onFollow}>
-            Follow this writer again
+            Follow this loader again
           </Button>
         )}
         {onShowPipeline && !node.output && (

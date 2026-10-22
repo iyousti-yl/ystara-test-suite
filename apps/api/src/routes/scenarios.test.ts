@@ -104,7 +104,7 @@ describe("building a scenario", () => {
       expect: [{ checkpoint: "S.V_NOPE", assertions: [{ type: "row_count", equals: 0 }] }],
     });
     expect(misplaced.json()).toMatchObject({
-      problems: ["S.V_OUT is a sql view: fixtures stand in for tables, so give rows to the tables it reads."],
+      problems: ["S.V_OUT is a sql view: test rows stand in for tables, so give rows to the tables it reads."],
       checks: [{ problem: "S.V_NOPE isn't a step of the pipeline." }],
     });
 
@@ -221,7 +221,7 @@ describe("scenarios", () => {
     sent.length = 0;
     const res = await call("POST", `/scenarios/${scenario.id}/runs`, admin);
     expect(res.statusCode).toBe(409);
-    expect(res.json().error).toBe("The scenario can't run: The fixture for S.LT_NOPE names no table of the pipeline.");
+    expect(res.json().error).toBe("The scenario can't run: The test rows for S.LT_NOPE name no table of the pipeline.");
     expect(sent).toEqual([]);
   });
 });

@@ -15,7 +15,7 @@ import {
 } from "@ui5/webcomponents-react";
 import { ROLES, type Role, type SpaceScope } from "@ystara/shared";
 import { useCan, useChangeRole, useInvite, useMe, useRemoveMember, useRenameAccount, useTeam, useTeamSpaces, useWithdrawInvitation, type TeamJson } from "../api";
-import { ErrorStrip, Loading } from "../components/Feedback";
+import { ErrorStrip, Loading, When } from "../components/Feedback";
 import { LinkToSend } from "../components/LinkToSend";
 import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
@@ -97,13 +97,7 @@ export function UsersPage() {
                   <TableCell>
                     {m.email}
                     {m.userId === me.user.id && <span className="muted you">(you)</span>}
-                    {m.signInResets.map((r) => (
-                      <div key={String(r.madeAt)} className="muted">
-                        {r.usedAt
-                          ? `Sign-in reset by Ystara on ${formatDateTime(r.usedAt)} (link made ${formatDateTime(r.madeAt)})`
-                          : `Ystara made a sign-in reset link on ${formatDateTime(r.madeAt)}; ${r.open ? "not used yet" : "never used, no longer valid"}`}
-                      </div>
-                    ))}
+                    {m.signInResets.length > 0 && <ResetNote resets={m.signInResets} />}
                   </TableCell>
                   <TableCell>
                     <Select
@@ -319,5 +313,36 @@ function SpacesDialog({ member, onClose }: { member: TeamJson["members"][number]
         <ErrorStrip error={change.error} />
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * The latest sign-in reset Ystara's operator made for a member, in one short line; every reset
+ * of the last 30 days, with its times, on hover.
+ */
+function ResetNote({ resets }: { resets: TeamJson["members"][number]["signInResets"] }) {
+  const [latest] = resets;
+  const all = resets
+    .map((r) =>
+      r.usedAt
+        ? `Sign-in reset by Ystara on ${formatDateTime(r.usedAt)} (link made ${formatDateTime(r.madeAt)})`
+        : `Reset link made on ${formatDateTime(r.madeAt)}: ${r.open ? "not used yet" : "never used, no longer valid"}`,
+    )
+    .join("\n");
+  return (
+    <div className="muted" title={all}>
+      {latest.usedAt ? (
+        <>
+          Sign-in reset by Ystara <When iso={latest.usedAt} />
+        </>
+      ) : latest.open ? (
+        <>
+          Reset link waiting, made <When iso={latest.madeAt} />
+        </>
+      ) : (
+        "Reset link not used, no longer valid"
+      )}
+      {resets.length > 1 && ` (${resets.length} in 30 days)`}
+    </div>
   );
 }

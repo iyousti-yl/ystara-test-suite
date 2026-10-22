@@ -19,7 +19,7 @@ import {
   type Db,
 } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
-import { ScenarioSpec, type HistoryEvent, type PipelineDefinition, type PipelineReport, type SignOffState } from "@ystara/shared";
+import { pipelineHealth, ScenarioSpec, type HistoryEvent, type PipelineDefinition, type PipelineReport, type PipelineSummary, type SignOffState } from "@ystara/shared";
 import { testSecrets, testUser, type TestUser } from "../auth/testing.js";
 import { buildServer } from "../server.js";
 
@@ -147,6 +147,8 @@ describe("signing off a pipeline", () => {
     await scan(pipeline.tenantId, rawWith('SELECT * FROM "LT_DATA" WHERE 1 = 1'));
     const state: SignOffState = (await call("GET", `/pipelines/${pipeline.id}/signoffs`, viewer)).json();
     expect(state.changedSince).toEqual([{ space: "S", technicalName: "V_OUT", type: "sql_view", change: "definition" }]);
+    const board: PipelineSummary[] = (await call("GET", `/tenants/${pipeline.tenantId}/pipeline-summaries`, viewer)).json();
+    expect(board.find((s) => s.pipelineId === pipeline.id)?.signOff).toMatchObject({ verdict: "approved", outdated: true });
   });
 });
 
@@ -198,5 +200,34 @@ describe("a pipeline's history", () => {
     expect(report.comparison).toMatchObject({ verdict: "data_changed", changed: [{ technicalName: "V_OUT", verdict: "data_changed" }] });
     expect(report.history.map((e) => e.kind)).toEqual(["signoff", "snapshot", "suite", "snapshot"]);
     expect((await call("GET", `/pipelines/${pipeline.id}/report`, stranger)).statusCode).toBe(404);
+  });
+});
+
+describe("the Pipelines board", () => {
+  it("gives each pipeline its latest suite, snapshot with the output's rows, schedule, sign-off and watch, for its tenant only", async () => {
+    const tested = await pipelineOf("Board tested");
+    const tenantId = tested.tenantId;
+    const untested = await createPipeline(db, { tenantId, name: "Board untested", output: { space: "S", technicalName: "V_OUT" }, excludeWriters: [] });
+    const suiteId = await suiteOf(tested);
+    const snapshotId = await snapshotOf(tested, 7);
+    await call("POST", `/pipelines/${tested.id}/signoffs`, coordinator, { verdict: "approved" });
+
+    const res = await call("GET", `/tenants/${tenantId}/pipeline-summaries`, viewer);
+    expect(res.statusCode).toBe(200);
+    const [first, second]: PipelineSummary[] = res.json();
+    expect(first).toMatchObject({
+      pipelineId: tested.id,
+      scenarios: 1,
+      suite: { id: suiteId, status: "passed", passed: 1, total: 1 },
+      snapshot: { id: snapshotId, status: "succeeded", outputRows: 7, alert: null },
+      schedule: null,
+      signOff: { verdict: "approved", outdated: false },
+      watching: false,
+    });
+    expect(pipelineHealth(first)).toMatchObject({ state: "ok", sentence: "Its one scenario passes." });
+    expect(second).toMatchObject({ pipelineId: untested.id, scenarios: 0, suite: null, snapshot: null, signOff: null });
+    expect(pipelineHealth(second).state).toBe("untested");
+
+    expect((await call("GET", `/tenants/${tenantId}/pipeline-summaries`, stranger)).statusCode).toBe(404);
   });
 });

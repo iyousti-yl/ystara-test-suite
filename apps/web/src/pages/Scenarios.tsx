@@ -54,6 +54,7 @@ import {
   type ScenarioDraft,
   type ScenarioJson,
   type ScenarioRunJson,
+  type ScenarioSuiteJson,
 } from "../api";
 import { emailDelivery, teamsDelivery } from "../alerts";
 import { monoColumnWidth } from "../columns";
@@ -65,7 +66,7 @@ import { counted, formatDateTime, formatDateTimesApart } from "../format";
 import { typeLabel } from "../objectTypes";
 import { CheckDialog, type Checkpoint } from "../scenario/CheckDialog";
 import { readWorkbook, workbookOf } from "../scenario/excel";
-import { assertionLabel, cellFromText, gridFromRows, rowsFromGrid, shownColumns, type Grid } from "../scenario/model";
+import { assertionLabel, cellFromText, gridFromRows, kindLabel, KINDS, rowsFromGrid, shownColumns, type Grid } from "../scenario/model";
 import { PASTE_HELP, RowsGrid } from "../scenario/RowsGrid";
 import { useInTenant } from "../tenantScope";
 
@@ -79,12 +80,6 @@ import { useInTenant } from "../tenantScope";
  * and Claude can draft the rows and checks from the description (phase 3c).
  */
 
-const KINDS: { kind: ScenarioSpec["kind"]; label: string; hint: string }[] = [
-  { kind: "golden", label: "Golden", hint: "The normal case, with known results." },
-  { kind: "common", label: "Common", hint: "A frequent variation." },
-  { kind: "outlying", label: "Outlying", hint: "An edge case." },
-];
-const kindLabel = (kind: string) => kind[0].toUpperCase() + kind.slice(1);
 
 const RUN_STATUS = {
   queued: { design: "Information", label: "Queued" },
@@ -1087,6 +1082,23 @@ const CHANGE: Record<ChangedStep["change"], string> = { definition: "Definition 
  * after a scan that changed the pipeline, with what that scan changed, each
  * run, and the alert it raised. Refreshes while it runs.
  */
+/** What a finished suite means, and what to do next, in a sentence or two. */
+function suiteNext(s: ScenarioSuiteJson): string {
+  const failed = s.runs.filter((r) => r.status === "failed").length;
+  const errored = s.runs.filter((r) => r.status === "error").length;
+  const afterScan = s.cause === "scan" && s.changed.length > 0;
+  if (s.status === "error" && s.runs.length === 0) return "Nothing ran: see why above. Run all again once it is fixed.";
+  if (!failed && !errored) return afterScan ? "Every scenario still passes after the scan changed the pipeline: nothing to do." : "Every scenario passes: nothing to do.";
+  const parts: string[] = [];
+  if (failed) {
+    parts.push(
+      `Open ${failed === 1 ? "the failing scenario" : "a failing scenario"} to see which check broke and what the pipeline returned. If the pipeline changed on purpose, update what the scenario expects; if not, the change broke it${afterScan ? ", and it is among the steps the scan changed, below" : ""}.`,
+    );
+  }
+  if (errored) parts.push(`${errored === 1 ? "One scenario" : `${errored} scenarios`} couldn't run: the reason is in the table.`);
+  return parts.join(" ");
+}
+
 export function ScenarioSuitePage() {
   const { suiteId = "" } = useParams();
   const suite = useScenarioSuite(suiteId);
@@ -1137,10 +1149,12 @@ export function ScenarioSuitePage() {
           {emailDelivery(s.alert)} {teamsDelivery(s.alert.teams)}
         </MessageStrip>
       )}
-      {busy && (
+      {busy ? (
         <p className="muted">
           The worker runs the scenarios one after the other, each on its own test rows, signing in to the database once. This page refreshes on its own.
         </p>
+      ) : (
+        <p>{suiteNext(s)}</p>
       )}
       {s.changed.length > 0 && (
         <section className="block">

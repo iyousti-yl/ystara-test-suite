@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from "react";
 import {
   Avatar,
   Button,
+  Icon,
   Menu,
   MenuItem,
   MenuSeparator,
@@ -11,7 +12,7 @@ import {
   SideNavigation,
   SideNavigationItem,
   SideNavigationGroup,
-  Text,
+  Tag,
   UserMenu,
   UserMenuAccount,
   UserMenuItem,
@@ -86,8 +87,13 @@ function AppMenu({ me, slot }: { me: Me; slot?: string }) {
   const navigate = useNavigate();
   const tenantId = useCurrentTenant().current?.id;
   const app = appOf(useLocation().pathname);
+  // Without a picked tenant (on Tenants, or before the first one is added) the tenant's apps show, greyed, so the menu doesn't jump.
   const item = (to: App, text: string, icon: string) =>
-    tenantId && <SideNavigationItem icon={icon} text={text} data-to={appPath(to, tenantId)} selected={app === to} />;
+    tenantId ? (
+      <SideNavigationItem icon={icon} text={text} data-to={appPath(to, tenantId)} selected={app === to} />
+    ) : (
+      <SideNavigationItem icon={icon} text={text} disabled tooltip="Pick a tenant first, in the top bar" />
+    );
 
   return (
     <SideNavigation
@@ -110,19 +116,20 @@ function AppMenu({ me, slot }: { me: Me; slot?: string }) {
       {item("home", "Home", "home")}
       {item("discovery", "Discovery", "search")}
       {item("pipelines", "Pipelines", "process")}
-      {tenantId && (
-        // A group rather than a parent item: its title only folds it (on a phone a parent item's click closes the menu too),
-        // and it draws no divider between the title and the arrow.
-        <SideNavigationGroup text="Connection" expanded>
-          {item("connection", "Technical client", "connected")}
-          {item("database-users", "Database users", "database")}
-        </SideNavigationGroup>
-      )}
+      {/* A group rather than a parent item: its title only folds it (on a phone a parent item's click closes the menu too),
+          and it draws no divider between the title and the arrow. */}
+      <SideNavigationGroup text="Connection" expanded>
+        {item("connection", "Technical client", "connected")}
+        {item("database-users", "Database users", "database")}
+      </SideNavigationGroup>
     </SideNavigation>
   );
 }
 
-/** The product, the tenant picker, the account worked in, and the user menu's avatar. `slot` as for AppMenu. */
+/**
+ * The product, the account worked in and the tenant picker after it ("Account / Tenant"), a badge
+ * that says Ystara only reads Datasphere, and the user menu's avatar. `slot` as for AppMenu.
+ */
 function TopBar(props: { me: Me; slot?: string; onMenu: () => void; onTenantMenu: (opener: HTMLElement) => void; onUserMenu: (opener: HTMLElement) => void }) {
   const { me, onMenu } = props;
   const navigate = useNavigate();
@@ -149,11 +156,23 @@ function TopBar(props: { me: Me; slot?: string; onMenu: () => void; onTenantMenu
       }
       content={
         <>
-          {/* Hidden first when the bar runs out of room: the account name, never the tenant picker. */}
-          <TenantButton data-hide-order="10" onOpen={props.onTenantMenu} />
-          <Text className="shell-account" data-hide-order="1">
+          {/* Hidden first when the bar runs out of room: the account name, then the badge, never the tenant picker. */}
+          <span className="shell-account" data-hide-order="1">
             {me.account.name}
-          </Text>
+            <span className="shell-separator" aria-hidden="true">
+              /
+            </span>
+          </span>
+          <TenantButton data-hide-order="10" onOpen={props.onTenantMenu} />
+          <Tag
+            className="shell-read-only"
+            data-hide-order="2"
+            design="Neutral"
+            icon={<Icon name="locked" />}
+            title="Ystara only lists and reads your Datasphere objects and runs SELECT on their data. It never creates, changes, deploys or deletes anything there."
+          >
+            Read-only<span className="sr-only">: Ystara never changes your Datasphere tenants</span>
+          </Tag>
         </>
       }
       profile={<Avatar initials={initials(me.user.email)} accessibleName={`${me.user.email}, ${me.account.name}`} />}

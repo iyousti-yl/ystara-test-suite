@@ -23,7 +23,7 @@ export function TenantsPage() {
     <div className="page">
       <PageHeader
         title="Tenants"
-        subtitle="Datasphere tenants Ystara reads from. Read-only: it only lists and reads object definitions."
+        subtitle="The Datasphere tenants Ystara reads from: it lists and reads their objects, and changes nothing."
         actions={tenants.data?.length ? addButton : undefined}
       />
       <ErrorStrip error={tenants.error} />

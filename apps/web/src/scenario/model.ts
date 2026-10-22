@@ -1,4 +1,4 @@
-import type { Assertion, ScenarioColumn } from "@ystara/shared";
+import type { Assertion, ScenarioColumn, ScenarioSpec } from "@ystara/shared";
 
 /**
  * What the scenario builder edits, apart from the screen: test rows as text in
@@ -182,6 +182,14 @@ export function pasteInto(grid: Grid, row: number, column: number, pasted: strin
   });
   return { ...grid, rows };
 }
+
+/** The kinds in plain words; the scenario file keeps its own (golden, common, outlying). */
+export const KINDS: { kind: ScenarioSpec["kind"]; label: string; hint: string }[] = [
+  { kind: "golden", label: "Normal case", hint: "The everyday case, with known results." },
+  { kind: "common", label: "Variation", hint: "A frequent variation on it." },
+  { kind: "outlying", label: "Edge case", hint: "A rare or extreme case." },
+];
+export const kindLabel = (kind: string) => KINDS.find((k) => k.kind === kind)?.label ?? kind;
 
 /** An assertion in a few words, as a run labels it (labelOf in the connector's scenario.ts). */
 export function assertionLabel(a: Assertion): string {

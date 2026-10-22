@@ -38,10 +38,10 @@ export function PipelineView(props: {
     <div className="pipeline">
       {pipeline.ambiguousWriters.map((a) => (
         <MessageStrip key={refKey(a.table)} design="Critical" hideCloseButton>
-          <span className="mono">{a.table.technicalName}</span> has several writers:{" "}
+          <span className="mono">{a.table.technicalName}</span> is loaded by several flows:{" "}
           <span className="mono">{a.writers.map((w) => w.technicalName).join(", ")}</span>. All of them were followed, so this pipeline may include
           another process.{" "}
-          {onExclusionsChange ? "Select the writer that doesn't belong in the picture and exclude it." : "Exclude the one that doesn't belong when you try this pipeline on a scan."}
+          {onExclusionsChange ? "Select the loader that doesn't belong in the picture and ignore it." : "Ignore the one that doesn't belong: More actions › Change ignored loaders."}
         </MessageStrip>
       ))}
       {pipeline.cycles.map((c) => (

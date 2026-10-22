@@ -23,7 +23,7 @@ describe("a scenario skeleton", () => {
         "    rows:",
         "      - CUSTOMER_ID: null  # NVARCHAR(10)",
         "        REGION: null       # NVARCHAR(20)",
-        "  # LT_ORDERS: DF_ORDERS loads it, and a data flow can't be expressed in SQL",
+        "  # LT_ORDERS: it is loaded by DF_ORDERS, a data flow Ystara can't run",
         "  - table: SALES.LT_ORDERS",
       ].join("\n"),
     );
@@ -68,7 +68,7 @@ describe("a scenario's inputs", () => {
     const inputs = scenarioInputs(graph, pipeline);
     expect(inputs.tables.map((t) => [t.technicalName, t.why, t.columns.map((c) => c.name)])).toEqual([
       ["LT_CUSTOMERS", "nothing in the pipeline loads it", ["CUSTOMER_ID", "REGION"]],
-      ["LT_ORDERS", "DF_ORDERS loads it, and a data flow can't be expressed in SQL", ["ORDER_ID", "CUSTOMER_ID", "AMOUNT", "STATUS"]],
+      ["LT_ORDERS", "it is loaded by DF_ORDERS, a data flow Ystara can't run", ["ORDER_ID", "CUSTOMER_ID", "AMOUNT", "STATUS"]],
     ]);
     // A view's columns when its definition lists them (V_REGION_OUT's does, the synthetic V_OPEN_ORDERS' doesn't).
     expect(inputs.checkpoints.map((c) => [c.technicalName, c.columns?.map((col) => col.name) ?? null])).toEqual([

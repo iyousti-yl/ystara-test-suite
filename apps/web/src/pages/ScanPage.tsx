@@ -11,11 +11,12 @@ import {
   TableHeaderCell,
   TableHeaderRow,
   TableRow,
+  Tag,
   Title,
 } from "@ui5/webcomponents-react";
 import { isDataEdge, OBJECT_TYPES, refKey, type ScanGraph } from "@ystara/shared";
 import { useNavigate, useParams } from "react-router";
-import { pipelineQuery, useScan, useScanGraph } from "../api";
+import { pipelineQuery, usePipelines, useScan, useScanGraph } from "../api";
 import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
@@ -74,7 +75,7 @@ export function ScanPage() {
         </MessageStrip>
       )}
       <ErrorStrip error={graph.error} />
-      {graph.data && <ObjectList scanId={scanId} graph={graph.data} />}
+      {graph.data && <ObjectList scanId={scanId} tenantId={s.tenantId} graph={graph.data} />}
     </div>
   );
 }
@@ -84,8 +85,10 @@ type Filter = "outputs" | "all";
 /** Objects nothing else reads: views and analytic models at the end of a chain are what pipelines are usually built for. */
 const OUTPUT_TYPES = new Set(["sql_view", "graphical_view", "analytic_model"]);
 
-function ObjectList({ scanId, graph }: { scanId: string; graph: ScanGraph }) {
+function ObjectList({ scanId, tenantId, graph }: { scanId: string; tenantId: string; graph: ScanGraph }) {
   const navigate = useNavigate();
+  // Outputs that already have a saved pipeline, so nobody saves the same one twice by accident.
+  const saved = new Map((usePipelines(tenantId).data ?? []).map((p) => [refKey(p.output), p.name]));
   const multiSpace = graph.spaces.length > 1;
 
   const rows = useMemo(() => {
@@ -139,8 +142,8 @@ function ObjectList({ scanId, graph }: { scanId: string; graph: ScanGraph }) {
       </div>
       <p className="muted">
         {filter === "outputs"
-          ? "Views and analytic models that nothing else in the scan reads. Pick one to see the pipeline behind it."
-          : "Pick any object to see the pipeline behind it."}
+          ? "Views and analytic models that nothing else in the scan reads: what people use. Pick one to see the pipeline behind it, and save it from there."
+          : "Pick any object to see the pipeline behind it, and save it from there."}
       </p>
       <Table
         noDataText="No objects match."
@@ -168,7 +171,16 @@ function ObjectList({ scanId, graph }: { scanId: string; graph: ScanGraph }) {
       >
         {shown.map((r) => (
           <TableRow key={r.key} rowKey={r.key} interactive>
-            <TableCell className="mono">{r.technicalName}</TableCell>
+            <TableCell>
+              <span>
+                <span className="mono">{r.technicalName}</span>
+                {saved.has(r.key) && (
+                  <Tag design="Neutral" className="tag-after" title={`Saved as the pipeline "${saved.get(r.key)}"`}>
+                    Saved
+                  </Tag>
+                )}
+              </span>
+            </TableCell>
             {businessNames && <TableCell>{r.businessName || "–"}</TableCell>}
             <TableCell>
               {/* In a span: the cell lays its children out in a row, and the dot sits on the text's line only inside one. */}
