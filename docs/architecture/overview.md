@@ -48,7 +48,7 @@ _Phase 1 version. Written so one person can maintain the whole system. Update it
 | 4 | Metadata, hashes and aggregates only; no raw rows by default | Security reviews and GDPR (HR data at the first client) | A customer opts in to store N differing rows |
 | 5 | Scenario spec is YAML validated by Zod; visual builder emits the same YAML | One artefact for devs and non-devs; Git-friendly | Never |
 | 6 | **Strictly read-only.** The connector allows only CLI `list`/`read`, plus `config cache init` which only downloads the CLI's command list (enforced in `packages/connector/src/readonly.ts`), and SQL `SELECT` | Product promise to customers and Issam's requirement (2026-10-15); easiest possible security review | Never without an explicit product decision |
-| 7 | Hosted in the EU (Hetzner or Scaleway), Docker Compose, Caddy | Budget under €200/month, GDPR | Beyond ~30 tenants, move to managed Postgres and two VMs |
+| 7 | Hosted in the EU (Hetzner or Scaleway), Docker Compose, Caddy (`deploy/`: Caddy is the only published port, secrets are files under `/etc/ystara/secrets`, nightly `pg_dump` encrypted with restic to object storage at another provider, a weekly restore test; runbook in `deploy/README.md`) | Budget under €200/month, GDPR | Beyond ~30 tenants, move to managed Postgres and two VMs |
 | 8 | Email + TOTP auth in v1, SSO in v2 | Keep v1 small; SSO is a known enterprise ask | First enterprise procurement |
 | 9 | Scenario tests are **read-only simulations**: fixture rows are inlined into a single `SELECT` that reproduces the pipeline's SQL logic | Keeps decision 6 for scenarios too (chosen by Issam, 2026-10-15) | Customers ask for coverage of flow types that can't be expressed as SQL |
 | 10 | Lineage is found by scanning definitions for names of known objects, with role rules per type, not by a parser per object format | Flow and task chain JSON differs between CLI releases; this survives format changes | Real samples show false or missing edges |
@@ -185,7 +185,8 @@ Open questions for phase 3: how delta loads and upserts in transformation flows 
 
 - Read-only by design: CLI limited to `list`/`read` in code (plus `config cache init`, which only fills the CLI's local list of commands), database user with `SELECT` rights only, no writes, deploys or task runs.
 - Sign-in with password and a mandatory authenticator code; roles checked on every API call; each account sees only its own data.
-- Secrets encrypted at rest, TLS in transit, EU hosting, daily encrypted backups, 30-day retention of results by default.
+- Secrets encrypted at rest, TLS in transit (Caddy, Let's Encrypt), EU hosting, nightly backups encrypted on the server before they leave it (restic) and kept at another EU provider, restored into a throwaway database every week to prove they work. The master key is never in a backup.
+- On the server only HTTPS (and SSH) is reachable: Postgres and the API publish no port, and passwords are mounted as files, never set as environment variables.
 - No customer row data stored unless explicitly enabled per account.
 - Full audit log: every change made through the app (connections, scans, pipelines, tests, runs, sign-offs, users and roles) and every sign-in, with who, when and from where; admins read and export it, nobody can change it in the app.
 - Members can be limited to some spaces; a pipeline is visible to those who see its output's space.

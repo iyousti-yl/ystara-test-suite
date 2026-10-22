@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { COMPOSE_SETTING, envKeys, loadLocalEnv, unquotedHashKeys } from "./env.js";
+import { parse } from "yaml";
+import { COMPOSE_SETTING, envKeys, loadLocalEnv, settingFromEnv, unquotedHashKeys } from "./env.js";
 
 const dirs: string[] = [];
 const touched = ["YSTARA_TEST_PORT", "YSTARA_TEST_SECRET", "MASTER_KEY_FILE"];
@@ -55,6 +56,23 @@ describe("loadLocalEnv", () => {
   });
 });
 
+describe("settingFromEnv", () => {
+  it("reads the file NAME_FILE names, without its final line break, before NAME", () => {
+    const dir = root({ "database_url": "postgres://u:p@db:5432/ystara\n" });
+    const env = { DATABASE_URL_FILE: path.join(dir, "database_url"), DATABASE_URL: "postgres://other" };
+    expect(settingFromEnv("DATABASE_URL", env)).toBe("postgres://u:p@db:5432/ystara");
+  });
+
+  it("falls back to NAME, and to nothing", () => {
+    expect(settingFromEnv("SMTP_URL", { SMTP_URL: "smtp://mail:1025" })).toBe("smtp://mail:1025");
+    expect(settingFromEnv("SMTP_URL", {})).toBeUndefined();
+  });
+
+  it("names a missing file, never a value", () => {
+    expect(() => settingFromEnv("SMTP_URL", { SMTP_URL_FILE: "/nowhere/smtp_url" })).toThrow("SMTP_URL_FILE names /nowhere/smtp_url, which doesn't exist.");
+  });
+});
+
 describe("envKeys", () => {
   it("reads names only, skipping comments and blank lines", () => {
     expect(envKeys("# comment\n\nA=1\r\n  export B = '2'\nnot a setting\n")).toEqual(["A", "B"]);
@@ -81,6 +99,39 @@ describe("docker-compose.yml", () => {
     const file = path.join(repo, ".env");
     const keys = existsSync(file) ? envKeys(readFileSync(file, "utf8")) : [];
     expect(keys.filter((k) => !COMPOSE_SETTING.test(k)), "move these keys from .env to .env.local").toEqual([]);
+  });
+});
+
+describe("deploy/docker-compose.prod.yml", () => {
+  const repo = fileURLToPath(new URL("../../../", import.meta.url));
+  const text = readFileSync(path.join(repo, "deploy", "docker-compose.prod.yml"), "utf8");
+  // Compose's own tags (!override, !reset) are read as plain values here, which is all these checks need.
+  const prod = parse(text, { logLevel: "error", merge: true }) as {
+    services: Record<string, { ports?: string[]; environment?: Record<string, string>; secrets?: string[] }>;
+    secrets: Record<string, { file: string }>;
+  };
+
+  it("substitutes only Compose settings and loads no env files", () => {
+    const used = [...text.matchAll(/\$\{?([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]);
+    expect(used.filter((v) => !COMPOSE_SETTING.test(v))).toEqual([]);
+    expect(text).not.toMatch(/^\s*env_file\s*:/m);
+  });
+
+  it("opens only Caddy to the outside: Postgres and the API publish no port", () => {
+    const published = Object.entries(prod.services).filter(([, s]) => s.ports?.length).map(([name]) => name);
+    expect(published).toEqual(["caddy"]);
+    expect(prod.services.postgres.ports).toEqual([]);
+    expect(prod.services.api.ports).toEqual([]);
+  });
+
+  it("puts no password in an environment variable: each comes from a file in the secrets folder", () => {
+    for (const [name, service] of Object.entries(prod.services)) {
+      for (const [key, value] of Object.entries(service.environment ?? {})) {
+        expect(`${name}.${key}=${value}`).not.toMatch(/PASSWORD=|postgres:\/\/|smtps?:\/\//);
+      }
+      for (const secret of service.secrets ?? []) expect(prod.secrets[secret], `${name} uses ${secret}`).toBeDefined();
+    }
+    for (const secret of Object.values(prod.secrets)) expect(secret.file).toMatch(/^\$\{YSTARA_SECRETS:-\/etc\/ystara\/secrets\}\//);
   });
 });
 

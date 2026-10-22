@@ -1,0 +1,16 @@
+# Caddy in front of Ystara (deploy/docker-compose.prod.yml): HTTPS for YSTARA_DOMAIN with a certificate
+# from Let's Encrypt, renewed on its own, and plain http on port 80 redirected to it.
+# The API sets the security headers itself (Content-Security-Policy, HSTS, ...: apps/api/src/server.ts).
+{
+	email {$YSTARA_ACME_EMAIL}
+}
+
+{$YSTARA_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy api:4000
+	header -Server
+	log {
+		output stdout
+		format console
+	}
+}

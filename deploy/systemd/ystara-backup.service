@@ -1,0 +1,11 @@
+# Copy to /etc/systemd/system/ (deploy/README.md, step 7). Run by ystara-backup.timer.
+[Unit]
+Description=Ystara: back up the database, encrypted, off the server
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ystara/deploy/backup.sh
+Nice=10

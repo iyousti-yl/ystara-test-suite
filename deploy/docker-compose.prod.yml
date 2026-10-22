@@ -1,0 +1,117 @@
+# Ystara on a server: docker-compose.yml plus this file, run through deploy/compose (see deploy/README.md).
+#   deploy/compose up -d --build            start or update everything
+#   deploy/compose run --rm tools npm run account:create -- --name "Customer" --admin admin@customer.example
+#
+# What changes from the local setup:
+# - Caddy is the only door: it answers on 80 and 443, gets the HTTPS certificate for YSTARA_DOMAIN
+#   from Let's Encrypt and passes requests to the API. Postgres and the API publish no port at all.
+# - Every password lives in a file under /etc/ystara/secrets (YSTARA_SECRETS names another folder, for a
+#   trial run), mounted into the services that need it: never in an environment variable, so
+#   `docker inspect` and Compose's output don't show it.
+# - Alert emails go to a real mail server (the file smtp_url); Mailpit doesn't run.
+# - Services restart on their own, and their logs rotate.
+#
+# Settings Compose substitutes come from /etc/ystara/ystara.env (deploy/ystara.env.example) and are
+# all named YSTARA_*, like the local .env: no secret ever goes through substitution.
+
+x-server: &server
+  restart: unless-stopped
+  logging:
+    driver: local # rotates: 5 files of 20 MB per container
+
+services:
+  postgres:
+    <<: *server
+    environment: !override
+      POSTGRES_USER: ystara
+      POSTGRES_DB: ystara
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    ports: !reset []
+    secrets: [db_password]
+
+  migrate:
+    environment: !override
+      DATABASE_URL_FILE: /run/secrets/database_url
+    secrets: [database_url]
+    logging:
+      driver: local
+
+  api:
+    <<: *server
+    environment: !override
+      DATABASE_URL_FILE: /run/secrets/database_url
+      API_HOST: 0.0.0.0
+      YSTARA_API_PORT: 4000
+      MASTER_KEY_FILE: /run/secrets/master_key
+      # Caddy, on the same machine, says who the client is (X-Forwarded-For) and that it came over HTTPS,
+      # so sign-in limits count per real client and the session cookie is marked Secure.
+      YSTARA_TRUST_PROXY: 1
+    ports: !reset []
+    secrets: [database_url, master_key]
+
+  worker:
+    <<: *server
+    environment: !override
+      DATABASE_URL_FILE: /run/secrets/database_url
+      MASTER_KEY_FILE: /run/secrets/master_key
+      # An empty file sends no email: alerts are then only shown in the app (and posted in Teams).
+      SMTP_URL_FILE: /run/secrets/smtp_url
+      SMTP_FROM: ${YSTARA_SMTP_FROM:?set YSTARA_SMTP_FROM in /etc/ystara/ystara.env}
+      YSTARA_PUBLIC_URL: https://${YSTARA_DOMAIN:?set YSTARA_DOMAIN in /etc/ystara/ystara.env}
+    secrets: [database_url, master_key, smtp_url]
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+
+  # Not on a server: alerts go to the real mail server instead.
+  mailpit:
+    profiles: [local-only]
+
+  caddy:
+    <<: *server
+    image: caddy:2.10-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      YSTARA_DOMAIN: ${YSTARA_DOMAIN:?set YSTARA_DOMAIN in /etc/ystara/ystara.env}
+      YSTARA_ACME_EMAIL: ${YSTARA_ACME_EMAIL:?set YSTARA_ACME_EMAIL in /etc/ystara/ystara.env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # the certificates: kept, so a restart doesn't ask Let's Encrypt again
+      - caddy_config:/config
+    depends_on:
+      - api
+
+  # One-off admin commands, run by hand and removed after: deploy/compose run --rm tools npm run <script> -- ...
+  # The build with its dev packages and tools/ (Dockerfile, stage "tools"); never started by `up`.
+  tools:
+    image: ystara-tools:latest
+    pull_policy: build
+    build:
+      context: .
+      target: tools
+    profiles: [tools]
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      MASTER_KEY_FILE: /run/secrets/master_key
+      YSTARA_PUBLIC_URL: https://${YSTARA_DOMAIN:?set YSTARA_DOMAIN in /etc/ystara/ystara.env}
+    secrets: [database_url, master_key]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  master_key:
+    file: ${YSTARA_SECRETS:-/etc/ystara/secrets}/master_key
+  db_password:
+    file: ${YSTARA_SECRETS:-/etc/ystara/secrets}/db_password
+  database_url:
+    file: ${YSTARA_SECRETS:-/etc/ystara/secrets}/database_url
+  smtp_url:
+    file: ${YSTARA_SECRETS:-/etc/ystara/secrets}/smtp_url
