@@ -16,10 +16,12 @@
  *
  * Without --page it opens every kind of page that has data: sign-in (signed
  * out), Tenants, each tenant's apps (Home, Discovery, Pipelines, Technical
- * client, Database users), its newest successful scan, its first saved
- * pipeline in its three tabs with its newest snapshot and the comparison of its
- * latest two, a new scenario's builder, its first scenario with that scenario's
- * newest run, Users and roles for admins and Operator for operators. --tenant
+ * client, Database users), its newest successful scan, one saved pipeline
+ * (the first with two successful snapshots, or else with one) in its four
+ * tabs with its newest snapshot, the comparison of its latest two and its
+ * printable report, a new scenario's builder, its first scenario with that
+ * scenario's newest run, Users and roles, Alerts and the Audit log for admins
+ * and Operator for operators. --tenant
  * (once or more) keeps to those tenants. --page takes a path on this app that
  * starts with one "/", so it never opens another site. Without a tenant of your
  * own, `npm run db:demo` adds a synthetic one whose names are as long as
@@ -339,13 +341,20 @@ async function discoverPages(cookie: string, who: { role: string; operator: bool
     add("database-users", `/tenants/${tenant.id}/database-users`);
     const scan = (await get<Scan[]>(`/tenants/${tenant.id}/scans`)).find((s) => s.status === "succeeded");
     if (scan) add("scan", `/scans/${scan.id}`);
-    const [pipeline] = await get<PipelineDefinition[]>(`/tenants/${tenant.id}/pipelines`);
-    if (pipeline) {
+    // The pipeline with the most to show: two successful snapshots (so a comparison), or else one, or else the first.
+    const candidates = await Promise.all(
+      (await get<PipelineDefinition[]>(`/tenants/${tenant.id}/pipelines`)).map(async (p) => ({ pipeline: p, snapshots: await get<Snapshot[]>(`/pipelines/${p.id}/snapshots`) })),
+    );
+    const succeeded = (c: (typeof candidates)[number]) => c.snapshots.filter((s) => s.status === "succeeded").length;
+    const chosen = candidates.find((c) => succeeded(c) >= 2) ?? candidates.find((c) => succeeded(c) >= 1) ?? candidates[0];
+    if (chosen) {
+      const { pipeline, snapshots } = chosen;
       add("pipeline", `/pipelines/${pipeline.id}`);
       add("pipeline-snapshots", `/pipelines/${pipeline.id}/snapshots`);
-      const snapshots = await get<Snapshot[]>(`/pipelines/${pipeline.id}/snapshots`);
       if (snapshots[0]) add("snapshot", `/snapshots/${snapshots[0].id}`);
-      if (snapshots.filter((s) => s.status === "succeeded").length >= 2) add("compare", `/pipelines/${pipeline.id}/compare`);
+      if (succeeded(chosen) >= 2) add("compare", `/pipelines/${pipeline.id}/compare`);
+      add("pipeline-history", `/pipelines/${pipeline.id}/history`);
+      add("pipeline-report", `/pipelines/${pipeline.id}/report`);
       add("pipeline-scenarios", `/pipelines/${pipeline.id}/scenarios`);
       add("scenario-new", `/pipelines/${pipeline.id}/scenarios/new`);
       const [scenario] = await get<StoredScenario[]>(`/pipelines/${pipeline.id}/scenarios`);
@@ -360,6 +369,7 @@ async function discoverPages(cookie: string, who: { role: string; operator: bool
   }
   if (who.role === "admin") pages.push({ label: "users", path: "/users", signedIn: true });
   if (who.role === "admin") pages.push({ label: "alerts", path: "/alerts", signedIn: true });
+  if (who.role === "admin") pages.push({ label: "audit", path: "/audit", signedIn: true });
   if (who.operator) pages.push({ label: "operator", path: "/operator", signedIn: true });
   return pages;
 }

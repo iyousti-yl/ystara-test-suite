@@ -264,6 +264,21 @@ ui5-tag {
   gap: var(--space-2);
 }
 
+/* A measure kept only as a hash (pages/Snapshots.tsx). */
+.fingerprint {
+  width: 1rem;
+  height: 1rem;
+  color: var(--ystara-muted);
+}
+/* A long ID on one line, with its copy button (components/ShortId.tsx). */
+.short-id {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
 /* --- Connection: technical client and database users */
 .connection-row {
   margin: var(--space-2) 0;
@@ -890,6 +905,25 @@ ui5-tag {
   flex: 1;
   min-width: 0;
 }
+/* A field that gets focus scrolls clear of the bar, not under it. */
+.app-main:has(.action-bar) {
+  scroll-padding-bottom: 96px;
+}
+/* On a phone the bar keeps to one line: "Saved", without when and by whom, which wider screens show. */
+@media (max-width: 600px) {
+  .action-bar {
+    bottom: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+  .action-bar-state {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .action-bar-detail {
+    display: none;
+  }
+}
 .scenario-description {
   display: block;
 }
@@ -1112,4 +1146,400 @@ section.block.scenario-about {
 section.block > * {
   margin-top: 0;
   margin-bottom: 0;
+}
+
+/* --- A pipeline's history: its sign-off and two trends (pages/History.tsx, components/Charts.tsx) */
+.signoff p {
+  margin: 0;
+}
+.signoff-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+.signoff-head ui5-title + p {
+  margin-top: var(--space-2);
+}
+.signoff-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.signoff-comment {
+  margin: 0;
+  padding: var(--space-1) var(--space-4);
+  border-left: 3px solid var(--ystara-border);
+  color: var(--ystara-ink);
+  white-space: pre-wrap;
+}
+.signoff-verdict {
+  display: flex;
+  flex-direction: column;
+}
+.chart-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: var(--space-5);
+  margin: var(--space-2) 0;
+}
+.chart-row > section.block {
+  margin: 0;
+}
+.chart-card > p {
+  margin: 0;
+}
+/* The chart's box holds the plot and its axis labels: no scroll inside it. */
+.chart {
+  position: relative;
+  width: 100%;
+  height: 168px;
+}
+.chart-svg {
+  display: block;
+  overflow: visible;
+}
+.chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 168px;
+  text-align: center;
+}
+.chart-grid {
+  stroke: var(--ystara-border);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+.chart-tick,
+.chart-label {
+  font-family: var(--sapFontFamily);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-tick {
+  fill: var(--ystara-muted);
+}
+.chart-label {
+  fill: var(--ystara-ink);
+  font-weight: 600;
+}
+.chart-column {
+  fill: var(--ystara-sapphire);
+}
+.chart-column-zero {
+  fill: var(--ystara-muted);
+}
+.chart-mark.is-hovered .chart-column {
+  fill: color-mix(in srgb, var(--ystara-sapphire) 75%, var(--ystara-card));
+}
+.chart-hit {
+  fill: transparent;
+  outline: none;
+}
+.chart-hit:focus-visible {
+  stroke: var(--sapContent_FocusColor);
+  stroke-width: 2;
+}
+.chart-line {
+  fill: none;
+  stroke: var(--ystara-sapphire);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+/* A 2px ring in the card's colour keeps each point apart from the line. */
+.chart-dot {
+  fill: var(--ystara-sapphire);
+  stroke: var(--ystara-card);
+  stroke-width: 2;
+}
+.chart-crosshair {
+  stroke: var(--ystara-grey);
+  stroke-width: 1;
+}
+.chart-tooltip {
+  position: absolute;
+  top: -8px;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-1) var(--space-3);
+  background: var(--ystara-card);
+  border: 1px solid var(--ystara-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgb(20 32 51 / 0.12);
+  color: var(--ystara-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1;
+}
+.chart-tooltip strong {
+  color: var(--ystara-ink);
+  font-size: 14px;
+}
+
+/* --- Users: the spaces a member sees (pages/UsersPage.tsx, components/SpacesPicker.tsx) */
+.spaces-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.spaces-picker {
+  display: flex;
+  flex-direction: column;
+}
+.spaces-picker-some {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-left: var(--space-6);
+}
+.spaces-picker-known {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-4);
+}
+
+/* --- The audit log (pages/AuditPage.tsx): one row of filters above the list */
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-4);
+}
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.filter ui5-select,
+.filter ui5-date-picker {
+  width: 14rem;
+}
+@media (max-width: 600px) {
+  .filter,
+  .filter ui5-select,
+  .filter ui5-date-picker {
+    width: 100%;
+  }
+}
+.load-more {
+  display: flex;
+  justify-content: center;
+}
+/* While a new filter loads, the old list stays, dimmed. */
+.is-refreshing {
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+/* --- A pipeline's report (pages/ReportPage.tsx): a sheet on screen, just the sheet on paper */
+.report {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5) var(--space-8);
+}
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+.report-actions a {
+  color: var(--sapLinkColor);
+}
+.report-sheet {
+  padding: var(--space-6);
+  background: var(--ystara-card);
+  border: 1px solid var(--ystara-border);
+  border-radius: var(--radius-panel);
+  color: var(--ystara-ink);
+}
+@media (max-width: 600px) {
+  .report {
+    padding: var(--space-4) var(--space-4) var(--space-6);
+  }
+  .report-sheet {
+    padding: var(--space-4);
+  }
+}
+.report-sheet h1 {
+  margin: var(--space-3) 0 var(--space-4);
+  font-size: 1.75rem;
+  font-weight: 600;
+}
+.report-sheet h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+.report-sheet section {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--ystara-border);
+}
+.report-sheet p {
+  margin: var(--space-2) 0;
+}
+.report-brand,
+.report-facts dt {
+  font-family: var(--ystara-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ystara-muted);
+}
+.report-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.report-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--space-3) var(--space-5);
+  margin: 0;
+}
+.report-facts dd {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.report-table th,
+.report-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ystara-border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.report-table th {
+  color: var(--ystara-muted);
+  font-weight: 600;
+}
+.report-table tr {
+  break-inside: avoid;
+}
+.report-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.report-badge.is-approved {
+  background: var(--ystara-tint);
+  color: var(--ystara-sapphire);
+}
+.report-badge.is-rejected {
+  background: color-mix(in srgb, var(--ystara-ruby) 14%, transparent);
+  color: var(--ystara-ruby);
+}
+.report-warning {
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--ystara-amber);
+}
+.report-table .report-result {
+  white-space: nowrap;
+}
+/* A scenario's name over its checks. */
+.report-table .report-group th {
+  padding-top: var(--space-3);
+  color: var(--ystara-ink);
+}
+@media (max-width: 600px) {
+  .report-table,
+  .report-table tbody {
+    display: block;
+  }
+  .report-table thead {
+    display: none;
+  }
+  .report-table tr {
+    display: block;
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--ystara-border);
+  }
+  .report-table td {
+    display: grid;
+    grid-template-columns: 6rem minmax(0, 1fr);
+    gap: var(--space-2);
+    padding: 2px 0;
+    border: 0;
+  }
+  .report-table td::before {
+    content: attr(data-label);
+    color: var(--ystara-muted);
+    font-family: var(--sapFontFamily);
+    font-weight: 600;
+  }
+  .report-table .report-result {
+    white-space: normal;
+  }
+  .report-table .report-group th {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+}
+.report-steps {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+.report-steps li {
+  overflow-wrap: anywhere;
+}
+.report-footer {
+  margin-top: var(--space-6);
+  font-size: 0.8125rem;
+}
+@media print {
+  @page {
+    margin: 16mm;
+  }
+  html,
+  body,
+  #root {
+    height: auto;
+    background: #fff;
+  }
+  .report {
+    max-width: none;
+    padding: 0;
+  }
+  .report-actions {
+    display: none;
+  }
+  /* Paper is light, whatever the screen's mode. */
+  .report-sheet {
+    --ystara-ink: #142033;
+    --ystara-muted: #5b6678;
+    --ystara-border: #e3e8f0;
+    --ystara-card: #fff;
+    --ystara-tint: #eef2f8;
+    --ystara-sapphire: #1f3b70;
+    --ystara-ruby: #9e2b3f;
+    --ystara-amber: #d9962b;
+    padding: 0;
+    border: 0;
+    background: #fff;
+    color: var(--ystara-ink);
+  }
+  .report-badge {
+    print-color-adjust: exact;
+  }
+  .report-sheet section {
+    break-inside: avoid-page;
+  }
 }

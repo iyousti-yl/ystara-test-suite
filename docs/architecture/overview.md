@@ -78,13 +78,14 @@ In place (`packages/db/migrations/`):
 - `scenario_suites` (tenant, pipeline, cause manual/scan, the scan that queued it and the steps it changed, status, how many runs passed of how many) → `scenario_alerts` (the scenarios that broke, email status and recipients, Teams status)
 - `tenant_scan_schedules` (tenant, cron line, time zone, next run); `scans.scheduled` marks the scans it made
 - `teams_channels` (account, the webhook address encrypted with `MASTER_KEY`, its host, who set it); `snapshot_alerts` also has a Teams status
+- `audit_events` (account, or none for the operator panel; user and their email as it was; when; the action; what it acted on with its name read before the request ran; the request fields the action lists; the IP address). Written only, never changed or deleted by the app
+- `memberships.spaces` and `invitations.spaces`: null for every space, or the space IDs a member sees
+- `pipeline_signoffs` (tenant, pipeline, approved or rejected, comment, the scan, latest suite and latest successful snapshot it covered, who signed and their email, when)
 
 Planned:
 
-- a space scope on `memberships` (a role limited to some spaces)
 - `pipeline_steps` if tests need stored step lists
 - scenario fixtures from an uploaded CSV
-- `audit_log`
 
 Secrets are encrypted with `MASTER_KEY` (AES-256-GCM, `packages/shared/src/secrets.ts`: authenticator secrets, tenant client secrets, database user passwords, snapshot salts and Teams webhook addresses). The key lives alone in the git-ignored file `.master-key`, which Docker Compose passes as a secret to the API and the worker; a hosting platform can set `MASTER_KEY` instead. The API seals a client secret for its tenant (the tenant ID is the additional authenticated data), a database password for its tenant and space, and a Teams webhook address for its account, and the worker seals a tenant's snapshot salt for that tenant; only the worker opens them, for one job at a time (the API opens the webhook address too, to post a test card). Rotating the master key re-encrypts rows in a migration.
 
@@ -169,6 +170,15 @@ Who may do what: everyone in the account reads scenarios and runs (`scenarios.re
 - **Scenario alerts** (`scenario-alert` job): after a suite with cause `scan` that didn't pass, `brokenScenarios` in `@ystara/shared` lists the runs that failed or couldn't run where the scenario's run before passed, or there was none. The alert is stored, emailed to the watchers and posted in Teams, as snapshot alerts are; a suite started by hand never alerts.
 - **Teams** (`/api/account/teams-channel`, the Alerts page, admins only): one channel per account. The address must be one of Microsoft's webhook hosts (`teamsWebhookHost`); a test card is posted before it is kept, sealed for the account. `deliverAlert` (`apps/worker/src/jobs/deliver.ts`) sends the email, then the Adaptive Card (`teamsPayload`), keeps the two statuses apart and lets pg-boss retry the one that failed.
 
+### Audit log, sign-off and access per space (phase 4a)
+
+What a design partner's auditors and admins ask for before a pilot.
+
+- **Audit log** (`apps/api/src/audit.ts`, `AUDIT_ACTIONS` in `packages/shared/src/audit.ts`). After each request that changed something answers below 400, one `audit_events` row says who did what, to what, when and from which address; each sign-in (after the code) and each switch of account too. What a request acts on is read before it runs, so a deleted pipeline keeps its name in the log. Only the body fields the action lists are kept (a name, a role, spaces, a verdict and its comment), never a secret, a webhook address or test rows. Every route that isn't a GET must be in `AUDIT_ACTIONS` (or listed as null, for one that changes nothing, such as compiling a draft): the API refuses to start otherwise, so a new route can't go unlogged by mistake. Operator panel events belong to no account. Admins read it on the Audit log page (`GET /api/audit`, newest first, 100 a page, filters by person, group and days; `GET /api/audit.csv`, up to 50,000 events); nothing in the app changes or deletes an entry.
+- **Access per space.** A member other than an admin can be limited to some space IDs (`memberships.spaces`), in every tenant of the account, since a space ID such as HR usually names the same team's space in DEV and PROD. One place checks it for every route (`apps/api/src/scope.ts`): a pipeline belongs to its output's space, and a member who sees that space sees the whole pipeline, upstream steps in other spaces included, because a test needs all of them (`GET /scans/:id/objects/...?within=SPACE.OUTPUT` opens such a step). Anything else answers 404, as if it didn't exist. Scans and their graphs list only the member's spaces; scan schedules need every space, because a scheduled scan reads all of them; database users are listed and checked per space. Tenants themselves are not limited.
+- **Sign-off** (`POST /api/pipelines/:id/signoffs`, `results.sign_off`: test coordinators and admins). Approve, or reject with a reason, a pipeline as it stands: the sign-off records the scan its steps came from, its latest finished suite and its latest successful snapshot. It is **outdated** once a later scan changes any of its steps (`changedSteps`, the same comparison that queues suites after a scan); the pipeline page then shows "Approval outdated" and which steps changed. A later sign-off replaces it; the earlier ones stay in the history.
+- **History and report.** `GET /api/pipelines/:id/history` puts suites, scenario runs, snapshots and sign-offs on one timeline (the History tab, with two charts and a CSV of the whole timeline). `GET /api/pipelines/:id/report` gathers what an auditor reads: the sign-off and what it covered, the latest suite with every check, the latest two snapshots compared, the steps and the recent history. The web app shows it on a page without the menu, to print or save as PDF from the browser. Nothing here calls the tenant.
+
 Open questions for phase 3: how delta loads and upserts in transformation flows should be simulated; how far a compiler from the CSN `query` of graphical views to HANA SQL can go (joins, unions, calculated columns, aggregation, parameters), which can't be tested against the deployed SQL of exposed views, because `SYS.VIEWS` gives the database user no definition (the spike's run, 2026-10-19), so only a view's columns are checked against `SYS.VIEW_COLUMNS`; which steps can't be inlined into one SELECT (SQLScript views and table functions, currency conversion that reads TCUR tables, `CURRENT_DATE` and session values, which need fixed fixture values). A phase-3 spike should compile one SQL view and one graphical view of a real pipeline into a fixture-only SELECT and run it through the database user before the engine is built. That compiler is in `packages/connector/src/simulate` (`simulatePipeline`), and `npm run spike:simulate` runs it on a saved scan, with `--run` through the database user and `--oracle` against the deployed SQL of exposed views (README, "Simulating a pipeline"). It uses nested subqueries, so `assertSelectOnly` is unchanged.
 
 ## Security posture (short form for the security pack)
@@ -177,7 +187,8 @@ Open questions for phase 3: how delta loads and upserts in transformation flows 
 - Sign-in with password and a mandatory authenticator code; roles checked on every API call; each account sees only its own data.
 - Secrets encrypted at rest, TLS in transit, EU hosting, daily encrypted backups, 30-day retention of results by default.
 - No customer row data stored unless explicitly enabled per account.
-- Full audit log of connections, scans, runs and user actions.
+- Full audit log: every change made through the app (connections, scans, pipelines, tests, runs, sign-offs, users and roles) and every sign-in, with who, when and from where; admins read and export it, nobody can change it in the app.
+- Members can be limited to some spaces; a pipeline is visible to those who see its output's space.
 - Self-hosted runner available when required (same connector interface).
 
 ## Feasibility spike results (2026-10-15)

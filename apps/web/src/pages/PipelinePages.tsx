@@ -21,6 +21,7 @@ import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTime } from "../format";
 import { PipelineView } from "../lineage/PipelineView";
 import { useInTenant } from "../tenantScope";
+import { HistorySection, SignOffTag } from "./History";
 import { ScenariosSection } from "./Scenarios";
 import { ScheduleSection } from "./Schedule";
 import { SnapshotsSection } from "./Snapshots";
@@ -90,12 +91,13 @@ export function PipelineOnScanPage() {
   );
 }
 
-type PipelineTab = "lineage" | "snapshots" | "scenarios";
+type PipelineTab = "lineage" | "snapshots" | "scenarios" | "history";
 
 /**
- * A saved pipeline, computed on the tenant's latest successful scan, in three
+ * A saved pipeline, computed on the tenant's latest successful scan, in four
  * tabs with their own addresses: its lineage (/pipelines/:id), its snapshots
- * (/pipelines/:id/snapshots) and its scenarios (/pipelines/:id/scenarios).
+ * (/pipelines/:id/snapshots), its scenarios (/pipelines/:id/scenarios) and
+ * its history with its sign-off (/pipelines/:id/history).
  * Taking a snapshot opens the second.
  */
 export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
@@ -127,14 +129,15 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
             <span className="mono wrap-anywhere">{output}</span>
             <span>Computed on the latest successful scan</span>
             <Summary result={result.data} />
+            <SignOffTag pipelineId={definition.id} />
           </span>
         }
         actions={
           <>
             {can("runs.execute") && (
               <Button
-                // The page's one primary action, except on Scenarios, where it is New scenario.
-                design={tab === "scenarios" ? "Default" : "Emphasized"}
+                // The page's one primary action, except on Scenarios (New scenario) and History (Sign off). Disabled, it looks the same on every tab.
+                design={tab === "scenarios" || tab === "history" || !measurable ? "Default" : "Emphasized"}
                 icon="camera"
                 disabled={!measurable || takeSnapshot.isPending}
                 tooltip={measurable ? "Measure the steps the database users can see" : (whyNot ?? "No step can be measured with SQL yet")}
@@ -177,6 +180,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
         <Tab text="Lineage" data-tab="lineage" selected={tab === "lineage"} />
         <Tab text="Snapshots" data-tab="snapshots" selected={tab === "snapshots"} />
         <Tab text="Scenarios" data-tab="scenarios" selected={tab === "scenarios"} />
+        <Tab text="History" data-tab="history" selected={tab === "history"} />
       </TabContainer>
       <ErrorStrip error={remove.error ?? takeSnapshot.error} />
       {tab === "lineage" ? (
@@ -186,6 +190,8 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
         </>
       ) : tab === "scenarios" ? (
         <ScenariosSection pipelineId={definition.id} tenantId={definition.tenantId} />
+      ) : tab === "history" ? (
+        <HistorySection pipelineId={definition.id} />
       ) : (
         <>
           {whyNot && can("runs.execute") && (

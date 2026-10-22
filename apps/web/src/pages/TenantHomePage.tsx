@@ -18,6 +18,7 @@ import {
 import { ConnectionStatusTag, ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
+import { ShortId } from "../components/ShortId";
 import { counted, formatDateTime } from "../format";
 import { useAddressTenant } from "../tenantScope";
 
@@ -181,7 +182,7 @@ function ClientFacts({ connection: c }: { connection: ConnectionJson | null }) {
         <ConnectionStatusTag status={c.status} />
       </li>
       <li>
-        Client <span className="mono">{c.clientId}</span>
+        Client <ShortId id={c.clientId} what="client ID" />
       </li>
       <li>{readable.length > 0 ? <>Reads {readable.join(", ")}</> : <span className="muted">Reads no space yet</span>}</li>
     </ul>

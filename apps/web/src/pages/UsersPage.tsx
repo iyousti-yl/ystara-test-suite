@@ -13,20 +13,21 @@ import {
   TableRow,
   Title,
 } from "@ui5/webcomponents-react";
-import { ROLES, type Role } from "@ystara/shared";
-import { useCan, useChangeRole, useInvite, useMe, useRemoveMember, useRenameAccount, useTeam, useWithdrawInvitation } from "../api";
+import { ROLES, type Role, type SpaceScope } from "@ystara/shared";
+import { useCan, useChangeRole, useInvite, useMe, useRemoveMember, useRenameAccount, useTeam, useTeamSpaces, useWithdrawInvitation, type TeamJson } from "../api";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { LinkToSend } from "../components/LinkToSend";
 import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
 import { RenameAccountDialog } from "../components/RenameAccountDialog";
+import { SpacesPicker, spacesLabel } from "../components/SpacesPicker";
 import { formatDateTime } from "../format";
 import { ROLE_LABEL, ROLE_SUMMARY } from "../roles";
 
 /**
  * The account's admin page (/users): who can sign in to this account, with
- * which role, and the invitations still open; the account's name can be changed
- * here too. Admins only; the API checks it too.
+ * which role and in which spaces, and the invitations still open; the
+ * account's name can be changed here too. Admins only; the API checks it too.
  */
 export function UsersPage() {
   const can = useCan();
@@ -36,6 +37,7 @@ export function UsersPage() {
   const remove = useRemoveMember();
   const withdraw = useWithdrawInvitation();
   const [inviting, setInviting] = useState(false);
+  const [limiting, setLimiting] = useState<TeamJson["members"][number]>();
   const rename = useRenameAccount();
   const [renaming, setRenaming] = useState(false);
   const closeRename = () => {
@@ -82,6 +84,7 @@ export function UsersPage() {
                     Email
                   </TableHeaderCell>
                   <TableHeaderCell minWidth="10rem">Role</TableHeaderCell>
+                  <TableHeaderCell minWidth="10rem">Spaces</TableHeaderCell>
                   <TableHeaderCell minWidth="10rem">Joined</TableHeaderCell>
                   <TableHeaderCell minWidth="6rem" importance={1} horizontalAlign="End">
                     <span className="sr-only">Actions</span>
@@ -118,6 +121,16 @@ export function UsersPage() {
                       ))}
                     </Select>
                   </TableCell>
+                  <TableCell>
+                    {m.role === "admin" ? (
+                      <span className="muted">Every space, as an admin</span>
+                    ) : (
+                      <span className="spaces-cell">
+                        <span className={m.spaces ? "mono" : undefined}>{spacesLabel(m.spaces)}</span>
+                        <Button design="Transparent" icon="edit" tooltip={`Change the spaces ${m.email} sees`} accessibleName={`Change the spaces of ${m.email}`} onClick={() => setLimiting(m)} />
+                      </span>
+                    )}
+                  </TableCell>
                   <TableCell>{formatDateTime(m.joinedAt)}</TableCell>
                   <TableCell horizontalAlign="End">
                     <Button
@@ -148,6 +161,7 @@ export function UsersPage() {
                     Email
                   </TableHeaderCell>
                   <TableHeaderCell minWidth="7rem">Role</TableHeaderCell>
+                  <TableHeaderCell minWidth="8rem">Spaces</TableHeaderCell>
                   <TableHeaderCell minWidth="10rem">Link valid until</TableHeaderCell>
                   <TableHeaderCell minWidth="6rem" importance={1} horizontalAlign="End">
                     <span className="sr-only">Actions</span>
@@ -159,6 +173,9 @@ export function UsersPage() {
                 <TableRow key={i.id} rowKey={i.id}>
                   <TableCell>{i.email}</TableCell>
                   <TableCell>{ROLE_LABEL[i.role]}</TableCell>
+                  <TableCell>
+                    <span className={i.spaces ? "mono" : undefined}>{i.role === "admin" ? "Every space" : spacesLabel(i.spaces)}</span>
+                  </TableCell>
                   <TableCell>{formatDateTime(i.expiresAt)}</TableCell>
                   <TableCell horizontalAlign="End">
                     <Button design="Transparent" disabled={withdraw.isPending} onClick={() => withdraw.mutate(i.id)}>
@@ -184,6 +201,7 @@ export function UsersPage() {
         </>
       )}
       {inviting && <InviteDialog onClose={() => setInviting(false)} />}
+      {limiting && <SpacesDialog member={limiting} onClose={() => setLimiting(undefined)} />}
       {renaming && (
         <RenameAccountDialog
           current={me.account.name}
@@ -202,6 +220,8 @@ function InviteDialog({ onClose }: { onClose: () => void }) {
   const invite = useInvite();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("developer");
+  const [spaces, setSpaces] = useState<SpaceScope | undefined>(null);
+  const known = useTeamSpaces(true).data ?? [];
 
   return (
     <Dialog
@@ -216,7 +236,11 @@ function InviteDialog({ onClose }: { onClose: () => void }) {
             </Button>
           ) : (
             <>
-              <Button design="Emphasized" disabled={!email.trim() || invite.isPending} onClick={() => invite.mutate({ email: email.trim(), role })}>
+              <Button
+                design="Emphasized"
+                disabled={!email.trim() || (role !== "admin" && spaces === undefined) || invite.isPending}
+                onClick={() => invite.mutate({ email: email.trim(), role, spaces: role === "admin" ? null : (spaces ?? null) })}
+              >
                 Create invitation link
               </Button>
               <Button design="Transparent" onClick={onClose}>
@@ -251,9 +275,49 @@ function InviteDialog({ onClose }: { onClose: () => void }) {
             ))}
           </Select>
           <span className="muted">{ROLE_SUMMARY[role]}</span>
+          {role !== "admin" && (
+            <>
+              <Label>Spaces</Label>
+              <SpacesPicker id="invite-spaces" value={null} known={known} onChange={setSpaces} />
+            </>
+          )}
           <ErrorStrip error={invite.error} />
         </div>
       )}
+    </Dialog>
+  );
+}
+
+/** Every space, or only some, for a member other than an admin. Their sign-in sees the change at their next request. */
+function SpacesDialog({ member, onClose }: { member: TeamJson["members"][number]; onClose: () => void }) {
+  const change = useChangeRole();
+  const known = useTeamSpaces(true).data;
+  const [spaces, setSpaces] = useState<SpaceScope | undefined>(member.spaces);
+
+  return (
+    <Dialog
+      open
+      headerText={`Spaces of ${member.email}`}
+      onClose={onClose}
+      footer={
+        <div className="dialog-footer">
+          <Button
+            design="Emphasized"
+            disabled={spaces === undefined || change.isPending}
+            onClick={() => change.mutate({ userId: member.userId, role: member.role, spaces: spaces ?? null }, { onSuccess: onClose })}
+          >
+            Save
+          </Button>
+          <Button design="Transparent" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      }
+    >
+      <div className="dialog-body">
+        {known ? <SpacesPicker id="member-spaces" value={member.spaces} known={[...new Set([...known, ...(member.spaces ?? [])])].sort()} onChange={setSpaces} /> : <Loading />}
+        <ErrorStrip error={change.error} />
+      </div>
     </Dialog>
   );
 }

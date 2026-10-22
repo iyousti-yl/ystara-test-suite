@@ -1,9 +1,10 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { deleteDatabaseUser, getTenant, listDatabaseUsers, markDatabaseUserChecking, setDatabaseUser, type Db } from "@ystara/db";
+import { deleteDatabaseUser, listDatabaseUsers, markDatabaseUserChecking, setDatabaseUser, type Db } from "@ystara/db";
 import { DATABASE_HOST_HINT, databaseUserProblem, databaseUserSpace, isDatabaseHost, JOBS, type DatabaseCheckJobData } from "@ystara/shared";
 import { databaseUserSecretContext, type SecretBox } from "@ystara/shared/secrets";
 import { signedIn } from "../auth/access.js";
+import { scope, space as sees } from "../scope.js";
 import type { JobQueue } from "../server.js";
 import { spaceId } from "./discovery.js";
 
@@ -14,6 +15,7 @@ import { spaceId } from "./discovery.js";
  *
  * Admins ("tenant.connect") enter, change and remove them; anyone who can scan
  * may ask for another check. The space comes from the user name (SPACE#SUFFIX).
+ * A member limited to some spaces sees and checks only theirs.
  * As for the technical client, the password is sealed with MASTER_KEY before it
  * is stored, for this tenant and space only, and never sent back. The API never
  * signs in itself: the worker checks the user (apps/worker/src/jobs/database-check.ts).
@@ -34,18 +36,15 @@ const params = z.object({ id: z.string().uuid() });
 const spaceParams = z.object({ id: z.string().uuid(), space: spaceId });
 
 export function databaseUserRoutes(db: Db, queue: JobQueue, secrets: SecretBox) {
-  /** The tenant, when it belongs to the signed-in account (as in discovery.ts). */
-  async function ownTenant(req: FastifyRequest, tenantId: string) {
-    const tenant = await getTenant(db, tenantId);
-    return tenant?.accountId === signedIn(req).accountId ? tenant : undefined;
-  }
+  /** The tenant, when it belongs to the signed-in account (scope.ts). */
+  const ownTenant = scope(db).tenant;
   const check = (tenantId: string, space: string) => queue.send(JOBS.databaseCheck, { tenantId, space } satisfies DatabaseCheckJobData);
 
   return async (app: FastifyInstance) => {
     app.get("/tenants/:id/database-users", { config: { access: "pipelines.read" } }, async (req, reply) => {
       const tenant = await ownTenant(req, params.parse(req.params).id);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
-      return listDatabaseUsers(db, tenant.id);
+      return (await listDatabaseUsers(db, tenant.id)).filter((u) => sees(req, u.space));
     });
 
     // Enter or change the database user of a space. It is checked at once, in the background.
@@ -71,7 +70,7 @@ export function databaseUserRoutes(db: Db, queue: JobQueue, secrets: SecretBox) 
       const { id, space } = spaceParams.parse(req.params);
       const tenant = await ownTenant(req, id);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
-      const user = await markDatabaseUserChecking(db, tenant.id, space);
+      const user = sees(req, space) ? await markDatabaseUserChecking(db, tenant.id, space) : undefined;
       if (!user) return reply.code(404).send({ error: `Space ${space} has no database user` });
       await check(tenant.id, space);
       return reply.code(202).send(user);

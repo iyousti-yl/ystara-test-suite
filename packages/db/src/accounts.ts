@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { Account, Invitation, Member, Role } from "@ystara/shared";
+import { spaceScopeOf, type Account, type Invitation, type Member, type Role, type SpaceScope } from "@ystara/shared";
 import type { Db, Queryable } from "./db.js";
 
 /**
@@ -138,8 +138,15 @@ export const RESET_HISTORY_DAYS = 30;
 export async function listMembers(db: Queryable, accountId: string): Promise<Member[]> {
   // With each member, every sign-in reset Ystara's operator made for them in the last RESET_HISTORY_DAYS days, newest
   // first, so a newer link never hides an earlier one that was used.
-  const { rows } = await db.query<{ user_id: string; email: string; role: Role; created_at: Date; resets: { madeAt: string; usedAt: string | null; open: boolean }[] }>(
-    `select m.user_id, u.email, m.role, m.created_at, r.resets
+  const { rows } = await db.query<{
+    user_id: string;
+    email: string;
+    role: Role;
+    spaces: string[] | null;
+    created_at: Date;
+    resets: { madeAt: string; usedAt: string | null; open: boolean }[];
+  }>(
+    `select m.user_id, u.email, m.role, m.spaces, m.created_at, r.resets
      from memberships m
      join users u on u.id = m.user_id
      cross join lateral (
@@ -157,16 +164,24 @@ export async function listMembers(db: Queryable, accountId: string): Promise<Mem
     userId: r.user_id,
     email: r.email,
     role: r.role,
+    spaces: spaceScopeOf(r.role, r.spaces),
     joinedAt: r.created_at,
     signInResets: r.resets.map((x) => ({ madeAt: new Date(x.madeAt), ...(x.usedAt && { usedAt: new Date(x.usedAt) }), open: x.open })),
   }));
 }
 
 /**
- * Changes a member's role, or removes them (role undefined). Refuses to leave
- * the account without an admin. Returns "not-found", "last-admin" or "done".
+ * Changes a member's role and, when given, the spaces they see; or removes them
+ * (role undefined). An admin always sees every space. Refuses to leave the
+ * account without an admin. Returns "not-found", "last-admin" or "done".
  */
-export async function changeMember(db: Db, accountId: string, userId: string, role: Role | undefined): Promise<"not-found" | "last-admin" | "done"> {
+export async function changeMember(
+  db: Db,
+  accountId: string,
+  userId: string,
+  role: Role | undefined,
+  spaces?: SpaceScope,
+): Promise<"not-found" | "last-admin" | "done"> {
   return db.transaction(async (tx) => {
     // Lock the account's memberships so two admins can't demote each other at the same time.
     const { rows } = await tx.query<{ user_id: string; role: Role }>("select user_id, role from memberships where account_id = $1 for update", [accountId]);
@@ -174,7 +189,13 @@ export async function changeMember(db: Db, accountId: string, userId: string, ro
     if (!member) return "not-found";
     const otherAdmins = rows.filter((r) => r.role === "admin" && r.user_id !== userId).length;
     if (member.role === "admin" && role !== "admin" && otherAdmins === 0) return "last-admin";
-    if (role) await tx.query("update memberships set role = $3 where account_id = $1 and user_id = $2", [accountId, userId, role]);
+    if (role) {
+      await tx.query(
+        `update memberships set role = $3, spaces = case when $3 = 'admin' then null when $4 then $5::text[] else spaces end
+         where account_id = $1 and user_id = $2`,
+        [accountId, userId, role, spaces !== undefined, spaces ?? null],
+      );
+    }
     else {
       await tx.query("delete from memberships where account_id = $1 and user_id = $2", [accountId, userId]);
       // Their sessions in this account already stopped working (a session needs a membership); remove them too.
@@ -193,19 +214,33 @@ interface InvitationRow {
   account_id: string;
   email: string;
   role: Role;
+  spaces: string[] | null;
   created_at: Date;
   expires_at: Date;
   accepted_at: Date | null;
 }
-const toInvitation = (r: InvitationRow): Invitation => ({ id: r.id, email: r.email, role: r.role, createdAt: r.created_at, expiresAt: r.expires_at });
+const toInvitation = (r: InvitationRow): Invitation => ({
+  id: r.id,
+  email: r.email,
+  role: r.role,
+  spaces: spaceScopeOf(r.role, r.spaces),
+  createdAt: r.created_at,
+  expiresAt: r.expires_at,
+});
 
-/** A new invitation and its token. The token goes in the link and is not stored; show it once. */
-export async function createInvitation(db: Queryable, input: { accountId: string; email: string; role: Role }): Promise<{ invitation: Invitation; token: string }> {
+/**
+ * A new invitation and its token. The token goes in the link and is not stored; show it once.
+ * `spaces`: the spaces the member will see (every space when left out, and always for an admin).
+ */
+export async function createInvitation(
+  db: Queryable,
+  input: { accountId: string; email: string; role: Role; spaces?: SpaceScope },
+): Promise<{ invitation: Invitation; token: string }> {
   const token = newToken();
   const { rows } = await db.query<InvitationRow>(
-    `insert into invitations (account_id, email, role, token_hash, expires_at)
-     values ($1, $2, $3, $4, now() + make_interval(days => $5)) returning *`,
-    [input.accountId, input.email.toLowerCase(), input.role, hashToken(token), INVITATION_DAYS],
+    `insert into invitations (account_id, email, role, spaces, token_hash, expires_at)
+     values ($1, $2, $3, $4, $5, now() + make_interval(days => $6)) returning *`,
+    [input.accountId, input.email.toLowerCase(), input.role, spaceScopeOf(input.role, input.spaces ?? null), hashToken(token), INVITATION_DAYS],
   );
   return { invitation: toInvitation(rows[0]), token };
 }
@@ -294,8 +329,8 @@ export async function acceptInvitation(
       userId = created.rows[0].id;
     }
     await tx.query(
-      "insert into memberships (account_id, user_id, role) values ($1, $2, $3) on conflict (account_id, user_id) do nothing",
-      [invitation.account_id, userId, invitation.role],
+      "insert into memberships (account_id, user_id, role, spaces) values ($1, $2, $3, $4) on conflict (account_id, user_id) do nothing",
+      [invitation.account_id, userId, invitation.role, invitation.spaces],
     );
     // Other open links for the same person and account have nothing left to do.
     await tx.query("delete from invitations where account_id = $1 and email = $2 and accepted_at is null", [invitation.account_id, invitation.email]);
@@ -314,6 +349,8 @@ export interface Session {
   verified: boolean;
   /** Ystara's operator: may use the operator panel (migration 004). */
   operator: boolean;
+  /** The spaces the user sees in this account: null for every space (migration 014). */
+  spaces: SpaceScope;
 }
 
 /** Starts a session and returns the token for the cookie. */
@@ -331,8 +368,8 @@ export async function createSession(db: Queryable, input: { userId: string; acco
  * account. Undefined when it expired or the user is no longer a member there.
  */
 export async function findSession(db: Queryable, token: string): Promise<Session | undefined> {
-  const { rows } = await db.query<{ user_id: string; email: string; account_id: string; role: Role; verified: boolean; operator: boolean }>(
-    `select s.user_id, u.email, s.account_id, m.role, s.verified, u.operator
+  const { rows } = await db.query<{ user_id: string; email: string; account_id: string; role: Role; spaces: string[] | null; verified: boolean; operator: boolean }>(
+    `select s.user_id, u.email, s.account_id, m.role, m.spaces, s.verified, u.operator
      from sessions s
      join users u on u.id = s.user_id
      join memberships m on m.account_id = s.account_id and m.user_id = s.user_id
@@ -340,7 +377,15 @@ export async function findSession(db: Queryable, token: string): Promise<Session
     [hashToken(token)],
   );
   const r = rows[0];
-  return r && { userId: r.user_id, email: r.email, accountId: r.account_id, role: r.role, verified: r.verified, operator: r.operator };
+  return r && {
+    userId: r.user_id,
+    email: r.email,
+    accountId: r.account_id,
+    role: r.role,
+    spaces: spaceScopeOf(r.role, r.spaces),
+    verified: r.verified,
+    operator: r.operator,
+  };
 }
 
 /** Moves a session to another account the user belongs to. False when they are not a member there. */

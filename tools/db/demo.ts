@@ -3,6 +3,7 @@ import { buildPipeline, graphFromRaw, planScenario, stepNotes, type RawObject } 
 import {
   createPipeline,
   createScan,
+  createSignOff,
   createScenario,
   createScenarioRun,
   createScenarioSuite,
@@ -19,6 +20,7 @@ import {
   saveScanResult,
   saveScenarioAlert,
   getSnapshotDetails,
+  listMembers,
   saveSnapshotAlert,
   saveSnapshotObject,
   setSchedule,
@@ -39,13 +41,16 @@ import {
   type Scan,
   type ScenarioRun,
   type ScenarioSuite,
+  type SignOff,
   type Snapshot,
   type Tenant,
 } from "@ystara/shared";
 
 /**
  * A synthetic tenant for looking at the web app without a real one: a scan
- * of one space, a saved pipeline and two snapshots of it. Every name is made
+ * of one space, a saved pipeline, two snapshots of it, a scenario that passed
+ * on its own and in a suite (which the account's first admin signed off),
+ * then broke in a suite after a scan. Every name is made
  * up. They are as long as Datasphere allows (technical names up to 50
  * characters, in UPPER_SNAKE for objects and camelCase for columns, with
  * names of 30, 40 and 50), so a page that can't show a long name shows it
@@ -290,7 +295,7 @@ function measures(technicalName: string, version: 1 | 2): { rows: number; column
 export async function loadDemo(
   db: Db,
   accountId: string,
-): Promise<{ tenant: Tenant; scan: Scan; pipeline: PipelineDefinition; snapshots: Snapshot[]; scenarioRun: ScenarioRun; suite: ScenarioSuite }> {
+): Promise<{ tenant: Tenant; scan: Scan; pipeline: PipelineDefinition; snapshots: Snapshot[]; scenarioRun: ScenarioRun; suite: ScenarioSuite; signOff: SignOff | null }> {
   if (await findTenantByName(db, accountId, DEMO_TENANT)) throw new Error(`The account already has the tenant "${DEMO_TENANT}". To load it again, delete it from its Home first.`);
   const tenant = await createTenant(db, { accountId, name: DEMO_TENANT, host: null });
   try {
@@ -340,6 +345,19 @@ export async function loadDemo(
     });
     const scenarioRun = (await getScenarioRun(db, run.id))!;
 
+    // All scenarios run by hand, which passed, and the account's first admin approving the results.
+    const passing = await createScenarioSuite(db, { tenantId: tenant.id, pipelineId: pipeline.id, cause: "manual", requestedBy: null });
+    await startScenarioSuite(db, passing.id);
+    for (const id of await suiteRunIds(db, passing.id)) {
+      await startScenarioRun(db, id, scan.id);
+      await finishScenarioRun(db, id, { status: "passed", steps: stepNotes(plan.simulation), checks: scenarioRun.checks ?? [] });
+    }
+    await finishScenarioSuite(db, passing.id);
+    const admin = (await listMembers(db, accountId)).find((m) => m.role === "admin");
+    const signOff = admin
+      ? await createSignOff(db, { tenantId: tenant.id, pipelineId: pipeline.id, verdict: "approved", comment: "Totals match the carrier's own count (demo).", userId: admin.userId })
+      : null;
+
     const flow = steps.find((step) => step.technicalName === n.enrichFlow)!;
     const changed = [{ space: flow.space, technicalName: flow.technicalName, type: flow.type, change: "definition" as const }];
     const created = await createScenarioSuite(db, { tenantId: tenant.id, pipelineId: pipeline.id, cause: "scan", scanId: scan.id, changed, requestedBy: null });
@@ -355,7 +373,7 @@ export async function loadDemo(
     const failedChecks = checks.filter((c) => c.status === "fail").map((c) => c.label);
     await saveScenarioAlert(db, created.id, { broken: [{ scenarioId: scenario.id, runId: suiteRunId, name: scenario.name, status: "failed", failedChecks }], status: "no_watchers" });
     const suite = (await getScenarioSuite(db, created.id))!;
-    return { tenant, scan, pipeline, snapshots, scenarioRun, suite };
+    return { tenant, scan, pipeline, snapshots, scenarioRun, suite, signOff };
   } catch (e) {
     await deleteTenant(db, tenant.id);
     throw e;

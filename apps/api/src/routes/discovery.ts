@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { buildPipeline, pipelineGraph, toMermaid } from "@ystara/connector";
 import {
@@ -9,10 +9,7 @@ import {
   deleteScanSchedule,
   deleteTenant,
   getConnection,
-  getPipeline,
-  getScan,
   getScanSchedule,
-  getTenant,
   latestSucceededScan,
   listDatabaseUsers,
   listPipelines,
@@ -38,6 +35,7 @@ import {
   type ScanJobData,
 } from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
+import { allSpaces, scope, space } from "../scope.js";
 import type { JobQueue } from "../server.js";
 
 /**
@@ -49,14 +47,17 @@ import type { JobQueue } from "../server.js";
  * the connector's pure graph functions (no CLI calls).
  *
  * Everything belongs to the signed-in account: another account's tenant, scan
- * or pipeline answers 404, as if it didn't exist. Reading needs
- * "pipelines.read" (every role); the rest needs the permission named on its route.
+ * or pipeline answers 404, as if it didn't exist (scope.ts). A member limited
+ * to some spaces sees only those spaces' objects in a scan and pipelines whose
+ * output is in one of them, with every step of such a pipeline. Reading needs "pipelines.read" (every role); the
+ * rest needs the permission named on its route.
  */
 const read = { access: "pipelines.read" } as const;
 const id = z.object({ id: z.string().uuid() });
 export const spaceId = z.string().regex(/^[A-Za-z0-9_]{1,64}$/, "Space IDs contain only letters, digits and underscores");
 const objectName = z.object({ id: z.string().uuid(), space: spaceId, name: z.string().regex(/^[A-Za-z0-9_]{1,128}$/, "Technical names contain only letters, digits and underscores") });
 const objectRef = z.string().regex(/^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)?$/, "Use NAME or SPACE.NAME");
+const ObjectQuery = z.object({ within: objectRef.optional() });
 const patterns = z.array(z.string().min(1).max(200)).max(50);
 
 const TenantInput = z.object({
@@ -82,17 +83,13 @@ const PipelineQuery = z.object({
   excludeWriter: z.union([z.string(), z.array(z.string())]).optional(),
 });
 
+/** A scan schedule scans every space the technical client reads, so only someone who sees every space may set it. */
+const SCHEDULE_NEEDS_ALL_SPACES = "Only someone who sees every space can change the scan schedule: it scans them all.";
+
 export function discoveryRoutes(db: Db, queue: JobQueue) {
-  /** The tenant, when it belongs to the signed-in account. */
-  async function ownTenant(req: FastifyRequest, tenantId: string) {
-    const tenant = await getTenant(db, tenantId);
-    return tenant?.accountId === signedIn(req).accountId ? tenant : undefined;
-  }
-  /** The scan, when its tenant belongs to the signed-in account. */
-  async function ownScan(req: FastifyRequest, scanId: string) {
-    const scan = await getScan(db, scanId);
-    return scan && (await ownTenant(req, scan.tenantId)) ? scan : undefined;
-  }
+  const own = scope(db);
+  const ownTenant = own.tenant;
+  const ownScan = own.scan;
 
   return async (app: FastifyInstance) => {
     app.get("/tenants", { config: read }, async (req) => listTenants(db, signedIn(req).accountId));
@@ -127,6 +124,8 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
       if (!tenant.host) return reply.code(409).send({ error: "This tenant has no Datasphere URL; it only has imported scans." });
       const { spaces } = ScanInput.parse(req.body);
+      const hidden = spaces.filter((s) => !space(req, s));
+      if (hidden.length) return reply.code(403).send({ error: `You can't scan ${hidden.join(", ")}: your access is limited to other spaces.` });
       // With a technical client, only the spaces its last check could read. (Without one, the worker refuses the scan anyway.)
       const connection = await getConnection(db, tenant.id);
       const readable = connection ? readableSpaces(connection) : undefined;
@@ -152,6 +151,7 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
     app.put("/tenants/:id/scan-schedule", { config: { access: "discovery.run" } }, async (req, reply) => {
       const tenant = await ownTenant(req, id.parse(req.params).id);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
+      if (!allSpaces(req)) return reply.code(403).send({ error: SCHEDULE_NEEDS_ALL_SPACES });
       if (!tenant.host) return reply.code(409).send({ error: "This tenant has no Datasphere URL; it only has imported scans." });
       const body = ScanScheduleBody.parse(req.body);
       const check = checkSchedule(body.cron, body.timeZone, new Date(), 5, MIN_MINUTES_BETWEEN_SCANS);
@@ -167,6 +167,7 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
     app.delete("/tenants/:id/scan-schedule", { config: { access: "discovery.run" } }, async (req, reply) => {
       const tenant = await ownTenant(req, id.parse(req.params).id);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
+      if (!allSpaces(req)) return reply.code(403).send({ error: SCHEDULE_NEEDS_ALL_SPACES });
       await deleteScanSchedule(db, tenant.id);
       return reply.code(204).send();
     });
@@ -181,15 +182,31 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
       if (!scan) return reply.code(404).send({ error: "Scan not found" });
       if (scan.status !== "succeeded") return reply.code(409).send({ error: `Scan is ${scan.status}` });
       const graph = await loadGraph(db, scan.id);
-      return { ...graph, nodes: graph.nodes.map(({ definition: _definition, ...node }) => node) } satisfies ScanGraph;
+      // Only the spaces the user sees, and the links between them.
+      const nodes = graph.nodes.filter((n) => space(req, n.space));
+      const edges = graph.edges.filter((e) => space(req, e.from.space) && space(req, e.to.space));
+      return { ...graph, nodes: nodes.map(({ definition: _definition, ...node }) => node), edges } satisfies ScanGraph;
     });
 
     // One object with its definition (as the CLI returned it) and every edge that touches it.
+    // ?within=SPACE.NAME: opened from that output's pipeline, whose steps a member sees whatever their space.
     app.get("/scans/:id/objects/:space/:name", { config: read }, async (req, reply) => {
       const params = objectName.parse(req.params);
-      if (!(await ownScan(req, params.id))) return reply.code(404).send({ error: "Scan not found" });
-      const details = await loadObject(db, params.id, params.space, params.name);
-      return details ?? reply.code(404).send({ error: `${params.space}.${params.name} is not in this scan` });
+      const { within } = ObjectQuery.parse(req.query);
+      const scan = await ownScan(req, params.id);
+      if (!scan) return reply.code(404).send({ error: "Scan not found" });
+      const steps = new Set<string>();
+      const output = within && toOutput(within, scan.spaces);
+      if (output && space(req, output.space) && !allSpaces(req) && scan.status === "succeeded") {
+        const graph = await loadGraph(db, scan.id);
+        if (graph.nodes.some((n) => refKey(n) === refKey(output))) {
+          for (const n of pipelineGraph(graph, buildPipeline(graph, output, { excludeWriters: [] })).nodes) steps.add(refKey(n));
+        }
+      }
+      const sees = (ref: { space: string; technicalName: string }) => space(req, ref.space) || steps.has(refKey(ref));
+      const details = sees({ space: params.space, technicalName: params.name }) ? await loadObject(db, params.id, params.space, params.name) : undefined;
+      if (!details) return reply.code(404).send({ error: `${params.space}.${params.name} is not in this scan` });
+      return { ...details, edges: details.edges.filter((e) => sees(e.from) && sees(e.to)) };
     });
 
     // Try a pipeline on one scan before saving it: ?output=SPACE.NAME&excludeWriter=DF_X&excludeWriter=TF_*
@@ -200,6 +217,7 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
       const query = PipelineQuery.parse(req.query);
       const output = toOutput(query.output, scan.spaces);
       if (!output) return reply.code(400).send({ error: "This scan covers several spaces; use SPACE.NAME" });
+      if (!space(req, output.space)) return reply.code(404).send({ error: `${output.space}.${output.technicalName} is not in this scan` });
       const excludeWriters = patterns.parse(query.excludeWriter === undefined ? [] : [query.excludeWriter].flat());
       const computed = await computePipeline(db, scan, output, excludeWriters);
       return computed ?? reply.code(404).send({ error: `${output.space}.${output.technicalName} is not in this scan` });
@@ -208,23 +226,24 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
     app.get("/tenants/:id/pipelines", { config: read }, async (req, reply) => {
       const tenant = await ownTenant(req, id.parse(req.params).id);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
-      return listPipelines(db, tenant.id);
+      return (await listPipelines(db, tenant.id)).filter((p) => space(req, p.output.space));
     });
 
     app.post("/tenants/:id/pipelines", { config: { access: "pipelines.write" } }, async (req, reply) => {
       const tenant = await ownTenant(req, id.parse(req.params).id);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
       const input = PipelineInput.parse(req.body);
-      const [space, technicalName] = input.output.split(".");
-      const pipeline = await createPipeline(db, { tenantId: tenant.id, name: input.name, output: { space, technicalName }, excludeWriters: input.excludeWriters });
+      const [outputSpace, technicalName] = input.output.split(".");
+      if (!space(req, outputSpace)) return reply.code(403).send({ error: `You can't save a pipeline in ${outputSpace}: your access is limited to other spaces.` });
+      const pipeline = await createPipeline(db, { tenantId: tenant.id, name: input.name, output: { space: outputSpace, technicalName }, excludeWriters: input.excludeWriters });
       await watchPipeline(db, pipeline.id, signedIn(req).userId); // whoever saves a pipeline gets its alerts, until they unwatch it
       return reply.code(201).send(pipeline);
     });
 
     // A saved pipeline, with its steps computed from the tenant's latest successful scan.
     app.get("/pipelines/:id", { config: read }, async (req, reply) => {
-      const definition = await getPipeline(db, id.parse(req.params).id);
-      if (!definition || !(await ownTenant(req, definition.tenantId))) return reply.code(404).send({ error: "Pipeline not found" });
+      const definition = await own.pipeline(req, id.parse(req.params).id);
+      if (!definition) return reply.code(404).send({ error: "Pipeline not found" });
       const scan = await latestSucceededScan(db, definition.tenantId);
       if (!scan) return reply.code(409).send({ error: "This tenant has no successful scan yet", definition });
       const computed = await computePipeline(db, scan, definition.output, definition.excludeWriters);
@@ -236,8 +255,8 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
     });
 
     app.delete("/pipelines/:id", { config: { access: "pipelines.write" } }, async (req, reply) => {
-      const definition = await getPipeline(db, id.parse(req.params).id);
-      if (!definition || !(await ownTenant(req, definition.tenantId))) return reply.code(404).send({ error: "Pipeline not found" });
+      const definition = await own.pipeline(req, id.parse(req.params).id);
+      if (!definition) return reply.code(404).send({ error: "Pipeline not found" });
       await deletePipeline(db, definition.id);
       return reply.code(204).send();
     });

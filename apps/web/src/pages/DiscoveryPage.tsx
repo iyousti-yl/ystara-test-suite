@@ -15,10 +15,11 @@ import {
   Title,
 } from "@ui5/webcomponents-react";
 import { useNavigate, useSearchParams } from "react-router";
-import { readableSpaces } from "@ystara/shared";
-import { useCan, useConnection, useScans, useStartScan, type ConnectionJson } from "../api";
+import { readableSpaces, seesSpace } from "@ystara/shared";
+import { useCan, useConnection, useMe, useScans, useStartScan, type ConnectionJson } from "../api";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
+import { SpacesNote } from "../components/SpacesPicker";
 import { formatDateTime } from "../format";
 import { useAddressTenant } from "../tenantScope";
 import { ScanScheduleSection } from "./Schedule";
@@ -57,6 +58,7 @@ export function DiscoveryPage() {
           )
         }
       />
+      <SpacesNote what="a scan shows you only the objects of these spaces, and you scan only these." />
       {!tenant.data.host && (
         <MessageStrip design="Information" hideCloseButton>
           This tenant only has imported scans, so it has no Datasphere URL to scan from here. To scan a tenant, add it with its URL under Tenants.
@@ -137,7 +139,9 @@ export function DiscoveryPage() {
 function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => void }) {
   const start = useStartScan(tenantId);
   const connection = useConnection(tenantId).data ?? null;
-  const readable = connection ? readableSpaces(connection) : [];
+  // A member limited to some spaces scans only those (the API refuses the others).
+  const mine = useMe().data?.spaces ?? null;
+  const readable = (connection ? readableSpaces(connection) : []).filter((s) => seesSpace(mine, s));
   const [text, setText] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const spaces = connection ? picked : parseSpaces(text);

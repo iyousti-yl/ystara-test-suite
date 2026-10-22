@@ -85,6 +85,8 @@ export function authRoutes(db: Db, secrets: SecretBox) {
     const minutes = input.verified ? SESSION_MINUTES : PENDING_MINUTES;
     const token = await createSession(db, { ...input, minutes });
     setSessionCookie(reply, token, minutes);
+    // The new session's user acts from here on: the audit log (audit.ts) names them, in the account they landed in.
+    if (input.verified) req.auditActor = { userId: input.userId, accountId: input.accountId };
     return token;
   }
 
@@ -160,6 +162,7 @@ export function authRoutes(db: Db, secrets: SecretBox) {
     app.post("/auth/account", async (req, reply) => {
       const { accountId } = SwitchAccount.parse(req.body);
       if (!(await switchSessionAccount(db, req.sessionToken!, accountId))) return reply.code(404).send({ error: "You are not a member of that account" });
+      req.auditActor = { userId: signedIn(req).userId, accountId };
       return me(db, (await findSession(db, req.sessionToken!))!);
     });
 
@@ -193,6 +196,7 @@ export function authRoutes(db: Db, secrets: SecretBox) {
         const joined = await acceptInvitation(db, token, { existingUserId: existing.id });
         if (!joined) return reply.code(404).send({ error: INVITATION_GONE });
         await switchSessionAccount(db, req.sessionToken!, joined.accountId);
+        req.auditActor = { userId: existing.id, accountId: joined.accountId };
         return me(db, (await findSession(db, req.sessionToken!))!);
       }
 
@@ -246,5 +250,6 @@ async function me(db: Db, session: Session): Promise<Me> {
     permissions: ROLE_PERMISSIONS[session.role],
     accounts,
     operator: session.operator,
+    spaces: session.spaces,
   };
 }

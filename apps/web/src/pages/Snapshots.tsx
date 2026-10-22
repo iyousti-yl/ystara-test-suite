@@ -1,4 +1,4 @@
-import { Button, Link, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Title } from "@ui5/webcomponents-react";
+import { Button, Icon, Link, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Title } from "@ui5/webcomponents-react";
 import { describeAlertReason, type ColumnMeasures, type Json, type SnapshotAlert, type SnapshotObject } from "@ystara/shared";
 import { useNavigate, useParams } from "react-router";
 import { emailDelivery, teamsDelivery } from "../alerts";
@@ -81,8 +81,8 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
 /**
  * One snapshot: the measures of each measured step, then every step of the
  * pipeline in order with what happened to it. Min and max (and a sum on a
- * small object) are shown as the start of their hash: Ystara never stores the
- * value, and two snapshots are compared by these.
+ * small object) are shown as a lock, with the start of their hash in its
+ * tooltip: Ystara never stores the value, and two snapshots are compared by these.
  */
 export function SnapshotPage() {
   const { snapshotId = "" } = useParams();
@@ -200,8 +200,11 @@ function StepResult({ object: o }: { object: SnapshotObject }) {
   return <span className="muted">{notMeasurableLabel(o.reason as Parameters<typeof notMeasurableLabel>[0])}</span>;
 }
 
-/** The start of a hash, enough to see whether two differ. */
-const fingerprint = (hash: string | null | undefined) => (hash ? `${hash.slice(0, 8)}…` : "–");
+/** A measure kept only as its hash: a lock, with the hash's start (enough to tell two apart) in its tooltip. */
+function Fingerprint({ hash, what }: { hash: string | null | undefined; what: string }) {
+  if (!hash) return <>–</>;
+  return <Icon name="locked" className="fingerprint" showTooltip accessibleName={`${what}: kept only as the fingerprint ${hash.slice(0, 8)}…, never as the value`} />;
+}
 
 /** On a narrow screen the type goes under the column name first, then the measures from the right. The name and the sum keep their width. */
 function ColumnsTable({ columns }: { columns: ColumnMeasures[] }) {
@@ -241,13 +244,13 @@ function ColumnsTable({ columns }: { columns: ColumnMeasures[] }) {
           <TableCell horizontalAlign="End" className="mono">{formatNumber(c.nonNull)}</TableCell>
           <TableCell horizontalAlign="End" className="mono">{formatNumber(c.distinct)}</TableCell>
           <TableCell horizontalAlign="End" className="mono">
-            {"minHash" in c ? fingerprint(c.minHash) : "–"}
+            {"minHash" in c ? <Fingerprint hash={c.minHash} what="Min" /> : "–"}
           </TableCell>
           <TableCell horizontalAlign="End" className="mono">
-            {"maxHash" in c ? fingerprint(c.maxHash) : "–"}
+            {"maxHash" in c ? <Fingerprint hash={c.maxHash} what="Max" /> : "–"}
           </TableCell>
           <TableCell horizontalAlign="End" className="mono">
-            {c.sum ?? (c.sumHash ? fingerprint(c.sumHash) : "–")}
+            {c.sum ?? <Fingerprint hash={c.sumHash} what="Sum" />}
           </TableCell>
         </TableRow>
       ))}

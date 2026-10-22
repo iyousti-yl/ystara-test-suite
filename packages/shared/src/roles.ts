@@ -19,6 +19,7 @@ export const PERMISSIONS = [
   "runs.execute",
   "runs.read",
   "results.sign_off",
+  "audit.read",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -50,3 +51,17 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
 export function can(role: Role, permission: Permission): boolean {
   return ROLE_PERMISSIONS[role].includes(permission);
 }
+
+/**
+ * The spaces a member sees: null for every space, or only these, in every
+ * tenant of the account (migration 014). Admins always see every space. A
+ * pipeline belongs to its output's space: a member who sees that space sees
+ * the whole pipeline, upstream steps in other spaces included, since a test
+ * needs all of them.
+ */
+export type SpaceScope = string[] | null;
+
+export const seesSpace = (scope: SpaceScope, space: string): boolean => scope === null || scope.includes(space);
+
+/** What a membership's spaces mean for its role: an admin's are ignored, an empty list is none. */
+export const spaceScopeOf = (role: Role, spaces: string[] | null): SpaceScope => (role === "admin" ? null : spaces);

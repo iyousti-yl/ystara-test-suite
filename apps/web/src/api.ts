@@ -1,7 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Account,
   AccountOverview,
+  AuditGroup,
+  AuditPage,
   AuthenticatorSetup,
   ClaudeSetting,
   ConnectionState,
@@ -13,12 +15,18 @@ import type {
   ObjectDetails,
   Permission,
   PipelineDefinition,
+  PipelineHistory,
+  PipelineReport,
   PipelineResult,
   PipelineSchedule,
   ResetOffer,
   Role,
   SavedPipelineResult,
   Scan,
+  SignOff,
+  SignOffState,
+  SignOffVerdict,
+  SpaceScope,
   ScenarioCompile,
   ScenarioDrafted,
   ScenarioInputs,
@@ -72,6 +80,11 @@ export type ScenarioSuiteJson = Json<ScenarioSuite>;
 export type ScenarioSuiteSummaryJson = Json<ScenarioSuiteSummary>;
 export type ScanScheduleJson = Json<TenantScanSchedule>;
 export type TeamsChannelJson = Json<TeamsChannel>;
+export type SignOffJson = Json<SignOff>;
+export type SignOffStateJson = Json<SignOffState>;
+export type HistoryEventJson = Json<PipelineHistory["events"][number]>;
+export type PipelineReportJson = Json<PipelineReport>;
+export type AuditEventJson = Json<AuditPage["events"][number]>;
 /** A scenario as the builder sends it: the API adds the pipeline and the version. */
 export type ScenarioDraft = Omit<ScenarioSpec, "pipeline" | "version">;
 
@@ -242,9 +255,16 @@ function useTeamChange<I, O>(mutationFn: (input: I) => Promise<O>) {
   return useMutation({ mutationFn, onSettled: () => client.invalidateQueries({ queryKey: TEAM }) });
 }
 
-export const useInvite = () => useTeamChange((input: { email: string; role: Role }) => request<Json<CreatedInvitation>>("POST", "/team/invitations", input));
+export const useInvite = () =>
+  useTeamChange((input: { email: string; role: Role; spaces: SpaceScope }) => request<Json<CreatedInvitation>>("POST", "/team/invitations", input));
 export const useWithdrawInvitation = () => useTeamChange((id: string) => request<void>("DELETE", `/team/invitations/${id}`));
-export const useChangeRole = () => useTeamChange((input: { userId: string; role: Role }) => request<void>("PATCH", `/team/members/${input.userId}`, { role: input.role }));
+/** A new role, and new spaces when given (null for every space); without spaces the member keeps theirs. */
+export const useChangeRole = () =>
+  useTeamChange((input: { userId: string; role: Role; spaces?: SpaceScope }) =>
+    request<void>("PATCH", `/team/members/${input.userId}`, { role: input.role, spaces: input.spaces }),
+  );
+/** The spaces the account's scans covered, to limit a member to. */
+export const useTeamSpaces = (allowed: boolean) => useQuery({ queryKey: [...TEAM, "spaces"], queryFn: () => request<string[]>("GET", "/team/spaces"), enabled: allowed });
 export const useRemoveMember = () => useTeamChange((userId: string) => request<void>("DELETE", `/team/members/${userId}`));
 
 /** The signed-in account's new name, which the header and the account switcher show (/auth/me). */
@@ -387,10 +407,12 @@ export function useRemoveScanSchedule(tenantId: string) {
 export const useScanGraph = (id: string, ready: boolean) =>
   useQuery({ queryKey: ["scans", id, "graph"], queryFn: () => request<ScanGraph>("GET", `/scans/${id}/graph`), enabled: ready, staleTime: Infinity });
 
-export const useObject = (scanId: string, ref: { space: string; technicalName: string } | undefined) =>
+/** `within`: the output (SPACE.NAME) of the pipeline it was opened from, so a member limited to some spaces still sees every step. */
+export const useObject = (scanId: string, ref: { space: string; technicalName: string } | undefined, within?: string) =>
   useQuery({
-    queryKey: ["scans", scanId, "objects", ref?.space, ref?.technicalName],
-    queryFn: () => request<ObjectDetails>("GET", `/scans/${scanId}/objects/${ref!.space}/${ref!.technicalName}`),
+    queryKey: ["scans", scanId, "objects", ref?.space, ref?.technicalName, within],
+    queryFn: () =>
+      request<ObjectDetails>("GET", `/scans/${scanId}/objects/${ref!.space}/${ref!.technicalName}${within ? `?within=${encodeURIComponent(within)}` : ""}`),
     enabled: ref !== undefined,
     staleTime: Infinity,
   });
@@ -669,3 +691,71 @@ export function useRemoveTeamsChannel() {
     onSuccess: () => client.setQueryData(TEAMS, null),
   });
 }
+
+// --- A pipeline's results: sign-offs, history and the report
+
+const signOffsKey = (pipelineId: string) => ["pipelines", pipelineId, "signoffs"];
+
+/** The latest sign-off, what changed since, and what signing off now would cover. */
+export const useSignOffs = (pipelineId: string) =>
+  useQuery({ queryKey: signOffsKey(pipelineId), queryFn: () => request<SignOffStateJson>("GET", `/pipelines/${pipelineId}/signoffs`) });
+
+export function useSignOff(pipelineId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { verdict: SignOffVerdict; comment: string }) => request<SignOffJson>("POST", `/pipelines/${pipelineId}/signoffs`, input),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: signOffsKey(pipelineId) }),
+        client.invalidateQueries({ queryKey: ["pipelines", pipelineId, "history"] }),
+        client.invalidateQueries({ queryKey: ["pipelines", pipelineId, "report"] }),
+      ]),
+  });
+}
+
+export const usePipelineHistory = (pipelineId: string) =>
+  useQuery({
+    queryKey: ["pipelines", pipelineId, "history"],
+    queryFn: async () => (await request<Json<PipelineHistory>>("GET", `/pipelines/${pipelineId}/history`)).events,
+  });
+
+export const usePipelineReport = (pipelineId: string) =>
+  useQuery({ queryKey: ["pipelines", pipelineId, "report"], queryFn: () => request<PipelineReportJson>("GET", `/pipelines/${pipelineId}/report`) });
+
+// --- The audit log (admins)
+
+export interface AuditFilters {
+  user?: string;
+  group?: AuditGroup;
+  /** Days, as YYYY-MM-DD in the browser's time zone; `to` is included. */
+  from?: string;
+  to?: string;
+}
+
+/** The filters as the API's query string: whole days in the browser's time zone, `to` up to the end of its day. */
+export function auditQuery(f: AuditFilters, before?: string): string {
+  const q = new URLSearchParams();
+  if (f.user) q.set("user", f.user);
+  if (f.group) q.set("group", f.group);
+  if (f.from) q.set("from", new Date(`${f.from}T00:00`).toISOString());
+  if (f.to) {
+    const end = new Date(`${f.to}T00:00`);
+    end.setDate(end.getDate() + 1);
+    q.set("to", end.toISOString());
+  }
+  if (before) q.set("before", before);
+  const text = q.toString();
+  return text ? `?${text}` : "";
+}
+
+/** The log a page of 100 at a time, newest first; fetchNextPage loads the next older page. */
+export const useAuditLog = (filters: AuditFilters, allowed: boolean) =>
+  useInfiniteQuery({
+    queryKey: ["audit", filters],
+    queryFn: ({ pageParam }) => request<Json<AuditPage>>("GET", `/audit${auditQuery(filters, pageParam)}`),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next ?? undefined,
+    enabled: allowed,
+  });
+
+export const useAuditUsers = (allowed: boolean) => useQuery({ queryKey: ["audit", "users"], queryFn: () => request<string[]>("GET", "/audit/users"), enabled: allowed });

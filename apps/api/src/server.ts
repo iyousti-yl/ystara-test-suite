@@ -11,13 +11,16 @@ import { assertYstaraDatabase, connect, databaseUrl, type Db } from "@ystara/db"
 import { postToTeams, ROLES, type PostToTeams } from "@ystara/shared";
 import { loadLocalEnv } from "@ystara/shared/env";
 import { masterKeyFromEnv, secretBox, type SecretBox } from "@ystara/shared/secrets";
+import { installAudit } from "./audit.js";
 import { installAccess } from "./auth/access.js";
 import { checkClaudeKey, claudeDrafter, currentClaudeKey, keyFromEnv, type ClaudeAccess, type ScenarioDrafter } from "./drafting.js";
+import { auditRoutes } from "./routes/audit.js";
 import { authRoutes } from "./routes/auth.js";
 import { connectionRoutes } from "./routes/connections.js";
 import { databaseUserRoutes } from "./routes/database-users.js";
 import { discoveryRoutes } from "./routes/discovery.js";
 import { operatorRoutes } from "./routes/operator.js";
+import { resultRoutes } from "./routes/results.js";
 import { scenarioRoutes } from "./routes/scenarios.js";
 import { snapshotRoutes } from "./routes/snapshots.js";
 import { teamRoutes } from "./routes/team.js";
@@ -32,7 +35,11 @@ import { teamsRoutes } from "./routes/teams.js";
  *            sign-in and invitations (routes/auth.ts), users and roles (routes/team.ts),
  *            the operator panel (routes/operator.ts)
  *   phase 2: each space's database user (routes/database-users.ts), snapshots (routes/snapshots.ts)
- *   later:   comparisons, runs, alerts; scenarios
+ *   phase 3: scenarios and suites (routes/scenarios.ts), Teams alerts (routes/teams.ts)
+ *   phase 4: sign-offs, history and the report (routes/results.ts), the audit log (routes/audit.ts)
+ *
+ * What a user may reach is decided in scope.ts (their account, and the spaces
+ * they see); every request that changes something is logged by audit.ts.
  *
  * Every route needs a signed-in user unless it says otherwise; auth/access.ts
  * explains the rules. The API still listens on 127.0.0.1 only (inside Docker
@@ -137,6 +144,7 @@ export async function buildServer(
   await app.register(
     async (api) => {
       installAccess(api, deps.db);
+      installAudit(api, deps.db);
       const open = { config: { access: "public" } } as const;
       api.get("/health", open, async () => ({ status: "ok", service: "ystara-api", time: new Date().toISOString() }));
       api.get("/meta", open, async () => ({ roles: ROLES, version: process.env.npm_package_version ?? "dev" }));
@@ -149,6 +157,8 @@ export async function buildServer(
       await api.register(snapshotRoutes(deps.db, deps.queue));
       await api.register(scenarioRoutes(deps.db, deps.queue, drafter));
       await api.register(teamsRoutes(deps.db, deps.secrets, deps.teams ?? postToTeams));
+      await api.register(resultRoutes(deps.db));
+      await api.register(auditRoutes(deps.db));
     },
     { prefix: "/api" },
   );

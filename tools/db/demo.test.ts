@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createAccount, getSchedule, getSnapshotDetails, listPipelines, listTenants, type Db } from "@ystara/db";
+import { acceptInvitation, createAccount, createInvitation, getSchedule, getSnapshotDetails, listPipelines, listTenants, pipelineHistory, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import { compareSnapshots } from "@ystara/shared";
 import { DEMO_COLUMNS, DEMO_NAMES, DEMO_SCENARIO, DEMO_SPACE, DEMO_TENANT, loadDemo } from "./demo.js";
@@ -9,6 +9,8 @@ let accountId: string;
 beforeAll(async () => {
   db = await createTestDb();
   accountId = (await createAccount(db, "Synthetic customer")).id;
+  const { token } = await createInvitation(db, { accountId, email: "admin@customer.example.com", role: "admin" });
+  await acceptInvitation(db, token, { newUser: { passwordHash: "hash", totpSecret: "sealed", totpStep: 0 } });
 });
 afterAll(async () => {
   await db.close();
@@ -26,7 +28,7 @@ describe("the demo tenant", () => {
   });
 
   it("loads a scan, a pipeline over the output, two snapshots that differ, a scenario with a run and a suite that broke", async () => {
-    const { tenant, pipeline, snapshots, scenarioRun, suite } = await loadDemo(db, accountId);
+    const { tenant, pipeline, snapshots, scenarioRun, suite, signOff } = await loadDemo(db, accountId);
     expect(tenant).toMatchObject({ name: DEMO_TENANT, host: null });
     expect(pipeline.output).toEqual({ space: DEMO_SPACE, technicalName: DEMO_NAMES.output });
     expect(snapshots.map((s) => [s.status, s.scheduled])).toEqual([
@@ -58,6 +60,10 @@ describe("the demo tenant", () => {
     expect(suite).toMatchObject({ cause: "scan", status: "failed", passed: 0, total: 1, changed: [{ technicalName: DEMO_NAMES.enrichFlow, change: "definition" }] });
     expect(suite.runs).toMatchObject([{ scenarioName: DEMO_SCENARIO.name, status: "failed", passed: 3, total: 4 }]);
     expect(suite.alert).toMatchObject({ status: "no_watchers", broken: [{ name: DEMO_SCENARIO.name, failedChecks: ["rows_equal on routeSegmentId (1 row)"] }], teams: null });
+
+    // Before that, the account's admin approved the pipeline on a suite that passed.
+    expect(signOff).toMatchObject({ verdict: "approved", signedBy: "admin@customer.example.com", suite: { status: "passed", passed: 1, total: 1 }, snapshot: { id: snapshots[1].id } });
+    expect((await pipelineHistory(db, pipeline.id)).map((e) => e.kind)).toEqual(["suite", "signoff", "suite", "run", "snapshot", "snapshot"]);
   });
 
   it("refuses to load it twice into one account, and adds nothing", async () => {

@@ -1,12 +1,10 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
   createSnapshot,
   deleteSchedule,
-  getPipeline,
   getSchedule,
   getSnapshotDetails,
-  getTenant,
   latestSucceededScan,
   listSnapshots,
   setSchedule,
@@ -26,6 +24,7 @@ import {
   type Tenant,
 } from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
+import { scope } from "../scope.js";
 import type { JobQueue } from "../server.js";
 import { computePipeline } from "./discovery.js";
 
@@ -49,14 +48,8 @@ const ComparePair = z
   .refine((q) => (q.from === undefined) === (q.to === undefined), "Give both from and to, or neither for the latest two snapshots");
 
 export function snapshotRoutes(db: Db, queue: JobQueue) {
-  /** The pipeline and its tenant, when the tenant belongs to the signed-in account. */
-  async function ownPipelineAndTenant(req: FastifyRequest, pipelineId: string) {
-    const pipeline = await getPipeline(db, pipelineId);
-    if (!pipeline) return undefined;
-    const tenant = await getTenant(db, pipeline.tenantId);
-    return tenant?.accountId === signedIn(req).accountId ? { pipeline, tenant } : undefined;
-  }
-  const ownPipeline = async (req: FastifyRequest, pipelineId: string) => (await ownPipelineAndTenant(req, pipelineId))?.pipeline;
+  // The pipeline (and its tenant), when the signed-in user may reach it (scope.ts).
+  const { pipeline: ownPipeline, pipelineAndTenant: ownPipelineAndTenant } = scope(db);
 
   /** Why no snapshot of the pipeline could measure anything today, or undefined when at least one step can be measured. */
   async function whyNoSnapshot({ pipeline, tenant }: { pipeline: PipelineDefinition; tenant: Tenant }): Promise<string | undefined> {

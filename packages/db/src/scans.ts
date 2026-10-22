@@ -267,3 +267,12 @@ async function insertRows(db: Queryable, target: string, rows: unknown[][], cast
     await db.query(`insert into ${target} values ${values.join(", ")} ${suffix}`, params);
   }
 }
+
+/** Every space any scan of the account's tenants covered, by ID: the spaces a member can be limited to. */
+export async function accountSpaces(db: Queryable, accountId: string): Promise<string[]> {
+  const { rows } = await db.query<{ space: string }>(
+    `select distinct unnest(s.spaces) as space from scans s join tenants t on t.id = s.tenant_id where t.account_id = $1 order by space`,
+    [accountId],
+  );
+  return rows.map((r) => r.space);
+}

@@ -12,14 +12,16 @@ import { whyNotMeasurable, type LineageNode } from "./model";
 export function ObjectPanel(props: {
   scanId: string;
   node: LineageNode;
+  /** The pipeline's output (SPACE.NAME): its steps open whatever spaces the member is limited to. */
+  within: string;
   /** Present when exclusions can be changed here (trying a pipeline, not a saved one). */
   onExclude?: () => void;
   onFollow?: () => void;
   onShowPipeline?: () => void;
 }) {
-  const { scanId, node, onExclude, onFollow, onShowPipeline } = props;
+  const { scanId, node, within, onExclude, onFollow, onShowPipeline } = props;
   const { ref } = node;
-  const details = useObject(scanId, ref);
+  const details = useObject(scanId, ref, within);
   const edges = details.data?.edges ?? [];
   const key = refKey(ref);
 
