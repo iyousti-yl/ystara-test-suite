@@ -18,6 +18,7 @@ import { readableSpaces, seesSpace } from "@ystara/shared";
 import { useCan, useConnection, useMe, useScans, useStartScan, type ConnectionJson } from "../api";
 import { Dialog } from "../components/Dialog";
 import { ErrorStrip, Loading, ScanStatusTag, ShowOlder } from "../components/Feedback";
+import { QuietNote } from "../components/Info";
 import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
 import { SpacesNote } from "../components/SpacesPicker";
@@ -50,7 +51,7 @@ export function DiscoveryPage() {
     <div className="page">
       <PageHeader
         title="Discovery"
-        subtitle="Each scan reads the object definitions of some spaces and works out how they feed each other. Open one to pick an output and see its pipeline."
+        subtitle="Scans read the definitions of some spaces and work out how they feed each other. Open one to pick an output."
         actions={
           can("discovery.run") && (
             <Button design="Emphasized" icon="refresh" disabled={!canScan} onClick={() => setScanning(true)}>
@@ -61,9 +62,9 @@ export function DiscoveryPage() {
       />
       <SpacesNote what="a scan shows you only the objects of these spaces, and you scan only these." />
       {!tenant.data.host && (
-        <MessageStrip design="Information" hideCloseButton>
-          This tenant only has imported scans, so it has no Datasphere URL to scan from here. To scan a tenant, add it with its URL under Tenants.
-        </MessageStrip>
+        <QuietNote more="To scan a tenant from here, add it with its Datasphere URL under Tenants." moreLabel="How to scan a tenant">
+          This tenant only has imported scans.
+        </QuietNote>
       )}
       {tenant.data.host && (
         <ScanScheduleSection

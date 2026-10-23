@@ -227,6 +227,26 @@ describe("pipelines", () => {
     expect((await del(`/pipelines/${created.json().id}`)).statusCode).toBe(204);
   });
 
+  it("change the loaders they ignore in place, without saving a second pipeline", async () => {
+    const { tenant } = await tenantWithScan("Ignored");
+    const viewer = await testUser(db, { account: "Customer", email: "ignoring-viewer@customer.example.com", role: "viewer" });
+    const created = (await post(`/tenants/${tenant.id}/pipelines`, { name: "Output", output: "S.V_OUT" })).json();
+    expect((await get(`/pipelines/${created.id}`)).json().pipeline.ambiguousWriters).toHaveLength(1);
+
+    const changed = await app.inject({ method: "PUT", url: `/api/pipelines/${created.id}/ignored-loaders`, headers: { cookie: admin.cookie }, payload: { excludeWriters: ["DF_OTHER_RELOAD", "DF_OTHER_RELOAD"] } });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json()).toMatchObject({ id: created.id, name: "Output", excludeWriters: ["DF_OTHER_RELOAD"] });
+    const res = (await get(`/pipelines/${created.id}`)).json();
+    expect(res.pipeline.ambiguousWriters).toEqual([]);
+    expect(res.pipeline.steps).toHaveLength(3);
+    expect((await get(`/tenants/${tenant.id}/pipelines`)).json()).toHaveLength(1);
+
+    const refused = await app.inject({ method: "PUT", url: `/api/pipelines/${created.id}/ignored-loaders`, headers: { cookie: viewer.cookie }, payload: { excludeWriters: [] } });
+    expect(refused.statusCode).toBe(403);
+    const malformed = await app.inject({ method: "PUT", url: `/api/pipelines/${created.id}/ignored-loaders`, headers: { cookie: admin.cookie }, payload: { excludeWriters: [""] } });
+    expect(malformed.statusCode).toBe(400);
+  });
+
   it("say which steps a snapshot can measure, from what the space's database user saw", async () => {
     const { tenant, scan } = await tenantWithScan("Measured");
     const url = `/scans/${scan.id}/pipeline?output=V_OUT&excludeWriter=DF_OTHER_RELOAD`;

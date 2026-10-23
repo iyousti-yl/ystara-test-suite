@@ -587,6 +587,20 @@ export const usePipelineSummaries = (tenantId: string) =>
 export const useSavedPipeline = (id: string) =>
   useQuery({ queryKey: ["pipelines", id], queryFn: () => request<Json<SavedPipelineResult>>("GET", `/pipelines/${id}`), enabled: id !== "", retry: false });
 
+/** A saved pipeline's ignored loaders, changed in place: its steps, picture and warnings are worked out again. */
+export function useSetIgnoredLoaders(pipelineId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (excludeWriters: string[]) => request<PipelineDefinitionJson>("PUT", `/pipelines/${pipelineId}/ignored-loaders`, { excludeWriters }),
+    onSuccess: (p) =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: ["pipelines", pipelineId] }),
+        client.invalidateQueries({ queryKey: ["tenants", p.tenantId, "pipelines"] }),
+        refreshSummaries(client),
+      ]),
+  });
+}
+
 export function useSavePipeline(tenantId: string) {
   const client = useQueryClient();
   return useMutation({

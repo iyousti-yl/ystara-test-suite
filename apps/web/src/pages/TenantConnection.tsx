@@ -5,6 +5,7 @@ import { useCan, useCheckConnection, useConnect, useConnection, useDisconnect, u
 import { Dialog } from "../components/Dialog";
 import { EmptyState } from "../components/EmptyState";
 import { ConnectionStatusTag, ErrorStrip, Loading } from "../components/Feedback";
+import { QuietNote } from "../components/Info";
 import { MoreActions } from "../components/MoreActions";
 import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
@@ -46,7 +47,7 @@ export function TechnicalClientPage() {
     <div className="page">
       <PageHeader
         title="Technical client"
-        subtitle="How the worker logs in to scan this tenant with nobody signed in: a technical OAuth client, and the spaces it reads."
+        subtitle="The OAuth client the worker scans this tenant with, and the spaces it can read."
         actions={
           t.host &&
           c && (
@@ -73,9 +74,7 @@ export function TechnicalClientPage() {
       />
       <ErrorStrip error={connection.error ?? check.error ?? disconnect.error} />
       {!t.host ? (
-        <MessageStrip design="Information" hideCloseButton>
-          This tenant only has imported scans, so there is nothing to connect.
-        </MessageStrip>
+        <QuietNote>This tenant only has imported scans, so there is nothing to connect.</QuietNote>
       ) : connection.isPending ? (
         <Loading />
       ) : !c ? (

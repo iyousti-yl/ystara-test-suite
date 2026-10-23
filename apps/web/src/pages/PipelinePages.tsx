@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Input, Label, Link, MessageStrip, Tab, TabContainer, ToggleButton, Token, Tokenizer } from "@ui5/webcomponents-react";
-import { refKey, whyNothingMeasurable, type PipelineResult } from "@ystara/shared";
+import { refKey, whyNothingMeasurable } from "@ystara/shared";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   pipelineQuery,
@@ -12,6 +12,7 @@ import {
   useSavedPipeline,
   useSavePipeline,
   useScan,
+  useSetIgnoredLoaders,
   useSetWatching,
   useTakeSnapshot,
   useTenant,
@@ -20,8 +21,9 @@ import {
   type PipelineSummaryJson,
 } from "../api";
 import { Dialog } from "../components/Dialog";
-import { ErrorStrip, HealthTag, Loading, When } from "../components/Feedback";
+import { ErrorStrip, HealthTag, Loading } from "../components/Feedback";
 import { healthOf, NextStep } from "../components/Health";
+import { QuietNote } from "../components/Info";
 import { MoreActions } from "../components/MoreActions";
 import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
@@ -62,12 +64,7 @@ export function PipelineOnScanPage() {
           { label: `Scan of ${scan.data?.spaces.join(", ") ?? "…"}`, to: `/scans/${scanId}` },
         ]}
         title={outputName}
-        subtitle={
-          <span className="facts">
-            <span>Pipeline on the scan of {formatDateTime(scan.data?.finishedAt)}</span>
-            <Summary result={result.data} />
-          </span>
-        }
+        subtitle={`Pipeline on the scan of ${formatDateTime(scan.data?.finishedAt)}`}
         actions={
           can("pipelines.write") && (
             <Button design="Emphasized" icon="save" disabled={!result.data || !scan.data} onClick={() => setSaving(true)}>
@@ -116,6 +113,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
   const can = useCan();
   const result = useSavedPipeline(pipelineId);
   const takeSnapshot = useTakeSnapshot(pipelineId);
+  const ignoreLoaders = useSetIgnoredLoaders(pipelineId);
   const [deleting, setDeleting] = useState(false);
   const definition = result.data?.definition;
   const tenant = useTenant(definition?.tenantId ?? "");
@@ -135,13 +133,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
       <PageHeader
         crumbs={[{ label: "Pipelines", to: `/tenants/${definition.tenantId}/pipelines` }]}
         title={definition.name}
-        subtitle={
-          <span className="facts">
-            <span className="mono wrap-anywhere">{output}</span>
-            <Summary result={result.data} saved />
-            <SignOffTag pipelineId={definition.id} />
-          </span>
-        }
+        subtitle={<span className="mono wrap-anywhere">{output}</span>}
         actions={
           <>
             {can("runs.execute") && (
@@ -157,16 +149,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
               </Button>
             )}
             <WatchButton pipelineId={definition.id} />
-            <MoreActions
-              actions={[
-                {
-                  text: "Change ignored loaders",
-                  icon: "chain-link",
-                  onClick: () => navigate(`/scans/${result.data.scanId}/pipeline?${pipelineQuery(output, definition.excludeWriters)}`),
-                },
-                can("pipelines.write") && { text: "Delete pipeline", icon: "delete", onClick: () => setDeleting(true) },
-              ]}
-            />
+            <MoreActions actions={[can("pipelines.write") && { text: "Delete pipeline", icon: "delete", onClick: () => setDeleting(true) }]} />
           </>
         }
       />
@@ -184,11 +167,18 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
         <Tab text="Scenarios" data-tab="scenarios" selected={tab === "scenarios"} />
         <Tab text="History" data-tab="history" selected={tab === "history"} />
       </TabContainer>
-      <ErrorStrip error={takeSnapshot.error} />
+      <ErrorStrip error={takeSnapshot.error ?? ignoreLoaders.error} />
       {tab === "lineage" ? (
         <>
-          <Exclusions patterns={definition.excludeWriters} />
-          <PipelineView result={result.data} />
+          <Exclusions
+            patterns={definition.excludeWriters}
+            onRemove={can("pipelines.write") ? (p) => ignoreLoaders.mutate(definition.excludeWriters.filter((x) => x !== p)) : undefined}
+          />
+          <PipelineView
+            result={result.data}
+            busy={ignoreLoaders.isPending}
+            onExclusionsChange={can("pipelines.write") ? (patterns) => ignoreLoaders.mutate(patterns) : undefined}
+          />
         </>
       ) : tab === "scenarios" ? (
         <ScenariosSection pipelineId={definition.id} tenantId={definition.tenantId} />
@@ -197,9 +187,9 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
       ) : (
         <>
           {whyNot && can("runs.execute") && (
-            <MessageStrip design="Information" hideCloseButton>
-              No snapshot can be taken yet. {whyNot}
-            </MessageStrip>
+            <QuietNote more={whyNot} moreLabel="Why no snapshot can be taken">
+              No snapshot can be taken on this pipeline yet.
+            </QuietNote>
           )}
           <ScheduleSection pipelineId={definition.id} whyNot={measurable ? undefined : (whyNot ?? "No step can be measured with SQL yet")} />
           <SnapshotsSection pipelineId={definition.id} canTake={measurable} />
@@ -292,20 +282,7 @@ function WatchButton({ pipelineId }: { pipelineId: string }) {
   );
 }
 
-/** "4 steps, 1 input table, 2 measurable": a saved pipeline's steps are worked out again from the latest scan. */
-function Summary({ result, saved }: { result: PipelineResult | undefined; saved?: boolean }) {
-  if (!result) return null;
-  const { pipeline } = result;
-  const measurable = Object.values(result.measurement).filter((m) => m.measurable).length;
-  return (
-    <span title={saved ? "Worked out again from the tenant's latest successful scan" : undefined}>
-      {counted(pipeline.steps.length, "step")}
-      {saved && " from the latest scan"}, {counted(pipeline.entryPoints.length, "input table")}, {measurable} measurable by snapshots
-    </span>
-  );
-}
-
-/** What the pipeline's latest results say, in a word and a sentence, with the next step and when its snapshots ran and will run. */
+/** What the pipeline's latest results say, in a word and a sentence, with the next step and its sign-off. When its snapshots run is on its Snapshots tab. */
 function StatusLine({ pipelineId, summary }: { pipelineId: string; summary: PipelineSummaryJson }) {
   const health = healthOf(summary);
   return (
@@ -313,17 +290,7 @@ function StatusLine({ pipelineId, summary }: { pipelineId: string; summary: Pipe
       <HealthTag state={health.state} />
       <span>{health.sentence}</span>
       <NextStep pipelineId={pipelineId} next={health.next} />
-      <span className="muted">
-        Last snapshot <When iso={summary.snapshot ? (summary.snapshot.finishedAt ?? summary.snapshot.requestedAt) : null} />
-        {" · "}
-        {summary.schedule ? (
-          <>
-            Next <When iso={summary.schedule.nextRunAt} />
-          </>
-        ) : (
-          "No schedule"
-        )}
-      </span>
+      <SignOffTag pipelineId={pipelineId} />
     </div>
   );
 }

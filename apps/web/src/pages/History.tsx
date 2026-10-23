@@ -19,6 +19,7 @@ import { HISTORY_EVENTS, useCan, useDownload, usePipelineHistory, useSignOff, us
 import { ColumnChart, formatCompact, LineChart, type ChartPoint } from "../components/Charts";
 import { Dialog } from "../components/Dialog";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
+import { InfoButton, QuietNote } from "../components/Info";
 import { counted, countedLatest, formatDateTime, formatNumber } from "../format";
 import { RunStatusTag } from "./Scenarios";
 
@@ -55,8 +56,12 @@ export function HistorySection({ pipelineId }: { pipelineId: string }) {
       <SignOffSection pipelineId={pipelineId} state={signOffs.data} error={signOffs.error} />
       <div className="chart-row" role="group" aria-label="Trends">
         <section className="block chart-card">
-          <Title level="H2" size="H5">Scenarios passing, per suite</Title>
-          <p className="muted">The share of the pipeline's scenarios that passed, each time all of them ran.</p>
+          <span className="title-with-info">
+            <Title level="H2" size="H5">
+              Scenarios passing
+            </Title>
+            <InfoButton label="About scenarios passing">The share of the pipeline&apos;s scenarios that passed, each time all of them ran.</InfoButton>
+          </span>
           {suitePoints.length ? (
             <ColumnChart
               label="Scenarios passing, per suite, in percent"
@@ -66,12 +71,16 @@ export function HistorySection({ pipelineId }: { pipelineId: string }) {
               endLabel={lastSuite?.kind === "suite" ? `${lastSuite.passed}/${lastSuite.total}` : ""}
             />
           ) : (
-            <p className="chart-empty muted">No suite has finished yet. Run all the scenarios on the Scenarios tab.</p>
+            <p className="chart-empty muted">No run of all scenarios yet.</p>
           )}
         </section>
         <section className="block chart-card">
-          <Title level="H2" size="H5">Output rows, per snapshot</Title>
-          <p className="muted">The rows of the pipeline's output, each time a snapshot measured it.</p>
+          <span className="title-with-info">
+            <Title level="H2" size="H5">
+              Output rows
+            </Title>
+            <InfoButton label="About output rows">The rows of the pipeline&apos;s output, each time a snapshot measured it.</InfoButton>
+          </span>
           {rowPoints.length ? (
             <LineChart label="Output rows, per snapshot" points={rowPoints} endLabel={lastRows ? formatCompact(lastRows.value) : ""} />
           ) : (
@@ -223,6 +232,7 @@ function SignOffSection({ pipelineId, state, error }: { pipelineId: string; stat
           {!state ? null : latest ? (
             <p className="signoff-line">
               <VerdictTag verdict={latest.verdict} /> by {latest.signedBy} on {formatDateTime(latest.signedAt)}
+              <InfoButton label="What this sign-off covers">It covers {coverage(latest)}.</InfoButton>
             </p>
           ) : (
             <p className="muted">Not signed off yet. A test coordinator or an admin approves or rejects the pipeline's results here.</p>
@@ -244,20 +254,27 @@ function SignOffSection({ pipelineId, state, error }: { pipelineId: string; stat
       {latest && (
         <>
           {latest.comment && <blockquote className="signoff-comment">{latest.comment}</blockquote>}
-          <p className="muted">It covers {coverage(latest)}.</p>
         </>
       )}
       {latest && state.changedSince && state.changedSince.length > 0 && (
-        <MessageStrip design="Critical" hideCloseButton>
-          A later scan changed {counted(state.changedSince.length, "step")} of the pipeline since this sign-off:{" "}
-          <span className="mono">{state.changedSince.map((c) => `${c.technicalName} (${c.change})`).join(", ")}</span>. Check the results again and sign off anew.
-        </MessageStrip>
+        <QuietNote
+          tone="warn"
+          moreLabel="Which steps changed"
+          more={
+            <ul className="info-list">
+              {state.changedSince.map((c) => (
+                <li key={c.technicalName}>
+                  <span className="mono wrap-anywhere">{c.technicalName}</span> <span className="muted">{c.change}</span>
+                </li>
+              ))}
+            </ul>
+          }
+        >
+          Outdated: a later scan changed {counted(state.changedSince.length, "step")} of the pipeline. Check the results again and sign off anew.
+        </QuietNote>
       )}
       {latest && state.outdatedBy === "result" && (
-        <MessageStrip design="Critical" hideCloseButton>
-          A result that came in after this approval fails, changed or found no rows in the output: the approval no longer covers the pipeline as it is.
-          Check the latest results and sign off anew.
-        </MessageStrip>
+        <QuietNote tone="warn">Outdated: a later result fails, changed or found no rows in the output. Check the latest results and sign off anew.</QuietNote>
       )}
       {signing && state && <SignOffDialog pipelineId={pipelineId} state={state} onClose={() => setSigning(false)} />}
     </section>

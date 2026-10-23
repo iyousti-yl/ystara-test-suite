@@ -78,7 +78,7 @@ export function lineageModel(
 }
 
 /** The exclusion pattern for a writer: its name, or SPACE.NAME when the pipeline spans several spaces. */
-export function exclusionFor(ref: GraphNode, pipeline: Pipeline): string {
+export function exclusionFor(ref: DspObjectRef, pipeline: Pipeline): string {
   const spaces = new Set(pipeline.steps.map((s) => s.space));
   return spaces.size > 1 ? refKey(ref) : ref.technicalName;
 }

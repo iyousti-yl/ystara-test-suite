@@ -23,6 +23,7 @@ import {
 } from "../api";
 import { Dialog } from "../components/Dialog";
 import { ErrorStrip } from "../components/Feedback";
+import { InfoButton } from "../components/Info";
 import { MoreActions } from "../components/MoreActions";
 import { formatDateTime, formatPercent } from "../format";
 
@@ -74,7 +75,17 @@ export function ScheduleSection({ pipelineId, whyNot }: { pipelineId: string; wh
   return (
     <section className="block">
       <div className="list-toolbar section-toolbar">
-        <Title level="H2" size="H4">Schedule</Title>
+        <span className="title-with-info">
+          <Title level="H2" size="H4">
+            Schedule
+          </Title>
+          {current && (
+            <InfoButton label="When watchers get an alert">
+              Watchers get an email when a scheduled snapshot fails, when a step&apos;s definition or columns change, or when the output goes empty or loses
+              more than {formatPercent(current.rowDropPercent)} of its rows.
+            </InfoButton>
+          )}
+        </span>
         {canSet && (
           <Button icon="date-time" disabled={!!whyNot} tooltip={whyNot ?? "Take snapshots on a schedule"} onClick={() => setEditing(true)}>
             {current ? "Change" : "Set schedule"}
@@ -108,6 +119,9 @@ function nextRuns(schedule: { cron: string; timeZone: string; nextRunAt: string 
   return [nextRunAt, ...(after.ok ? after.next : [])].map((at) => describeRun(at, schedule.timeZone));
 }
 
+/** "Next run Mon 26 Oct, 07:30, then Tue 27 Oct, 07:30 and Wed 28 Oct, 07:30". */
+const nextRunsLine = (runs: string[]) => `Next run ${runs[0]}${runs.length > 1 ? `, then ${runs.slice(1).join(" and ")}` : ""}`;
+
 /** Shown when a planned run is more than LATE_AFTER_MS late, as of `fetchedAt` (the schedule is read every minute). */
 function LateStrip({ nextRunAt, fetchedAt, run }: { nextRunAt: string; fetchedAt: number; run: string }) {
   if (fetchedAt - new Date(nextRunAt).getTime() <= LATE_AFTER_MS) return null;
@@ -123,11 +137,11 @@ function ScheduleSummary({ schedule, fetchedAt }: { schedule: ScheduleJson; fetc
   return (
     <>
       <p className="schedule-summary">
-        <span className="mono">{schedule.cron}</span> <span className="muted">in {schedule.timeZone} time.</span> Next runs: {runs.join(", ")}.
-      </p>
-      <p className="muted">
-        Watchers get an email when a scheduled snapshot fails, when a step&apos;s definition or columns change, or when the output goes empty or loses
-        more than {formatPercent(schedule.rowDropPercent)} of its rows.
+        {nextRunsLine(runs)}
+        <span className="muted">
+          {" · "}
+          <span className="mono">{schedule.cron}</span> in {schedule.timeZone} time
+        </span>
       </p>
       <LateStrip nextRunAt={schedule.nextRunAt} fetchedAt={fetchedAt} run={runs[0]} />
     </>
@@ -275,7 +289,16 @@ export function ScanScheduleSection({ tenantId, spaces, whyNot }: { tenantId: st
   return (
     <section className="block">
       <div className="list-toolbar section-toolbar">
-        <Title level="H2" size="H4">Scan schedule</Title>
+        <span className="title-with-info">
+          <Title level="H2" size="H4">
+            Scan schedule
+          </Title>
+          <InfoButton label="About the scan schedule">
+            Each run scans {spaces.length ? <span className="mono">{spaces.join(", ")}</span> : "the spaces the technical client can read"}, read-only. When it
+            changes a step of a saved pipeline, that pipeline&apos;s scenarios run again, and its watchers get an alert if one that passed before doesn&apos;t
+            now.
+          </InfoButton>
+        </span>
         {canSet && (
           <Button icon="date-time" disabled={!!whyNot} tooltip={whyNot ?? "Scan the tenant on a schedule"} onClick={() => setEditing(true)}>
             {current ? "Change" : "Set schedule"}
@@ -297,13 +320,10 @@ export function ScanScheduleSection({ tenantId, spaces, whyNot }: { tenantId: st
       </div>
       <ErrorStrip error={schedule.error ?? remove.error} />
       {current ? (
-        <ScanScheduleSummary schedule={current} spaces={spaces} fetchedAt={schedule.dataUpdatedAt} />
+        <ScanScheduleSummary schedule={current} fetchedAt={schedule.dataUpdatedAt} />
       ) : (
         schedule.isSuccess && (
-          <p className="muted">
-            No schedule: the tenant is only scanned by hand. A nightly scan catches changed definitions, and reruns the scenarios of each pipeline they
-            change.
-          </p>
+          <p className="muted">No schedule: the tenant is only scanned by hand. A nightly scan catches changed definitions.</p>
         )
       )}
       {editing && <ScanScheduleDialog tenantId={tenantId} spaces={spaces} current={current ?? undefined} onClose={() => setEditing(false)} />}
@@ -311,17 +331,16 @@ export function ScanScheduleSection({ tenantId, spaces, whyNot }: { tenantId: st
   );
 }
 
-function ScanScheduleSummary({ schedule, spaces, fetchedAt }: { schedule: ScanScheduleJson; spaces: string[]; fetchedAt: number }) {
+function ScanScheduleSummary({ schedule, fetchedAt }: { schedule: ScanScheduleJson; fetchedAt: number }) {
   const runs = nextRuns(schedule, MIN_MINUTES_BETWEEN_SCANS);
   return (
     <>
       <p className="schedule-summary">
-        <span className="mono">{schedule.cron}</span> <span className="muted">in {schedule.timeZone} time.</span> Next runs: {runs.join(", ")}.
-      </p>
-      <p className="muted">
-        Each run scans {spaces.length ? <span className="mono">{spaces.join(", ")}</span> : "the spaces the technical client can read"}. When it changes
-        a step of a saved pipeline, that pipeline&apos;s scenarios run again, and its watchers get an alert if one that passed before doesn&apos;t now.
-        Set on {formatDateTime(schedule.updatedAt)}.
+        {nextRunsLine(runs)}
+        <span className="muted">
+          {" · "}
+          <span className="mono">{schedule.cron}</span> in {schedule.timeZone} time, set on {formatDateTime(schedule.updatedAt)}
+        </span>
       </p>
       <LateStrip nextRunAt={schedule.nextRunAt} fetchedAt={fetchedAt} run={runs[0]} />
     </>

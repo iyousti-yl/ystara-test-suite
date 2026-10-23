@@ -40,6 +40,12 @@ export async function getPipeline(db: Queryable, id: string): Promise<PipelineDe
   return rows[0] && toPipeline(rows[0]);
 }
 
+/** The loaders a saved pipeline leaves out: its steps are worked out again with them from the next read. */
+export async function setIgnoredLoaders(db: Queryable, id: string, excludeWriters: string[]): Promise<PipelineDefinition | undefined> {
+  const { rows } = await db.query<Row>("update pipelines set exclude_writers = $2 where id = $1 returning *", [id, excludeWriters]);
+  return rows[0] && toPipeline(rows[0]);
+}
+
 export async function deletePipeline(db: Queryable, id: string): Promise<boolean> {
   return (await db.query("delete from pipelines where id = $1 returning id", [id])).rows.length > 0;
 }

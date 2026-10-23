@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
-import { Label, MessageStrip, Option, Panel, Select, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Title } from "@ui5/webcomponents-react";
+import { Label, Option, Panel, Select, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Title } from "@ui5/webcomponents-react";
 import { refKey, type ColumnComparison, type DspObjectRef, type StepNotCompared, type StepState, type Verdict } from "@ystara/shared";
 import { useParams, useSearchParams } from "react-router";
 import { useComparison, useSavedPipeline, useSnapshot, useSnapshots, type SnapshotComparisonJson, type SnapshotJson } from "../api";
 import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading } from "../components/Feedback";
+import { QuietNote } from "../components/Info";
 import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTimesApart, formatDifference, formatExact, formatNumber } from "../format";
@@ -68,10 +69,9 @@ export function ComparePage() {
         </div>
       )}
       {tooFew ? (
-        <MessageStrip design="Information" hideCloseButton>
-          Comparing needs two successful snapshots of this pipeline, and it has {succeeded === 0 ? "none" : "one"} yet. Snapshots are taken on the
-          pipeline page.
-        </MessageStrip>
+        <QuietNote>
+          Comparing needs two successful snapshots of this pipeline, and it has {succeeded === 0 ? "none" : "one"} yet.
+        </QuietNote>
       ) : snapshots.error ? (
         <ErrorStrip error={snapshots.error} />
       ) : comparison.isPending ? (
@@ -128,16 +128,15 @@ function ComparisonView({ comparison: c, saved }: { comparison: SnapshotComparis
       </div>
       <NextSentence comparison={c} steps={saved.pipeline.steps} />
       {c.measuredOnce.length > 0 && (
-        <MessageStrip design="Information" hideCloseButton>
-          {c.measuredOnce.length === 1 ? "One step was" : `${c.measuredOnce.length} steps were`} measured in only one of the two snapshots, so{" "}
-          {c.measuredOnce.length === 1 ? "its" : "their"} data isn&apos;t compared. They are listed below with the reason.
-        </MessageStrip>
+        <QuietNote>
+          {c.measuredOnce.length === 1 ? "One step was" : `${c.measuredOnce.length} steps were`} measured in only one snapshot, so not compared. They are
+          listed below.
+        </QuietNote>
       )}
 
       <div className="compare-graph pipeline-graph">
         <LineageGraph key={`${c.before.id}-${c.after.id}`} nodes={model.nodes} edges={model.edges} selected={selected} onSelect={select} dark={dark} />
       </div>
-      <p className="muted">The picture is the pipeline on the tenant&apos;s latest scan, with what changed between the two snapshots marked on each step.</p>
 
       {changed.length + definitionsChanged.length > 0 && (
         <section className="block">
@@ -229,8 +228,8 @@ function summary(c: SnapshotComparisonJson): string {
   if (definitions) parts.push(`${definitions} ${definitions === 1 ? "definition" : "definitions"} changed`);
   if (c.added.length || c.removed.length) parts.push(`${c.added.length} added, ${c.removed.length} removed`);
   if (c.measuredOnce.length) parts.push(`${c.measuredOnce.length} not compared`);
-  const time = formatDateTimesApart([taken(c.before), taken(c.after)]);
-  return `${parts.join(" · ")}. From ${time(taken(c.before))} to ${time(taken(c.after))}.`;
+  // When each was taken is in the pickers right above.
+  return `${parts.join(" · ")}.`;
 }
 
 /**
@@ -245,8 +244,8 @@ function NextSentence({ comparison: c, steps }: { comparison: SnapshotComparison
   if (!first) return c.compared.length ? <p>Nothing to do: every step measured in both is as it was.</p> : null;
   return (
     <p>
-      The change starts at <span className="mono">{first.technicalName}</span>, the first changed step from upstream. If it was expected, such as newly
-      loaded data, nothing needs doing; if not, look there first.
+      The change starts at <span className="mono wrap-anywhere">{first.technicalName}</span>. If it wasn&apos;t expected (newly loaded data, say), look there
+      first.
     </p>
   );
 }

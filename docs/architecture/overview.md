@@ -138,7 +138,7 @@ Snapshot tests measure views with SQL, through a database user of the space (Spa
 2. Classify each object (`views` is split back into SQL and graphical views) and hash its definition so re-scans show what changed.
 3. Find references: walk each definition and match strings, and identifiers inside SQL text with comments removed, against the names of all scanned objects. Role rules: in flows, each step's `component` decides (`...producer`, `...target` write; `...consumer`, `...source` read), keys of a `targets` section are writes, and elsewhere a key path containing "target" means a write; in task chains, references are steps; in tables, views and analytic models, references are reads. A flow reading its own target (delta, lookup) is not a dependency. When a `read` bundles dependency definitions, only the object's own entry is scanned.
 4. Build edges that point the way data moves (`reads_from`, `writes_to`) plus control edges from task chains: `triggers` for a step they run, `clears` for a table a step empties (DELETE_DATA).
-5. A **pipeline** for an output object is traced backwards through data edges: what it reads (main chain and side inputs alike), the flow that writes each table, down to tables nothing upstream writes. Task chains are never followed. Writers excluded by configuration are listed, not followed; a table still left with several writers is reported as ambiguous. Steps are topologically sorted and loops are reported, not hidden. **Entry points** are tables with no other table upstream (where fixtures go).
+5. A **pipeline** for an output object is traced backwards through data edges: what it reads (main chain and side inputs alike), the flow that writes each table, down to tables nothing upstream writes. Task chains are never followed. Writers excluded by configuration are listed, not followed; a table still left with several writers is reported as ambiguous. A saved pipeline's ignored loaders change in place (`PUT /api/pipelines/:id/ignored-loaders`, "Choose loaders" on its Lineage tab), and its steps are worked out again from them. Steps are topologically sorted and loops are reported, not hidden. **Entry points** are tables with no other table upstream (where fixtures go).
 
 Try it locally: `npm run scan -- --space <SPACE> --output <OBJECT>` writes a Mermaid lineage diagram to `tools/scan/output/`.
 
@@ -156,7 +156,7 @@ Nothing is written to the tenant and no flow or task chain is run. Instead the p
 
 A saved pipeline's Scenarios tab lists its scenarios with their latest run. The builder (`apps/web/src/pages/Scenarios.tsx`, `apps/web/src/scenario/`) edits one ScenarioSpec, the same shape as a file:
 
-- **Test rows:** one grid per table that takes rows (`GET /api/pipelines/:id/scenario-inputs`, from the latest scan's definitions), with the table's columns and types. Each cell is typed text, turned into a value by its column's type (`cellFromText`); an empty cell is NULL. Rows pasted from a spreadsheet fill the grid from the cell, by column name when the first line is a header. A table given no rows gets no fixture and is empty.
+- **Test rows:** one folded line per table that takes rows (`GET /api/pipelines/:id/scenario-inputs`, from the latest scan's definitions), open when it has rows, with a grid of the table's columns and types inside. Each cell is typed text, turned into a value by its column's type (`cellFromText`); an empty cell is NULL. Rows pasted from a spreadsheet fill the grid from the cell, by column name when the first line is a header. A table given no rows gets no fixture and is empty.
 - **Checks:** added per step in a dialog (row count, no empty values, unique, an aggregate, exact rows, SQL), with the step's columns to pick from.
 - **Compile as you go:** the draft is sent, unsaved, to `POST /api/pipelines/:id/scenario-check`, which compiles it on the latest scan and says what stops it or a check. Nothing is sent to the tenant.
 - **Run:** `POST /api/scenarios/:id/runs` refuses (409, with the reason) a scenario that can't run, and otherwise queues a `scenario-run` job. The run keeps the scenario as it was, and its page shows each check's result and what stood in for each step.
@@ -186,6 +186,18 @@ What a design partner's auditors and admins ask for before a pilot.
 - **History and report.** `GET /api/pipelines/:id/history` puts suites, scenario runs, snapshots and sign-offs on one timeline (the History tab, with two charts and a CSV of the whole timeline). `GET /api/pipelines/:id/report` gathers what an auditor reads: the sign-off and what it covered, the latest suite with every check, the latest two snapshots compared, the steps and the recent history. The web app shows it on a page without the menu, to print or save as PDF from the browser. Nothing here calls the tenant.
 
 Open questions for phase 3: how delta loads and upserts in transformation flows should be simulated; how far a compiler from the CSN `query` of graphical views to HANA SQL can go (joins, unions, calculated columns, aggregation, parameters), which can't be tested against the deployed SQL of exposed views, because `SYS.VIEWS` gives the database user no definition (the spike's run, 2026-10-19), so only a view's columns are checked against `SYS.VIEW_COLUMNS`; which steps can't be inlined into one SELECT (SQLScript views and table functions, currency conversion that reads TCUR tables, `CURRENT_DATE` and session values, which need fixed fixture values). A phase-3 spike should compile one SQL view and one graphical view of a real pipeline into a fixture-only SELECT and run it through the database user before the engine is built. That compiler is in `packages/connector/src/simulate` (`simulatePipeline`), and `npm run spike:simulate` runs it on a saved scan, with `--run` through the database user and `--oracle` against the deployed SQL of exposed views (README, "Simulating a pipeline"). It uses nested subqueries, so `assertSelectOnly` is unchanged.
+
+### How pages speak (calm pages)
+
+A page says one thing at a time, so a real tenant with dozens of findings still reads at a glance (Issam's review of 2026-10-23). The parts are in `apps/web/src/components/Info.tsx`:
+
+- **One notice at most.** A message strip is for a failure or the one thing the page is about (a snapshot's alert). Anything else is a `QuietNote`: one muted line with a small mark (ok, to check, a fact).
+- **Findings fold into a count.** `ToCheck` shows "To check: 4 tables loaded by several flows · 2 loops" with Review, which opens the list (a pipeline's checks, objects a scan couldn't read). Loops and several loaders are amber, never red: red is for what failed.
+- **Help behind an (i).** A section says what it is in one line; `InfoButton` opens the rest in a popover.
+- **Long lists fold.** `Fold` is a row that opens: a scenario's input tables, a loop's steps.
+- **Room.** Blocks on a page are 32px apart, and cards have 32px inside (24px below 1024px).
+
+`npm run check:browser` flags a page with more than one visible notice (`crowded`) and a line of help that runs over three lines on a wide window (`wordy`).
 
 ## Security posture (short form for the security pack)
 

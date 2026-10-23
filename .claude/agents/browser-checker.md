@@ -28,6 +28,7 @@ You check Ystara's web app in a real browser and report what is wrong on screen.
    - buttons, dialog footers or menus in the wrong place; content hidden under the top bar
    - stuck loading indicators, empty states where data was expected, error strips
    - in dark mode, text or lines that are hard to see
+   - a page that feels crowded or loud: more than one notice at a time, warnings in red that aren't failures, paragraphs of help where a line and an (i) would do, cards with too little room around their content (the check flags strips and long help as `crowded` and `wordy`; judge the rest by eye)
    - anything that differs from the same page at another width without a reason
 5. **Report** in the format below and nothing else.
 

@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { acceptInvitation, createAccount, createInvitation, getSchedule, getSnapshotDetails, listAuditEvents, listPipelines, listTenants, pipelineHistory, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import { compareSnapshots } from "@ystara/shared";
-import { DEMO_COLUMNS, DEMO_NAMES, DEMO_SCENARIO, DEMO_SPACE, DEMO_TENANT, loadDemo } from "./demo.js";
+import { buildPipeline, graphFromRaw } from "@ystara/connector";
+import { BUSY_OUTPUT, BUSY_RAW } from "./demo-busy.js";
+import { DEMO_COLUMNS, DEMO_NAMES, DEMO_RAW, DEMO_SCENARIO, DEMO_SPACE, DEMO_TENANT, loadDemo } from "./demo.js";
 
 let db: Db;
 let accountId: string;
@@ -71,10 +73,26 @@ describe("the demo tenant", () => {
     );
   });
 
+  it("has a busier process beside it, with several loaders, loops and wide input tables", () => {
+    const busy = buildPipeline(graphFromRaw(DEMO_RAW, [DEMO_SPACE]), { space: DEMO_SPACE, technicalName: BUSY_OUTPUT });
+    expect(busy.ambiguousWriters.map((a) => [a.table.technicalName, a.writers.length])).toEqual(
+      expect.arrayContaining([
+        ["LT_DEMO_INV_STAGING", 3],
+        ["LT_DEMO_INV_HISTORY", 2],
+        ["LT_DEMO_INV_CURRENT", 2],
+        ["LT_DEMO_INV_RATED_LINES", 2],
+      ]),
+    );
+    expect(busy.cycles).toHaveLength(2);
+    expect(busy.entryPoints).toHaveLength(16);
+    expect(busy.steps.length).toBeGreaterThan(40);
+    for (const o of BUSY_RAW) expect(o.technicalName.length).toBeLessThanOrEqual(50);
+  });
+
   it("refuses to load it twice into one account, and adds nothing", async () => {
     const before = (await listTenants(db, accountId)).length;
     await expect(loadDemo(db, accountId)).rejects.toThrow(`already has the tenant "${DEMO_TENANT}"`);
     expect((await listTenants(db, accountId)).length).toBe(before);
-    expect(await listPipelines(db, (await listTenants(db, accountId))[0].id)).toHaveLength(1);
+    expect(await listPipelines(db, (await listTenants(db, accountId))[0].id)).toHaveLength(2);
   });
 });

@@ -3,7 +3,7 @@
  * CSS variables (--sap...), which brand.ts sets to the youlytics brand, and
  * from its own --ystara-... tokens, so everything follows light and dark mode.
  * Spacing keeps to the brand's 4px scale (--space-...): blocks on a page are
- * 24px apart, a section's parts 16px, and a control's parts 8px.
+ * 32px apart, a section's parts 16px, and a control's parts 8px.
  */
 :root {
   --space-1: 4px;
@@ -59,7 +59,7 @@ li {
   padding: var(--space-6) var(--space-6) var(--space-8);
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-6);
 }
 /* Pages with a lineage picture, a pipeline's tabs or the scenario builder: wider. */
 .page-wide {
@@ -175,16 +175,21 @@ li {
   display: block;
   margin: var(--space-2) 0;
 }
-/* A section of a page is a card: white, 24px inside, its heading at 22px, its parts 16px apart. */
+/* A section of a page is a card: white, 32px inside (24px on a narrow window), its heading at 22px, its parts 16px apart. */
 section.block {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  padding: var(--space-5);
+  padding: var(--space-6);
   background: var(--ystara-card);
   border: 1px solid var(--ystara-border);
   border-radius: var(--radius-panel);
   min-width: 0;
+}
+@media (max-width: 1023px) {
+  section.block {
+    padding: var(--space-5);
+  }
 }
 section.block > ui5-title,
 .section-head > ui5-title {
@@ -414,9 +419,6 @@ ui5-tag {
   flex: 1 0 27rem;
   min-height: 0;
 }
-.pipeline > ui5-segmented-button {
-  align-self: flex-start;
-}
 .pipeline-main {
   display: flex;
   gap: var(--space-4);
@@ -463,6 +465,232 @@ ui5-tag {
   max-height: 24rem;
   overflow: auto;
   font-size: var(--sapFontSmallSize);
+}
+/* The view switch on the left, what the pipeline has on the right. */
+.pipeline-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+/* Something to check about the selected object: a quiet line, not a banner. */
+.panel-note {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--ystara-muted);
+}
+.panel-note-icon,
+.checks-icon {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.2rem;
+  color: var(--ystara-amber);
+}
+
+/* --- What a pipeline should be checked for (lineage/PipelineChecks.tsx): one line that opens into a short list. */
+
+.checks {
+  border: 1px solid var(--ystara-border);
+  border-radius: var(--radius-panel);
+  background: var(--ystara-card);
+}
+.checks-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+}
+.checks-head .checks-icon {
+  margin-top: 0;
+}
+.checks-head > span {
+  flex: 1;
+  min-width: 0;
+}
+.checks-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  border-top: 1px solid var(--ystara-border);
+  max-height: 22rem;
+  overflow: auto;
+}
+.checks-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: 600;
+}
+.checks-list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+.checks-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--ystara-border);
+  line-height: 1.4;
+}
+.checks-list > li:last-child {
+  border-bottom: 0;
+}
+.checks-list > li > .mono {
+  flex: 1;
+  min-width: 0;
+}
+.checks-list > li > .fold {
+  flex: 1;
+  min-width: 0;
+}
+.checks-steps {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-6);
+}
+.checks-steps > li {
+  margin: var(--space-1) 0;
+}
+.loader-choices {
+  list-style: none;
+  margin: var(--space-3) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.loader-choices ui5-checkbox {
+  overflow-wrap: anywhere;
+}
+
+/* --- The (i) beside a heading and what it explains (components/Info.tsx). */
+
+.info-button {
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  color: var(--ystara-muted);
+}
+.info-popover::part(content) {
+  padding: var(--space-4);
+}
+.info-text {
+  max-width: 22rem;
+  line-height: 1.6;
+}
+.info-text p {
+  margin: 0;
+}
+.info-list {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+.info-text p + p {
+  margin-top: var(--space-2);
+}
+
+/* A row that folds its content away: a chevron, a title and a quiet summary. */
+.fold-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  width: 100%;
+  padding: var(--space-2) 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fold-head:focus-visible {
+  outline: var(--sapContent_FocusWidth) var(--sapContent_FocusStyle) var(--sapContent_FocusColor);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.fold-chevron {
+  flex-shrink: 0;
+  width: 0.875rem;
+  height: 0.875rem;
+  color: var(--ystara-muted);
+  transition: transform 0.15s ease;
+}
+.fold.is-open .fold-chevron {
+  transform: rotate(90deg);
+}
+.fold-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Stays on the title's line: the title wraps first. */
+.fold-summary {
+  flex-shrink: 0;
+  padding-left: var(--space-3);
+  color: var(--ystara-muted);
+  white-space: nowrap;
+}
+.fold-body {
+  padding: var(--space-2) 0 var(--space-2) calc(0.875rem + var(--space-3));
+}
+/* Items that fold, one per line with a divider (a scenario's input tables). */
+.fold-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--ystara-border);
+}
+.fold-list > li {
+  border-bottom: 1px solid var(--ystara-border);
+}
+.fold-list .fold-head {
+  padding: var(--space-3) 0;
+}
+.fold-list .fold-body {
+  padding-bottom: var(--space-5);
+}
+.fold-note {
+  margin: 0 0 var(--space-3);
+}
+/* A section's heading with its (i) right beside it. */
+.title-with-info {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+/* A normal state in a quiet line (it compiles, it is ready), with a small mark: not a banner. */
+.quiet-state {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+}
+.quiet-state > ui5-icon {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.2rem;
+}
+.quiet-state > .info-button {
+  margin-top: -0.2rem;
+}
+.quiet-state-ok {
+  color: var(--ystara-sapphire);
+}
+.quiet-state-warn {
+  color: var(--ystara-amber);
+}
+.quiet-state-info {
+  color: var(--ystara-muted);
+}
+.quiet-state-error {
+  color: var(--ystara-ruby);
 }
 
 /* --- Snapshot and scan schedules */
@@ -681,11 +909,9 @@ ui5-tag {
 .flag-muted {
   color: var(--ystara-muted);
 }
+/* Something to check (several loaders, a loop): amber, never the colour of a failure. */
 .flag-warning {
   color: var(--sapCriticalTextColor);
-}
-.flag-error {
-  color: var(--ystara-ruby);
 }
 .flag-changed,
 .flag-measurable {
@@ -740,9 +966,13 @@ ui5-tag {
   font-size: 0.8125rem;
   color: var(--ystara-muted);
 }
+/* On the canvas, so it sits on a quiet card of its own and never runs into an object behind it. */
 .lineage-hint {
   color: var(--ystara-muted);
   font-size: var(--sapFontSmallSize);
+  padding: var(--space-1) var(--space-2);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ystara-card) 92%, transparent);
 }
 .react-flow__minimap-node.minimap-table {
   fill: var(--ystara-grey);
@@ -1037,7 +1267,6 @@ section.block.scenario-about {
 .scenario-field-wide {
   grid-column: 1 / -1;
 }
-.scenario-table,
 .scenario-checks {
   margin: var(--space-3) 0 var(--space-5);
 }
@@ -1137,9 +1366,6 @@ section.block.scenario-about {
 .rows-grid-key {
   color: var(--sapInformativeColor);
   font-weight: bold;
-}
-.rows-grid-used {
-  color: var(--sapInformativeColor);
 }
 .rows-grid-number {
   width: 2rem;

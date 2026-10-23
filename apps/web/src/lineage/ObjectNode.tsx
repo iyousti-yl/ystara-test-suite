@@ -23,7 +23,7 @@ export function ObjectNode({ data, selected }: NodeProps<ObjectNodeType>) {
         {entry && <span className="flag flag-entry">Input</span>}
         {excluded && <span className="flag flag-muted">Ignored</span>}
         {severalWriters && <span className="flag flag-warning">Several loaders</span>}
-        {inLoop && <span className="flag flag-error">Loop</span>}
+        {inLoop && <span className="flag flag-warning">Loop</span>}
         {mark ? <span className={`flag ${MARK_FLAG[mark]}`}>{MARK_LABEL[mark]}</span> : measurement?.measurable && <span className="flag flag-measurable">Measurable</span>}
       </div>
       <Handle type="source" position={Position.Right} isConnectable={false} />

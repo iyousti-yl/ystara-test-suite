@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { CheckBox, Input, Label, MessageStrip, RadioButton } from "@ui5/webcomponents-react";
+import { CheckBox, Input, Label, RadioButton } from "@ui5/webcomponents-react";
 import type { SpaceScope } from "@ystara/shared";
 import { useMe } from "../api";
 import { parseSpaceIds } from "../fields";
+import { QuietNote } from "./Info";
 
 /**
  * Which spaces a member sees: every space, or only some, ticked from those the
@@ -81,8 +82,8 @@ export function SpacesNote({ what }: { what: string }) {
   const spaces = useMe().data?.spaces;
   if (!spaces) return null;
   return (
-    <MessageStrip design="Information" hideCloseButton className="block">
-      Your access is limited to <span className="mono">{spaces.join(", ")}</span>: {what}
-    </MessageStrip>
+    <QuietNote more={`${what[0].toUpperCase()}${what.slice(1)}`} moreLabel="What a limited access means here">
+      Your access is limited to <span className="mono">{spaces.join(", ")}</span>.
+    </QuietNote>
   );
 }

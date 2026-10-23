@@ -19,6 +19,7 @@ import { useNavigate, useParams } from "react-router";
 import { pipelineQuery, usePipelines, useScan, useScanGraph } from "../api";
 import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
+import { QuietNote, ToCheck } from "../components/Info";
 import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTime, formatNumber } from "../format";
@@ -57,23 +58,31 @@ export function ScanPage() {
           </span>
         }
       />
-      {s.status === "queued" && <MessageStrip hideCloseButton>Waiting for the worker. This page refreshes on its own.</MessageStrip>}
-      {s.status === "running" && <MessageStrip hideCloseButton>Reading the spaces. This page refreshes on its own.</MessageStrip>}
+      {s.status === "queued" && <QuietNote>Waiting for the worker. This page refreshes on its own.</QuietNote>}
+      {s.status === "running" && <QuietNote>Reading the spaces. This page refreshes on its own.</QuietNote>}
       {s.error && (
         <MessageStrip design="Negative" hideCloseButton className="block">
           {s.error}
         </MessageStrip>
       )}
       {s.warnings.length > 0 && (
-        <MessageStrip design="Critical" hideCloseButton className="block">
-          {counted(s.warnings.length, "object")} could not be read or understood; the lineage may miss links to them.
-          <ul className="warnings">
-            {s.warnings.slice(0, 20).map((w) => (
-              <li key={w}>{w}</li>
+        <ToCheck
+          label="Objects the scan couldn't read"
+          summary={
+            <>
+              <strong>To check:</strong> {counted(s.warnings.length, "object")} couldn&apos;t be read, so the lineage may miss links to them
+            </>
+          }
+        >
+          <ul className="checks-list">
+            {s.warnings.slice(0, 50).map((w) => (
+              <li key={w} className="wrap-anywhere">
+                {w}
+              </li>
             ))}
-            {s.warnings.length > 20 && <li>…and {formatNumber(s.warnings.length - 20)} more</li>}
           </ul>
-        </MessageStrip>
+          {s.warnings.length > 50 && <p className="muted">…and {formatNumber(s.warnings.length - 50)} more</p>}
+        </ToCheck>
       )}
       <ErrorStrip error={graph.error} />
       {graph.data && <ObjectList scanId={scanId} tenantId={s.tenantId} graph={graph.data} />}
@@ -143,8 +152,8 @@ function ObjectList({ scanId, tenantId, graph }: { scanId: string; tenantId: str
       </div>
       <p className="muted">
         {filter === "outputs"
-          ? "Views and analytic models that nothing else in the scan reads: what people use. Pick one to see the pipeline behind it, and save it from there."
-          : "Pick any object to see the pipeline behind it, and save it from there."}
+          ? "Views and analytic models nothing else reads: what people use. Pick one to see its pipeline."
+          : "Pick any object to see its pipeline."}
       </p>
       <Table
         noDataText="No objects match."
