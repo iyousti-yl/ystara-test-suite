@@ -6,6 +6,7 @@ import { monoColumnWidth } from "../columns";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorStrip, HealthTag, Loading, When } from "../components/Feedback";
 import { healthOf, NextStep } from "../components/Health";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
 import { SpacesNote } from "../components/SpacesPicker";
 import { formatNumber } from "../format";
@@ -34,7 +35,7 @@ export function PipelinesPage() {
   const scanned = scans.data?.find((s) => s.status === "succeeded");
 
   if (tenant.isPending) return <Loading />;
-  if (!tenant.data) return <ErrorStrip error={tenant.error} />;
+  if (!tenant.data) return <PageError error={tenant.error} what="tenant" />;
 
   const byId = new Map(summaries.data?.map((s) => [s.pipelineId, s]));
   const rows: Row[] = (pipelines.data ?? [])

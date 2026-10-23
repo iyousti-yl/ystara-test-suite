@@ -1,10 +1,13 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
+import { ACTIVITY_HEADER } from "@ystara/shared";
 import type {
   Account,
   AccountOverview,
+  AccountSettings,
   AuditGroup,
   AuditPage,
   AuthenticatorSetup,
+  ChangePassword,
   ClaudeSetting,
   ConnectionState,
   CreatedInvitation,
@@ -50,6 +53,10 @@ import type {
   UserOverview,
   WatchState,
 } from "@ystara/shared";
+import { activity } from "./activity";
+import { answerError, connectionFailure } from "./errors";
+import { fileNameOf, saveFile } from "./files";
+import { signInSettled } from "./session";
 
 /**
  * The web app's only way to the API. Every call goes to /api on the same
@@ -61,8 +68,11 @@ import type {
  * Response types come from packages/shared/src/api.ts, with dates as strings.
  *
  * The session cookie travels with every call on its own (HttpOnly: this code
- * never sees it). An answer 401 means "not signed in": main.tsx then asks
- * for /auth/me again, and App.tsx sends the browser to the sign-in page.
+ * never sees it). An answer 401 means "not signed in": on the first /auth/me,
+ * App.tsx sends the browser to the sign-in page; later, the sign-in ended, and
+ * main.tsx opens "Your sign-in ended" over the page (session.ts). Each call
+ * says whether someone is using the page (activity.ts), and gives up after
+ * 30 seconds; a call that gets no answer fails with one plain sentence (errors.ts).
  */
 export type TenantJson = Json<Tenant>;
 export type ScanJson = Json<Scan>;
@@ -89,36 +99,88 @@ export type AuditEventJson = Json<AuditPage["events"][number]>;
 /** A scenario as the builder sends it: the API adds the pipeline and the version. */
 export type ScenarioDraft = Omit<ScenarioSpec, "pipeline" | "version">;
 
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-    /** The whole answer, for fields beyond `error`. */
-    readonly body?: unknown,
-  ) {
-    super(message);
+export { ApiError, errorMessage, isUnauthorized, SignInEnded } from "./errors";
+
+type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+/** How long a call may take before the app gives up on it. Drafting with Claude takes minutes, so it has none. */
+const TIME_LIMIT_MS = 30_000;
+
+/** fetch, with the activity header while someone uses the page and a time limit; no answer at all is one plain sentence. */
+async function send(method: Method, path: string, body: unknown, timeLimit: number | false): Promise<Response> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["content-type"] = "application/json";
+  if (activity.isActive()) headers[ACTIVITY_HEADER] = "1";
+  try {
+    return await fetch(`/api${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: timeLimit ? AbortSignal.timeout(timeLimit) : undefined,
+    });
+  } catch (e) {
+    throw connectionFailure(e);
   }
 }
 
-export const isUnauthorized = (e: unknown) => e instanceof ApiError && e.status === 401;
-
-async function request<T>(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers: body === undefined ? {} : { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+/** The answer's JSON, or undefined when it has none; an answer cut off on the way is a connection failure. */
+async function bodyOf(res: Response): Promise<unknown> {
+  const text = await res.text().catch((e: unknown) => {
+    throw connectionFailure(e);
   });
-  if (res.status === 204) return undefined as T;
-  const data: unknown = await res.json().catch(() => undefined);
-  if (!res.ok) throw new ApiError(res.status, errorMessage(data) ?? `The API answered ${res.status} ${res.statusText}`, data);
+  try {
+    return text ? JSON.parse(text) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function request<T>(method: Method, path: string, body?: unknown, timeLimit: number | false = TIME_LIMIT_MS): Promise<T> {
+  const res = await send(method, path, body, timeLimit);
+  const data = await bodyOf(res);
+  if (!res.ok) throw answerError(path.split("?")[0], res.status, res.statusText, data);
   return data as T;
 }
 
-/** The API's `{ error, issues? }` as one readable sentence. */
-export function errorMessage(data: unknown): string | undefined {
-  if (!data || typeof data !== "object" || !("error" in data) || typeof data.error !== "string") return undefined;
-  const issues = "issues" in data && Array.isArray(data.issues) ? data.issues.map((i: { message?: string }) => i.message).filter(Boolean) : [];
-  return issues.length ? `${data.error}: ${issues.join("; ")}` : data.error;
+/**
+ * A CSV export, fetched rather than opened in the tab: a refusal shows on the page in words (an ended
+ * sign-in opens the sign-in dialog), never as the API's raw answer. Saved under the name the API gives it.
+ */
+export function useDownload() {
+  return useMutation({
+    mutationFn: async ({ path, name }: { path: string; name: string }) => {
+      const res = await send("GET", path, undefined, TIME_LIMIT_MS);
+      if (!res.ok) throw answerError(path.split("?")[0], res.status, res.statusText, await bodyOf(res));
+      const blob = await res.blob().catch((e: unknown) => {
+        throw connectionFailure(e);
+      });
+      saveFile(blob, fileNameOf(res.headers.get("content-disposition"), name));
+    },
+  });
+}
+
+/** How many events of a pipeline's history the API sends, newest first (its CSV has them all). */
+export const HISTORY_EVENTS = 100;
+
+/** Lists that come a page at a time (scans, snapshots, runs, suites): the API's page, newest first. */
+export const PAGE = 50;
+
+/**
+ * A list a page of PAGE at a time, newest first, as one array (`data`). The API answers
+ * `?before=<requestedAt of the oldest row shown>` with the next older page; fetchNextPage loads it, and
+ * hasNextPage says whether a full page came last, so older rows may be left. Refetching (polling while
+ * something runs) asks for every page shown again. `poll`: how often to refetch, from the rows shown.
+ */
+function useOlderPages<T extends { requestedAt: string }>(key: QueryKey, path: string, options: { enabled?: boolean; poll: (rows: T[]) => number | false }) {
+  return useInfiniteQuery({
+    queryKey: key,
+    queryFn: ({ pageParam }) => request<T[]>("GET", pageParam ? `${path}?before=${encodeURIComponent(pageParam)}` : path),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => (last.length >= PAGE ? last.at(-1)?.requestedAt : undefined),
+    select: (data) => data.pages.flat(),
+    enabled: options.enabled,
+    refetchInterval: (q) => options.poll(q.state.data?.pages.flat() ?? []),
+  });
 }
 
 // --- Signing in
@@ -144,20 +206,70 @@ function useStartWith() {
   const keep = new Set([ME[0], "invitations", "resets"]);
   return (me: Me) => {
     client.setQueryData(ME, me);
+    signInSettled();
     void client.resetQueries({ predicate: (q) => !keep.has(String(q.queryKey[0])) });
   };
 }
 
-export const useLogin = () => useMutation({ mutationFn: (input: { email: string; password: string }) => request<{ next: "code" }>("POST", "/auth/login", input) });
+/** Email and password. `accountId`: start in that account when the user belongs to it (signing in again over a page), else in their first. */
+export const useLogin = () =>
+  useMutation({ mutationFn: (input: { email: string; password: string; accountId?: string }) => request<{ next: "code" }>("POST", "/auth/login", input) });
 
 export function useCode() {
   const startWith = useStartWith();
   return useMutation({ mutationFn: (code: string) => request<Me>("POST", "/auth/code", { code }), onSuccess: startWith });
 }
 
+/**
+ * The code, when signing in again over a page whose sign-in ended (components/SignInAgain.tsx). The same
+ * person in the same account carries on: the page stays, with what they typed, and asks for its data again.
+ * Anyone else starts afresh, as after signing in, and `elsewhere` takes them Home. Both happen here, not in
+ * the dialog, which is gone by the time a callback of its own would run.
+ */
+export function useCodeAgain(elsewhere: () => void) {
+  const client = useQueryClient();
+  const startWith = useStartWith();
+  return useMutation({
+    mutationFn: (code: string) => request<Me>("POST", "/auth/code", { code }),
+    onSuccess: (next) => {
+      const before = client.getQueryData<Me>(ME);
+      if (before?.user.id !== next.user.id || before.account.id !== next.account.id) {
+        startWith(next);
+        return elsewhere();
+      }
+      client.setQueryData(ME, next);
+      signInSettled();
+      void client.invalidateQueries({ predicate: (q) => q.queryKey[0] !== ME[0] });
+    },
+  });
+}
+
 export function useSignOut() {
   const client = useQueryClient();
-  return useMutation({ mutationFn: () => request<void>("POST", "/auth/logout"), onSettled: () => client.clear() });
+  return useMutation({
+    mutationFn: () => request<void>("POST", "/auth/logout"),
+    onSettled: () => {
+      client.clear();
+      signInSettled();
+    },
+  });
+}
+
+/** A new password, with the current one and a code. The API signs out every other browser, so /auth/me's count is asked for again. */
+export function useChangePassword() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ChangePassword) => request<{ ok: true }>("POST", "/auth/password", input),
+    onSuccess: () => client.invalidateQueries({ queryKey: ME }),
+  });
+}
+
+export function useEndOtherSessions() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => request<{ ended: number }>("POST", "/auth/sessions/end-others"),
+    onSuccess: () => client.invalidateQueries({ queryKey: ME }),
+  });
 }
 
 export function useSwitchAccount() {
@@ -259,11 +371,22 @@ function useTeamChange<I, O>(mutationFn: (input: I) => Promise<O>) {
 export const useInvite = () =>
   useTeamChange((input: { email: string; role: Role; spaces: SpaceScope }) => request<Json<CreatedInvitation>>("POST", "/team/invitations", input));
 export const useWithdrawInvitation = () => useTeamChange((id: string) => request<void>("DELETE", `/team/invitations/${id}`));
-/** A new role, and new spaces when given (null for every space); without spaces the member keeps theirs. */
-export const useChangeRole = () =>
-  useTeamChange((input: { userId: string; role: Role; spaces?: SpaceScope }) =>
-    request<void>("PATCH", `/team/members/${input.userId}`, { role: input.role, spaces: input.spaces }),
-  );
+/**
+ * A new role, and new spaces when given (null for every space); without spaces the member keeps theirs.
+ * A change to the signed-in user's own role changes what the app offers them, so /auth/me is asked for again.
+ */
+export function useChangeRole() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { userId: string; role: Role; spaces?: SpaceScope }) =>
+      request<void>("PATCH", `/team/members/${input.userId}`, { role: input.role, spaces: input.spaces }),
+    onSettled: (_done, _error, input) =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: TEAM }),
+        input.userId === client.getQueryData<Me>(ME)?.user.id ? client.invalidateQueries({ queryKey: ME }) : undefined,
+      ]),
+  });
+}
 /** The spaces the account's scans covered, to limit a member to. */
 export const useTeamSpaces = (allowed: boolean) => useQuery({ queryKey: [...TEAM, "spaces"], queryFn: () => request<string[]>("GET", "/team/spaces"), enabled: allowed });
 export const useRemoveMember = () => useTeamChange((userId: string) => request<void>("DELETE", `/team/members/${userId}`));
@@ -355,13 +478,9 @@ export const useRemoveDatabaseUser = (tenantId: string) =>
 
 // --- Scans
 
-/** Refetches every few seconds while one of the scans is queued or running. */
+/** Newest first, a page at a time (useOlderPages). Refetches every few seconds while one of the scans is queued or running. */
 export const useScans = (tenantId: string) =>
-  useQuery({
-    queryKey: ["tenants", tenantId, "scans"],
-    queryFn: () => request<ScanJson[]>("GET", `/tenants/${tenantId}/scans`),
-    refetchInterval: (q) => pollWhile(q.state.data?.some((s) => active(s.status)) ?? false),
-  });
+  useOlderPages<ScanJson>(["tenants", tenantId, "scans"], `/tenants/${tenantId}/scans`, { poll: (scans) => pollWhile(scans.some((s) => active(s.status))) });
 
 export const useScan = (id: string) =>
   useQuery({
@@ -483,20 +602,20 @@ export function useDeletePipeline() {
 // --- Snapshots
 
 /**
- * Refetches every few seconds while one of them is queued or running, and
- * every minute while the pipeline has a schedule, so a scheduled one shows up.
+ * Newest first, a page at a time (useOlderPages). Refetches every few seconds while one of them is queued
+ * or running, and every minute while the pipeline has a schedule, so a scheduled one shows up.
  */
 export const useSnapshots = (pipelineId: string, scheduled = false) =>
-  useQuery({
-    queryKey: ["pipelines", pipelineId, "snapshots"],
-    queryFn: () => request<SnapshotJson[]>("GET", `/pipelines/${pipelineId}/snapshots`),
-    refetchInterval: (q) => pollWhile(q.state.data?.some((s) => active(s.status)) ?? false) || (scheduled ? 60_000 : false),
+  useOlderPages<SnapshotJson>(["pipelines", pipelineId, "snapshots"], `/pipelines/${pipelineId}/snapshots`, {
+    poll: (snapshots) => pollWhile(snapshots.some((s) => active(s.status))) || (scheduled ? 60_000 : false),
   });
 
-export const useSnapshot = (id: string) =>
+/** `enabled`: false while it isn't needed (Compare asks for one only when it is older than the list it shows). */
+export const useSnapshot = (id: string, enabled = true) =>
   useQuery({
     queryKey: ["snapshots", id],
     queryFn: () => request<SnapshotDetailsJson>("GET", `/snapshots/${id}`),
+    enabled: enabled && id !== "",
     refetchInterval: (q) => pollWhile(q.state.data ? active(q.state.data.status) : false),
   });
 
@@ -613,7 +732,7 @@ export const useScenarioCompile = (pipelineId: string, draft: ScenarioDraft | un
 export const useDraftScenario = (pipelineId: string) =>
   useMutation({
     mutationFn: (body: { description: string; name?: string; kind?: ScenarioSpec["kind"] }) =>
-      request<ScenarioDrafted>("POST", `/pipelines/${pipelineId}/scenario-draft`, body),
+      request<ScenarioDrafted>("POST", `/pipelines/${pipelineId}/scenario-draft`, body, false),
   });
 
 export const useScenario = (id: string) =>
@@ -639,13 +758,11 @@ export function useDeleteScenario(pipelineId: string) {
   });
 }
 
-/** A scenario's runs, newest first. Refetches every few seconds while one is queued or running. */
+/** A scenario's runs, newest first, a page at a time (useOlderPages). Refetches every few seconds while one is queued or running. */
 export const useScenarioRuns = (scenarioId: string) =>
-  useQuery({
-    queryKey: ["scenarios", scenarioId, "runs"],
-    queryFn: () => request<ScenarioRunSummaryJson[]>("GET", `/scenarios/${scenarioId}/runs`),
+  useOlderPages<ScenarioRunSummaryJson>(["scenarios", scenarioId, "runs"], `/scenarios/${scenarioId}/runs`, {
     enabled: scenarioId !== "",
-    refetchInterval: (q) => pollWhile(q.state.data?.some((r) => runActive(r.status)) ?? false),
+    poll: (runs) => pollWhile(runs.some((r) => runActive(r.status))),
   });
 
 export function useRunScenario(pipelineId: string, scenarioId: string) {
@@ -668,12 +785,10 @@ export const useScenarioRun = (id: string) =>
 
 const suitesKey = (pipelineId: string) => ["pipelines", pipelineId, "scenario-suites"];
 
-/** A pipeline's suites, newest first. Refetches every few seconds while one is queued or running. */
+/** A pipeline's suites, newest first, a page at a time (useOlderPages). Refetches every few seconds while one is queued or running. */
 export const useScenarioSuites = (pipelineId: string) =>
-  useQuery({
-    queryKey: suitesKey(pipelineId),
-    queryFn: () => request<ScenarioSuiteSummaryJson[]>("GET", `/pipelines/${pipelineId}/scenario-suites`),
-    refetchInterval: (q) => pollWhile(q.state.data?.some((s) => runActive(s.status)) ?? false),
+  useOlderPages<ScenarioSuiteSummaryJson>(suitesKey(pipelineId), `/pipelines/${pipelineId}/scenario-suites`, {
+    poll: (suites) => pollWhile(suites.some((s) => runActive(s.status))),
   });
 
 export const useScenarioSuite = (id: string) =>
@@ -718,6 +833,25 @@ export function useRemoveTeamsChannel() {
   return useMutation({
     mutationFn: () => request<void>("DELETE", "/account/teams-channel"),
     onSuccess: () => client.setQueryData(TEAMS, null),
+  });
+}
+
+// --- The account's settings (admins)
+
+const SETTINGS = ["account", "settings"];
+
+export const useAccountSettings = (allowed: boolean) =>
+  useQuery({ queryKey: SETTINGS, queryFn: () => request<AccountSettings>("GET", "/account/settings"), enabled: allowed });
+
+/** Every builder asks again whether it can draft, as drafting with Claude may have been switched on or off. */
+export function useSetAccountSettings() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (settings: AccountSettings) => request<AccountSettings>("PUT", "/account/settings", settings),
+    onSuccess: (settings) => {
+      client.setQueryData(SETTINGS, settings);
+      return client.invalidateQueries({ predicate: (q) => q.queryKey.includes("scenario-inputs") });
+    },
   });
 }
 

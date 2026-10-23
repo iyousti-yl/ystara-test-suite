@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appLocale, formatRelative } from "./format";
+import { appLocale, counted, countedAtLeast, countedLatest, formatExact, formatNumber, formatPercent, formatRelative, formatSeconds } from "./format";
 
 describe("the app's locale", () => {
   it("is English in the browser's region, so months are never in another language", () => {
@@ -28,5 +28,29 @@ describe("relative times", () => {
     expect(formatRelative(at(-86_400_000), now)).toBe("yesterday");
     expect(formatRelative(at(2 * 86_400_000), now)).toBe("in 2 days");
     expect(formatRelative(null, now)).toBe("–");
+  });
+});
+
+describe("counts and measures", () => {
+  // The tests run with plain English (no browser region): "1,234".
+  it("say one or many, in the app's locale", () => {
+    expect(counted(1, "row")).toBe("1 row");
+    expect(counted(0, "row")).toBe("0 rows");
+    expect(counted(1234, "row")).toBe(`${formatNumber(1234)} rows`);
+  });
+
+  it("say when a list stops at its latest page", () => {
+    expect(countedLatest(12, false, "snapshot")).toBe("12 snapshots");
+    expect(countedLatest(50, true, "snapshot")).toBe("Latest 50 snapshots");
+    expect(countedAtLeast(50, true, "scan")).toBe("50 or more scans");
+    expect(countedAtLeast(1, false, "scan")).toBe("1 scan");
+  });
+
+  it("write seconds, percentages and exact sums the same way everywhere", () => {
+    expect(formatSeconds(1234)).toMatch(/^1[.,]2 s$/);
+    expect(formatSeconds(null)).toBe("–");
+    expect(formatPercent(25)).toBe("25 %");
+    expect(formatExact("-1234567.50")).toBe(`-${formatNumber(1234567)}${formatNumber(1.5).charAt(1)}50`);
+    expect(formatExact(null)).toBe("–");
   });
 });

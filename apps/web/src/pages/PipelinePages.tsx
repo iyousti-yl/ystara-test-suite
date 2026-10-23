@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label, Link, MessageStrip, Tab, TabContainer, ToggleButton, Token, Tokenizer } from "@ui5/webcomponents-react";
+import { Button, Input, Label, Link, MessageStrip, Tab, TabContainer, ToggleButton, Token, Tokenizer } from "@ui5/webcomponents-react";
 import { refKey, whyNothingMeasurable, type PipelineResult } from "@ystara/shared";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
@@ -16,12 +16,16 @@ import {
   useTakeSnapshot,
   useTenant,
   useWatch,
+  type PipelineDefinitionJson,
   type PipelineSummaryJson,
 } from "../api";
+import { Dialog } from "../components/Dialog";
 import { ErrorStrip, HealthTag, Loading, When } from "../components/Feedback";
 import { healthOf, NextStep } from "../components/Health";
 import { MoreActions } from "../components/MoreActions";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
+import { NAME_MAX } from "../fields";
 import { counted, formatDateTime } from "../format";
 import { PipelineView } from "../lineage/PipelineView";
 import { useInTenant } from "../tenantScope";
@@ -48,6 +52,7 @@ export function PipelineOnScanPage() {
 
   const setExclusions = (patterns: string[]) => setParams(pipelineQuery(output, [...new Set(patterns)]), { replace: true });
   const outputName = output.split(".").pop() ?? output;
+  if (!scan.data && scan.error) return <PageError error={scan.error} what="scan" />;
 
   return (
     <div className="page page-wide page-fill">
@@ -110,8 +115,8 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
   const navigate = useNavigate();
   const can = useCan();
   const result = useSavedPipeline(pipelineId);
-  const remove = useDeletePipeline();
   const takeSnapshot = useTakeSnapshot(pipelineId);
+  const [deleting, setDeleting] = useState(false);
   const definition = result.data?.definition;
   const tenant = useTenant(definition?.tenantId ?? "");
   const summary = usePipelineSummaries(definition?.tenantId ?? "").data?.find((s) => s.pipelineId === pipelineId);
@@ -119,7 +124,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
   const tabPath = (t: PipelineTab) => (t === "lineage" ? `/pipelines/${pipelineId}` : `/pipelines/${pipelineId}/${t}`);
 
   if (result.isPending) return <Loading />;
-  if (!result.data || !definition) return <ErrorStrip error={result.error} />;
+  if (!result.data || !definition) return <PageError error={result.error} what="pipeline" />;
   const output = `${definition.output.space}.${definition.output.technicalName}`;
   const measurable = Object.values(result.data.measurement).some((m) => m.measurable);
   // Shown to those who could take a snapshot, once the tenant is known (an imported-only tenant has another reason).
@@ -159,16 +164,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
                   icon: "chain-link",
                   onClick: () => navigate(`/scans/${result.data.scanId}/pipeline?${pipelineQuery(output, definition.excludeWriters)}`),
                 },
-                can("pipelines.write") && {
-                  text: "Delete pipeline",
-                  icon: "delete",
-                  disabled: remove.isPending,
-                  onClick: () => {
-                    if (window.confirm(`Delete the saved pipeline "${definition.name}"? Nothing changes in Datasphere.`)) {
-                      remove.mutate(definition, { onSuccess: () => navigate(`/tenants/${definition.tenantId}/pipelines`) });
-                    }
-                  },
-                },
+                can("pipelines.write") && { text: "Delete pipeline", icon: "delete", onClick: () => setDeleting(true) },
               ]}
             />
           </>
@@ -188,7 +184,7 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
         <Tab text="Scenarios" data-tab="scenarios" selected={tab === "scenarios"} />
         <Tab text="History" data-tab="history" selected={tab === "history"} />
       </TabContainer>
-      <ErrorStrip error={remove.error ?? takeSnapshot.error} />
+      <ErrorStrip error={takeSnapshot.error} />
       {tab === "lineage" ? (
         <>
           <Exclusions patterns={definition.excludeWriters} />
@@ -209,7 +205,68 @@ export function SavedPipelinePage({ tab }: { tab: PipelineTab }) {
           <SnapshotsSection pipelineId={definition.id} canTake={measurable} />
         </>
       )}
+      {deleting && <DeletePipelineDialog definition={definition} summary={summary} onClose={() => setDeleting(false)} />}
     </div>
+  );
+}
+
+/**
+ * Says what goes with a saved pipeline before it is deleted: everything Ystara keeps for it, its sign-offs
+ * among it, which are the record of who approved it. The audit log keeps its entries. Nothing in Datasphere.
+ */
+function DeletePipelineDialog({ definition, summary, onClose }: { definition: PipelineDefinitionJson; summary?: PipelineSummaryJson; onClose: () => void }) {
+  const navigate = useNavigate();
+  const remove = useDeletePipeline();
+  const scenarios = summary?.scenarios;
+  const goes = [
+    scenarios === undefined
+      ? "its scenarios, with their test rows, checks and runs"
+      : scenarios > 0 && `${counted(scenarios, "scenario")}, with ${scenarios === 1 ? "its" : "their"} test rows, checks and runs`,
+    "its runs of all scenarios, and the alerts they raised",
+    "its snapshots, and the alerts they raised",
+    summary?.schedule !== null && "its snapshot schedule",
+    "who watches it: they get no more alerts for it",
+    "its sign-offs: who approved or rejected it, and when",
+  ].filter((line): line is string => typeof line === "string");
+
+  return (
+    <Dialog
+      state="Negative"
+      headerText={`Delete ${definition.name}?`}
+      onClose={onClose}
+      footer={
+        <div className="dialog-footer">
+          <Button
+            design="Negative"
+            disabled={remove.isPending}
+            onClick={() => remove.mutate(definition, { onSuccess: () => navigate(`/tenants/${definition.tenantId}/pipelines`, { replace: true }) })}
+          >
+            Delete pipeline
+          </Button>
+          <Button design="Transparent" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      }
+    >
+      <div className="dialog-body">
+        <p>This removes the saved pipeline from Ystara, with everything stored for it:</p>
+        <ul className="deleted-with">
+          {goes.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+        <MessageStrip design="Critical" hideCloseButton>
+          Sign-offs are evidence for an audit. To keep them, download the pipeline&apos;s history first (History, Download CSV). The account&apos;s audit log
+          keeps its entries.
+        </MessageStrip>
+        <MessageStrip design="Information" hideCloseButton>
+          Nothing is deleted or changed in Datasphere.
+        </MessageStrip>
+        <p className="muted">This can&apos;t be undone. To test this output again, save its pipeline again from a scan.</p>
+        <ErrorStrip error={remove.error} />
+      </div>
+    </Dialog>
   );
 }
 
@@ -304,7 +361,6 @@ function SaveDialog(props: {
 
   return (
     <Dialog
-      open
       headerText="Save pipeline"
       onClose={props.onClose}
       footer={
@@ -322,7 +378,7 @@ function SaveDialog(props: {
         <Label for="pipeline-name" required>
           Name
         </Label>
-        <Input id="pipeline-name" value={name} placeholder="What it delivers, e.g. Monthly sales by region" onInput={(e) => setName(e.target.value)} />
+        <Input id="pipeline-name" value={name} maxlength={NAME_MAX} placeholder="What it delivers, e.g. Monthly sales by region" onInput={(e) => setName(e.target.value)} />
         <p className="muted">
           A name the business knows it by. It tests the output <span className="mono">{props.output}</span>
           {props.excludeWriters.length > 0 && <>, without the ignored loaders</>}. The steps are worked out again from each new scan, so the pipeline

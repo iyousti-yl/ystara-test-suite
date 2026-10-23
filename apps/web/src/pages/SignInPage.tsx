@@ -21,7 +21,9 @@ export function SignInPage() {
   const [notice, setNotice] = useState<string>();
 
   const codeComplete = code.replace(/\s/g, "").length === 6;
-  const submitPassword = () =>
+  // A second Enter while a request is out sends nothing: the first answer decides (a second code would be refused after the first signed in).
+  const submitPassword = () => {
+    if (!email.trim() || !password || login.isPending) return;
     login.mutate(
       { email: email.trim(), password },
       {
@@ -31,7 +33,9 @@ export function SignInPage() {
         },
       },
     );
-  const submitCode = () =>
+  };
+  const submitCode = () => {
+    if (!codeComplete || verify.isPending || verify.isSuccess) return;
     verify.mutate(code.trim(), {
       onSuccess: () => navigate(safeNext(params.get("next")), { replace: true }),
       onError: (e) => {
@@ -45,12 +49,13 @@ export function SignInPage() {
         }
       },
     });
+  };
 
   return (
     <AuthFrame title="Sign in">
       {/* A key per step, so the code field is a new field and doesn't keep the email typed before. */}
       {step === "password" ? (
-        <AuthForm key="password" onSubmit={() => email.trim() && password && submitPassword()}>
+        <AuthForm key="password" onSubmit={submitPassword}>
           {notice && (
             <MessageStrip design="Critical" hideCloseButton>
               {notice}
@@ -64,7 +69,7 @@ export function SignInPage() {
           </Button>
         </AuthForm>
       ) : (
-        <AuthForm key="code" onSubmit={() => codeComplete && submitCode()}>
+        <AuthForm key="code" onSubmit={submitCode}>
           <p>Enter the 6-digit code your authenticator app shows for Ystara ({email.trim().toLowerCase()}).</p>
           <Field id="code" label="Code" autoComplete="one-time-code" numeric value={code} onChange={setCode} placeholder="123456" />
           <ErrorStrip error={verify.error} />

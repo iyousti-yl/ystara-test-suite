@@ -1231,6 +1231,46 @@ section.block.scenario-about {
   margin: 0;
 }
 
+/* --- A page that can't be shown (components/PageError.tsx): its way out, and the technical message folded under it. */
+.error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* The page's title takes the focus on arriving (PageHeader), only so a screen reader reads it: it isn't something to act on. */
+.page-header ui5-title:focus {
+  outline: none;
+}
+/* A failed account switch, over the page it left as it was (components/AppFrame.tsx). */
+.frame-strip {
+  display: block;
+  margin: var(--space-4) var(--space-6) 0;
+}
+@media (max-width: 600px) {
+  .frame-strip {
+    margin: var(--space-4) var(--space-4) 0;
+  }
+}
+/* The cells of a test table that don't fit their column (pages/Scenarios.tsx), under its grid. */
+.cell-problems {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+  font-size: var(--sapFontSmallSize);
+}
+/* Sign-in and security (pages/SecurityPage.tsx): the sign-in pages' fields, at the width of the sign-in card. */
+.security-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 26rem;
+}
+/* A switch and what it does, on one line (pages/SettingsPage.tsx). */
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 /* --- Spacing between blocks: the parts of a page and of a section are spaced by its gap alone, whatever margin a part has
    elsewhere. Keep this last, so it outranks those margins. */
 .page > *,

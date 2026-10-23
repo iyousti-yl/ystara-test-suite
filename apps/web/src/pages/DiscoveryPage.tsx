@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   Button,
-  Dialog,
   Input,
   Label,
   MessageStrip,
@@ -17,17 +16,19 @@ import {
 import { useNavigate, useSearchParams } from "react-router";
 import { readableSpaces, seesSpace } from "@ystara/shared";
 import { useCan, useConnection, useMe, useScans, useStartScan, type ConnectionJson } from "../api";
-import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
+import { Dialog } from "../components/Dialog";
+import { ErrorStrip, Loading, ScanStatusTag, ShowOlder } from "../components/Feedback";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
 import { SpacesNote } from "../components/SpacesPicker";
-import { formatDateTime } from "../format";
+import { spaceIdsOf } from "../fields";
+import { countedLatest, formatDateTime, formatNumber } from "../format";
 import { useAddressTenant } from "../tenantScope";
 import { ScanScheduleSection } from "./Schedule";
-import { parseSpaces } from "./TenantConnection";
 
 /**
- * Discovery: the tenant's scan schedule, its scans, newest first (refreshed
- * while one runs), and Scan spaces. A scan opens its objects; from there an
+ * Discovery: the tenant's scan schedule, its scans, newest first, the latest
+ * 50 and older ones on request (refreshed while one runs), and Scan spaces. A scan opens its objects; from there an
  * output's pipeline. `?scan=1` (Home's next step) opens the scan dialog.
  */
 export function DiscoveryPage() {
@@ -43,7 +44,7 @@ export function DiscoveryPage() {
   const setScanning = (open: boolean) => setParams(open ? { scan: "1" } : {}, { replace: true });
 
   if (tenant.isPending) return <Loading />;
-  if (!tenant.data) return <ErrorStrip error={tenant.error} />;
+  if (!tenant.data) return <PageError error={tenant.error} what="tenant" />;
 
   return (
     <div className="page">
@@ -76,7 +77,7 @@ export function DiscoveryPage() {
         />
       )}
       <section className="block">
-        <Title level="H2" size="H4">Scans</Title>
+        <Title level="H2" size="H4">{scans.data && scans.hasNextPage ? countedLatest(scans.data.length, true, "scan") : "Scans"}</Title>
         <ErrorStrip error={scans.error} />
         <Table
           loading={scans.isPending}
@@ -117,12 +118,13 @@ export function DiscoveryPage() {
               <TableCell>
                 <ScanStatusTag status={s.status} />
               </TableCell>
-              <TableCell horizontalAlign="End" className="mono">{s.objectCount ?? "–"}</TableCell>
-              <TableCell horizontalAlign="End" className="mono">{s.edgeCount ?? "–"}</TableCell>
-              <TableCell horizontalAlign="End" className="mono">{s.warnings.length || "–"}</TableCell>
+              <TableCell horizontalAlign="End" className="mono">{formatNumber(s.objectCount)}</TableCell>
+              <TableCell horizontalAlign="End" className="mono">{formatNumber(s.edgeCount)}</TableCell>
+              <TableCell horizontalAlign="End" className="mono">{s.warnings.length ? formatNumber(s.warnings.length) : "–"}</TableCell>
             </TableRow>
           ))}
         </Table>
+        <ShowOlder list={scans} what="scans" />
       </section>
       {scanning && <ScanDialog tenantId={tenantId} onClose={() => setScanning(false)} />}
     </div>
@@ -144,11 +146,11 @@ function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => vo
   const readable = (connection ? readableSpaces(connection) : []).filter((s) => seesSpace(mine, s));
   const [text, setText] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
-  const spaces = connection ? picked : parseSpaces(text);
+  const typed = spaceIdsOf(text);
+  const spaces = connection ? picked : typed.problem ? [] : typed.spaces;
 
   return (
     <Dialog
-      open
       headerText="Scan spaces"
       onClose={onClose}
       footer={
@@ -186,7 +188,15 @@ function ScanDialog({ tenantId, onClose }: { tenantId: string; onClose: () => vo
             <Label for="spaces" required>
               Space IDs
             </Label>
-            <Input id="spaces" className="full-width" value={text} onInput={(e) => setText(e.target.value)} placeholder="HR, SHARED" />
+            <Input
+              id="spaces"
+              className="full-width"
+              value={text}
+              onInput={(e) => setText(e.target.value)}
+              placeholder="HR, SHARED"
+              valueState={text.trim() && typed.problem ? "Negative" : "None"}
+              valueStateMessage={<div>{typed.problem}</div>}
+            />
           </>
         )}
         <MessageStrip design={readable.length ? "Information" : "Critical"} hideCloseButton>

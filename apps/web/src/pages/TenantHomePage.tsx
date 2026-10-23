@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Button, Card, CardHeader, Dialog, Icon, Link, MessageStrip, Title } from "@ui5/webcomponents-react";
+import { Button, Card, CardHeader, Icon, Link, MessageStrip, Title } from "@ui5/webcomponents-react";
 import { useNavigate } from "react-router";
 import { HEALTH_LABEL, HEALTH_STATES, readableSpaces, type Permission, type PipelineHealth } from "@ystara/shared";
 import {
@@ -17,12 +17,14 @@ import {
   type ScanJson,
   type TenantJson,
 } from "../api";
+import { Dialog } from "../components/Dialog";
 import { ConnectionStatusTag, ErrorStrip, HealthTag, Loading, ScanStatusTag } from "../components/Feedback";
 import { healthOf, NextStep } from "../components/Health";
 import { MoreActions } from "../components/MoreActions";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
 import { ShortId } from "../components/ShortId";
-import { counted, formatDateTime } from "../format";
+import { counted, countedAtLeast, formatDateTime, formatNumber } from "../format";
 import { useAddressTenant } from "../tenantScope";
 
 /**
@@ -44,7 +46,7 @@ export function TenantHomePage() {
   const [deleting, setDeleting] = useState(false);
 
   if (tenant.isPending) return <Loading />;
-  if (!tenant.data) return <ErrorStrip error={tenant.error} />;
+  if (!tenant.data) return <PageError error={tenant.error} what="tenant" />;
   const t = tenant.data;
   const app = (path: string) => `/tenants/${tenantId}${path}`;
   const loaded = !connection.isPending && !users.isPending && !scans.isPending && !pipelines.isPending && !summaries.isPending;
@@ -75,7 +77,7 @@ export function TenantHomePage() {
             <UserFacts users={users.data ?? []} />
           </OverviewCard>
         )}
-        <OverviewCard title="Discovery" subtitle={counted(scans.data?.length ?? 0, "scan")} to={app("/discovery")} loading={scans.isPending}>
+        <OverviewCard title="Discovery" subtitle={countedAtLeast(scans.data?.length ?? 0, scans.hasNextPage, "scan")} to={app("/discovery")} loading={scans.isPending}>
           <ScanFacts scans={scans.data ?? []} />
         </OverviewCard>
         <OverviewCard title="Pipelines" subtitle={counted(pipelines.data?.length ?? 0, "saved pipeline")} to={app("/pipelines")} loading={pipelines.isPending}>
@@ -88,7 +90,7 @@ export function TenantHomePage() {
           tenant={t}
           connection={connection.data ?? null}
           users={users.data ?? []}
-          scans={scans.data?.length ?? 0}
+          scans={{ count: scans.data?.length ?? 0, more: scans.hasNextPage }}
           pipelines={pipelines.data?.length ?? 0}
           onClose={() => setDeleting(false)}
         />
@@ -307,7 +309,7 @@ function ScanFacts({ scans }: { scans: ScanJson[] }) {
       <li className="mono">{latest.spaces.join(", ")}</li>
       {latest.objectCount !== null && (
         <li>
-          {latest.objectCount} objects, {latest.edgeCount} links
+          {counted(latest.objectCount, "object")}, {counted(latest.edgeCount ?? 0, "link")}
         </li>
       )}
     </ul>
@@ -349,7 +351,8 @@ function DeleteTenantDialog(props: {
   tenant: TenantJson;
   connection: ConnectionJson | null;
   users: DatabaseUserJson[];
-  scans: number;
+  /** How many scans are loaded, and whether older ones weren't (Show older). */
+  scans: { count: number; more: boolean };
   pipelines: number;
   onClose: () => void;
 }) {
@@ -357,8 +360,9 @@ function DeleteTenantDialog(props: {
   const navigate = useNavigate();
   const remove = useDeleteTenant();
   const goes = [
-    `${counted(scans, "scan")}, with the object definitions ${scans === 1 ? "it" : "they"} read`,
-    `${counted(pipelines, "saved pipeline")}, with ${pipelines === 1 ? "its" : "all their"} snapshots`,
+    `${scans.more ? `${formatNumber(scans.count)} or more scans` : counted(scans.count, "scan")}, with the object definitions they read, and the scan schedule`,
+    pipelines > 0 &&
+      `${counted(pipelines, "saved pipeline")}, with ${pipelines === 1 ? "its" : "all their"} snapshots, scenarios and their runs, schedules, watchers and sign-offs`,
     connection && `the technical client ${connection.clientId}, with its stored secret`,
     users.length > 0 &&
       `${counted(users.length, "database user")}, with ${users.length === 1 ? "its" : "their"} stored password${users.length === 1 ? "" : "s"}`,
@@ -366,7 +370,6 @@ function DeleteTenantDialog(props: {
 
   return (
     <Dialog
-      open
       state="Negative"
       headerText={`Delete ${tenant.name}?`}
       onClose={onClose}
@@ -388,6 +391,12 @@ function DeleteTenantDialog(props: {
             <li key={line}>{line}</li>
           ))}
         </ul>
+        {pipelines > 0 && (
+          <MessageStrip design="Critical" hideCloseButton>
+            Sign-offs are evidence for an audit. To keep them, download each pipeline&apos;s history first (History, Download CSV). The account&apos;s audit
+            log keeps its entries.
+          </MessageStrip>
+        )}
         <MessageStrip design="Information" hideCloseButton>
           Nothing is deleted or changed in the Datasphere tenant itself.
         </MessageStrip>

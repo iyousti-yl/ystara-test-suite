@@ -1,4 +1,4 @@
-import { Button, ComboBox, ComboBoxItem, Dialog, Input, Label, Link, MessageStrip, StepInput, Title } from "@ui5/webcomponents-react";
+import { Button, ComboBox, ComboBoxItem, Input, Label, Link, MessageStrip, StepInput, Title } from "@ui5/webcomponents-react";
 import {
   checkSchedule,
   DEFAULT_ROW_DROP_PERCENT,
@@ -21,9 +21,10 @@ import {
   type ScanScheduleJson,
   type ScheduleJson,
 } from "../api";
+import { Dialog } from "../components/Dialog";
 import { ErrorStrip } from "../components/Feedback";
 import { MoreActions } from "../components/MoreActions";
-import { formatDateTime } from "../format";
+import { formatDateTime, formatPercent } from "../format";
 
 interface Example {
   cron: string;
@@ -126,7 +127,7 @@ function ScheduleSummary({ schedule, fetchedAt }: { schedule: ScheduleJson; fetc
       </p>
       <p className="muted">
         Watchers get an email when a scheduled snapshot fails, when a step&apos;s definition or columns change, or when the output goes empty or loses
-        more than {schedule.rowDropPercent}% of its rows.
+        more than {formatPercent(schedule.rowDropPercent)} of its rows.
       </p>
       <LateStrip nextRunAt={schedule.nextRunAt} fetchedAt={fetchedAt} run={runs[0]} />
     </>
@@ -214,7 +215,6 @@ function ScheduleDialog({ pipelineId, current, onClose }: { pipelineId: string; 
 
   return (
     <Dialog
-      open
       headerText={current ? "Change schedule" : "Set schedule"}
       onClose={onClose}
       footer={
@@ -339,7 +339,6 @@ function ScanScheduleDialog({ tenantId, spaces, current, onClose }: { tenantId: 
 
   return (
     <Dialog
-      open
       headerText={current ? "Change scan schedule" : "Set scan schedule"}
       onClose={onClose}
       footer={

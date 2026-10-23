@@ -1,9 +1,11 @@
 import type { HTMLInputAutoCompleteAttribute, ReactNode } from "react";
 import { Title } from "@ui5/webcomponents-react";
 import { Mark, Youlytics } from "./Logo";
+import { useDocumentTitle } from "./PageHeader";
 
 /** The frame of the pages people see before they are signed in: the mark and the product's name over one centred card, and who makes it. */
 export function AuthFrame({ title, children }: { title: string; children: ReactNode }) {
+  useDocumentTitle(title);
   return (
     <main className="auth-page">
       <div className="auth-brand">

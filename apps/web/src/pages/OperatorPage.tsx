@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Title } from "@ui5/webcomponents-react";
+import { Button, Input, Label, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Title } from "@ui5/webcomponents-react";
 import type { Json, UserOverview } from "@ystara/shared";
 import {
   useAccountOverviews,
@@ -12,11 +12,13 @@ import {
   useSetClaudeKey,
   useUserOverviews,
 } from "../api";
+import { Dialog } from "../components/Dialog";
 import { ErrorStrip, Loading } from "../components/Feedback";
 import { LinkToSend } from "../components/LinkToSend";
 import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
 import { RenameAccountDialog } from "../components/RenameAccountDialog";
+import { NAME_MAX } from "../fields";
 import { formatDateTime } from "../format";
 import { ROLE_LABEL } from "../roles";
 
@@ -270,7 +272,6 @@ function CreateAccountDialog({ onClose }: { onClose: () => void }) {
   const done = create.data;
   return (
     <Dialog
-      open
       headerText={done ? `Account ${done.account.name} created` : "Create an account"}
       onClose={onClose}
       footer={footer({
@@ -293,7 +294,7 @@ function CreateAccountDialog({ onClose }: { onClose: () => void }) {
           <Label for="account-name" required>
             Customer name
           </Label>
-          <Input id="account-name" value={name} onInput={(e) => setName(e.target.value)} />
+          <Input id="account-name" value={name} maxlength={NAME_MAX} onInput={(e) => setName(e.target.value)} />
           <Label for="account-admin" required>
             Email of its first admin
           </Label>
@@ -311,7 +312,6 @@ function InviteAdminDialog({ accountId, name, onClose }: { accountId: string; na
   const done = invite.data;
   return (
     <Dialog
-      open
       headerText={done ? "Send this link" : `Invite an admin to ${name}`}
       onClose={onClose}
       footer={footer({
@@ -343,7 +343,6 @@ function ResetDialog({ user, onClose }: { user: Json<UserOverview>; onClose: () 
   const done = reset.data;
   return (
     <Dialog
-      open
       headerText={done ? "Send this link" : `Reset the sign-in of ${user.email}?`}
       onClose={onClose}
       footer={footer({ done: !!done, action: "Create reset link", disabled: reset.isPending, onAction: () => reset.mutate(user.id), onClose })}

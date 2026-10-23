@@ -13,8 +13,9 @@ import {
 } from "@ui5/webcomponents-react";
 import { AUDIT_GROUPS, type AuditGroup } from "@ystara/shared";
 import { Link } from "react-router";
-import { auditQuery, useAuditLog, useAuditUsers, useCan, useMe, type AuditEventJson, type AuditFilters } from "../api";
+import { auditQuery, useAuditLog, useAuditUsers, useCan, useDownload, useMe, type AuditEventJson, type AuditFilters } from "../api";
 import { ErrorStrip } from "../components/Feedback";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
 import { ROLE_LABEL } from "../roles";
@@ -35,16 +36,11 @@ export function AuditPage() {
   const [filters, setFilters] = useState<AuditFilters>({});
   const log = useAuditLog(filters, allowed);
   const users = useAuditUsers(allowed);
+  const download = useDownload();
   const events = log.data?.pages.flatMap((p) => p.events) ?? [];
   const set = (change: Partial<AuditFilters>) => setFilters((f) => ({ ...f, ...change }));
 
-  if (!allowed) {
-    return (
-      <div className="page">
-        <ErrorStrip error={new Error("Only admins can read the audit log.")} />
-      </div>
-    );
-  }
+  if (!allowed) return <PageError heading="You can't open the audit log" sentence="Only admins of the account read its audit log." />;
 
   return (
     <div className="page">
@@ -52,7 +48,12 @@ export function AuditPage() {
         title="Audit log"
         subtitle={`Who changed what in ${me.account.name}, and when, sign-ins included. Nobody can change or delete an entry.`}
         actions={
-          <Button design="Emphasized" icon="download" disabled={!events.length} onClick={() => window.location.assign(`/api/audit.csv${auditQuery(filters)}`)}>
+          <Button
+            design="Emphasized"
+            icon="download"
+            disabled={!events.length || download.isPending}
+            onClick={() => download.mutate({ path: `/audit.csv${auditQuery(filters)}`, name: "ystara-audit.csv" })}
+          >
             Download CSV
           </Button>
         }
@@ -94,7 +95,7 @@ export function AuditPage() {
           </Button>
         )}
       </div>
-      <ErrorStrip error={log.error ?? users.error} />
+      <ErrorStrip error={log.error ?? users.error ?? download.error} />
       <section className={log.isFetching && !log.isFetchingNextPage && log.data ? "block is-refreshing" : "block"}>
         <Table
           loading={log.isPending}

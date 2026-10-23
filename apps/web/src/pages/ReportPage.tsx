@@ -2,8 +2,10 @@ import { Button } from "@ui5/webcomponents-react";
 import type { ObjectType, Verdict } from "@ystara/shared";
 import { Link, Navigate, useLocation, useParams } from "react-router";
 import { isUnauthorized, useMe, usePipelineReport, type PipelineReportJson } from "../api";
-import { ErrorStrip, Loading } from "../components/Feedback";
+import { Loading } from "../components/Feedback";
 import { Mark } from "../components/Logo";
+import { PageError, StartError } from "../components/PageError";
+import { useDocumentTitle } from "../components/PageHeader";
 import { counted, formatDateTime, formatNumber } from "../format";
 import { typeLabel } from "../objectTypes";
 import { coverage, detailOf, whatOf } from "./History";
@@ -20,9 +22,14 @@ export function ReportPage() {
   const me = useMe();
   const location = useLocation();
   const report = usePipelineReport(pipelineId);
+  useDocumentTitle(report.data ? `${report.data.pipeline.name} · Ystara report` : "Ystara report");
 
   if (me.isPending) return <Loading />;
-  if (isUnauthorized(me.error)) return <Navigate to={`/sign-in?next=${encodeURIComponent(location.pathname)}`} replace />;
+  // As Layout: the sign-in page only on arriving without one; a sign-in that ends later keeps the report ("Your sign-in ended").
+  if (!me.data) {
+    if (isUnauthorized(me.error)) return <Navigate to={`/sign-in?next=${encodeURIComponent(location.pathname)}`} replace />;
+    return <StartError error={me.error} retrying={me.isFetching} onRetry={() => void me.refetch()} />;
+  }
 
   return (
     <div className="report">
@@ -32,7 +39,7 @@ export function ReportPage() {
           Print or save as PDF
         </Button>
       </div>
-      {report.isPending ? <Loading /> : report.data ? <Report report={report.data} /> : <ErrorStrip error={report.error} />}
+      {report.isPending ? <Loading /> : report.data ? <Report report={report.data} /> : <PageError error={report.error} what="pipeline" />}
     </div>
   );
 }
@@ -44,7 +51,8 @@ const VERDICT: Record<Verdict | "added" | "removed", string> = {
   unchanged: "Unchanged",
   data_changed: "Data changed",
   definition_changed: "Definition changed",
-  both: "Definition and data changed",
+  // As the Compare page says it.
+  both: "Data and definition changed",
   added: "Added",
   removed: "Removed",
 };

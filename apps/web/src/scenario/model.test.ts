@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addRow, cellFromText, columnKind, columnNote, fillEmpty, gridFromRows, parsePasted, pasteInto, prefillText, rowsFromGrid, shownColumns, textFromCell } from "./model";
+import { addRow, cellFromText, cellProblems, columnKind, columnNote, fillEmpty, gridFromRows, parsePasted, pasteInto, prefillText, rowsFromGrid, shownColumns, textFromCell } from "./model";
 
 const columns = [
   { name: "ID", type: "NVARCHAR(10)" },
@@ -107,5 +107,13 @@ describe("a table with many columns", () => {
   it("pastes rows without a header into the shown columns, in their order", () => {
     const shown = shownColumns(wide);
     expect(pasteInto({ ...wide, rows: [] }, 0, 0, [["E1", "O1"]], shown).rows).toEqual([{ EMP_ID: "E1", ORG_ID: "O1" }]);
+  });
+});
+
+describe("the cells that don't fit", () => {
+  it("are listed by row and column, in reading order", () => {
+    const rows: Record<string, string>[] = [{ ID: "A1", AMOUNT: "10.5" }, { ID: "A2", AMOUNT: "ten", ACTIVE: "maybe" }, { ID: "A3", AMOUNT: "" }];
+    expect(cellProblems({ columns, rows })).toEqual(["Row 2, AMOUNT: DECIMAL(15, 2) takes a number", "Row 2, ACTIVE: BOOLEAN takes true or false"]);
+    expect(cellProblems({ columns, rows: [] })).toEqual([]);
   });
 });

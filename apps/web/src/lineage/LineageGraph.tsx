@@ -11,6 +11,7 @@ import {
   useStore,
   type Edge,
   type Node,
+  type OnSelectionChangeParams,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { OBJECT_TYPE, typeLabel } from "../objectTypes";
@@ -23,8 +24,8 @@ const nodeTypes = { object: ObjectNode };
 
 /**
  * The lineage picture: sources on the left, the output on the right, laid out
- * by dagre and drawn by React Flow (pan, zoom, minimap). Clicking an object
- * selects it; the page shows its details.
+ * by dagre and drawn by React Flow (pan, zoom, minimap). Clicking an object,
+ * or Tab to it and Enter, selects it; the page shows its details.
  *
  * React Flow keeps the nodes itself (defaultNodes): it measures them and
  * tracks the selection. A different set of objects mounts a fresh picture.
@@ -44,6 +45,20 @@ export function LineageGraph(props: {
   // The view is the person's once they press or scroll anywhere on the picture, or an object is selected.
   const touched = useRef(false);
   const openingFollows = useCallback(() => !touched.current && selected === undefined, [selected]);
+  // Enter on a focused object selects it in React Flow without a click: its selection tells the page. React Flow calls this again
+  // whenever the function changes, so it stays the same one and reads the page's selection from a ref; a page that selects a
+  // step itself (from a list) isn't overruled by the picture's older selection.
+  const latest = useRef({ selected, onSelect });
+  useLayoutEffect(() => {
+    latest.current = { selected, onSelect };
+  });
+  const picked = useRef<string>(undefined);
+  const selectionChanged = useCallback(({ nodes: inPicture }: OnSelectionChangeParams) => {
+    const key = inPicture.at(-1)?.id;
+    if (key === picked.current) return;
+    picked.current = key;
+    if (key !== latest.current.selected) latest.current.onSelect(key);
+  }, []);
 
   const widths = useMemo(
     () =>
@@ -99,12 +114,15 @@ export function LineageGraph(props: {
       nodeTypes={nodeTypes}
       onNodeClick={(_event, node) => onSelect(node.id)}
       onPaneClick={() => onSelect(undefined)}
+      onSelectionChange={selectionChanged}
       onNodeMouseEnter={(event, node) => setHovered({ key: node.id, cutOff: hasCutOffText(event.currentTarget as HTMLElement) })}
       onNodeMouseLeave={() => setHovered(undefined)}
       onPointerDownCapture={() => (touched.current = true)}
       onWheelCapture={() => (touched.current = true)}
       nodesDraggable={false}
       nodesConnectable={false}
+      // Backspace would take a selected object out of the picture.
+      deleteKeyCode={null}
       minZoom={0.1}
       colorMode={dark ? "dark" : "light"}
       // React Flow is MIT-licensed; its small link in the corner is left out.
@@ -113,7 +131,7 @@ export function LineageGraph(props: {
       <Background gap={20} />
       <Controls showInteractive={false} />
       <RoomyMiniMap />
-      {!selected && <Panel position="top-left" className="lineage-hint">Click an object for its details.</Panel>}
+      {!selected && <Panel position="top-left" className="lineage-hint">Click an object, or Tab to it and press Enter, for its details.</Panel>}
       <OpeningView outputKey={nodes.find((n) => n.output)?.key} follows={openingFollows} />
       <KeepInView selected={selected} openingFollows={openingFollows} />
       {hovered && hoveredNode && <HoverCard node={hoveredNode} cutOff={hovered.cutOff} multiSpace={multiSpace} />}

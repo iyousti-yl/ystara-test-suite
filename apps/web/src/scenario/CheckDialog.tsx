@@ -3,7 +3,6 @@ import {
   Button,
   ComboBox,
   ComboBoxItem,
-  Dialog,
   Input,
   Label,
   MultiComboBox,
@@ -14,6 +13,7 @@ import {
   TextArea,
 } from "@ui5/webcomponents-react";
 import type { Assertion, ScenarioColumn } from "@ystara/shared";
+import { Dialog } from "../components/Dialog";
 import { ASSERTION_KINDS, cellFromText, gridFromRows, rowsFromGrid, textFromCell, type Grid } from "./model";
 import { RowsGrid } from "./RowsGrid";
 
@@ -142,7 +142,6 @@ export function CheckDialog(props: {
 
   return (
     <Dialog
-      open
       className="check-dialog"
       headerText={props.initial.assertion ? "Change check" : "Add check"}
       onClose={props.onClose}
