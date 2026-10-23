@@ -44,6 +44,8 @@ export const AUDIT_ACTIONS: Record<string, AuditAction | null> = {
   "POST /invitations/:token/accept": { label: "Joined the account with an invitation", group: "Users" },
   "POST /resets/:token/authenticator": null,
   "POST /resets/:token/accept": { label: "Chose a new password and authenticator with a reset link", group: "Sign-in" },
+  "POST /auth/password": { label: "Changed their password", group: "Sign-in" },
+  "POST /auth/sessions/end-others": { label: "Signed out their other browsers", group: "Sign-in" },
 
   // Users and the account
   "PATCH /team/account": { label: "Renamed the account", group: "Users", fields: ["name"] },
@@ -93,6 +95,7 @@ export const AUDIT_ACTIONS: Record<string, AuditAction | null> = {
   "PUT /account/teams-channel": { label: "Connected a Teams channel", group: "Alerts" },
   "POST /account/teams-channel/test": { label: "Sent a test card to the Teams channel", group: "Alerts" },
   "DELETE /account/teams-channel": { label: "Removed the Teams channel", group: "Alerts" },
+  "PUT /account/settings": { label: "Changed the account's settings", group: "Users", fields: ["draftingWithClaude"] },
 
   // The operator panel: kept apart from every account's log (account_id null).
   "POST /operator/accounts": { label: "Created an account", group: "Operator", fields: ["name", "adminEmail"] },

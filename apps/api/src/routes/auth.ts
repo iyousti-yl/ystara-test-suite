@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   acceptInvitation,
   claimCodeAttempt,
+  countOtherSessions,
   createSession,
   deleteSession,
   findOpenInvitation,
@@ -147,7 +148,7 @@ export function authRoutes(db: Db, secrets: SecretBox) {
         return reply.code(401).send({ error: "That code is not right, or was already used. Try the next one your app shows." });
       }
       const token = await startSession(req, reply, { userId: user.id, accountId: pending.accountId, verified: true });
-      return me(db, (await findSession(db, token))!);
+      return me(db, (await findSession(db, token))!, token);
     });
 
     app.post("/auth/logout", { config: { access: "public" } }, async (req, reply) => {
@@ -156,14 +157,14 @@ export function authRoutes(db: Db, secrets: SecretBox) {
       return reply.code(204).send();
     });
 
-    app.get("/auth/me", async (req) => me(db, signedIn(req)));
+    app.get("/auth/me", async (req) => me(db, signedIn(req), req.sessionToken!));
 
     /** Work in another account the user belongs to. */
     app.post("/auth/account", async (req, reply) => {
       const { accountId } = SwitchAccount.parse(req.body);
       if (!(await switchSessionAccount(db, req.sessionToken!, accountId))) return reply.code(404).send({ error: "You are not a member of that account" });
       req.auditActor = { userId: signedIn(req).userId, accountId };
-      return me(db, (await findSession(db, req.sessionToken!))!);
+      return me(db, (await findSession(db, req.sessionToken!))!, req.sessionToken!);
     });
 
     // --- Invitation links (/invite/<token> in the web app)
@@ -197,7 +198,7 @@ export function authRoutes(db: Db, secrets: SecretBox) {
         if (!joined) return reply.code(404).send({ error: INVITATION_GONE });
         await switchSessionAccount(db, req.sessionToken!, joined.accountId);
         req.auditActor = { userId: existing.id, accountId: joined.accountId };
-        return me(db, (await findSession(db, req.sessionToken!))!);
+        return me(db, (await findSession(db, req.sessionToken!))!, req.sessionToken!);
       }
 
       // A new user chooses a password and proves the authenticator app works with one code.
@@ -206,7 +207,7 @@ export function authRoutes(db: Db, secrets: SecretBox) {
       const joined = await acceptInvitation(db, token, { newUser: signIn });
       if (!joined) return reply.code(404).send({ error: INVITATION_GONE });
       const session = await startSession(req, reply, { ...joined, verified: true });
-      return reply.code(201).send(await me(db, (await findSession(db, session))!));
+      return reply.code(201).send(await me(db, (await findSession(db, session))!, session));
     });
 
     // --- Reset links (/reset/<token> in the web app), made on the operator panel
@@ -235,12 +236,12 @@ export function authRoutes(db: Db, secrets: SecretBox) {
       const [account] = await membershipsOf(db, userId);
       if (!account) return reply.code(403).send({ error: "Your sign-in is reset, but you are no longer a member of any account. Ask an admin to invite you again." });
       const session = await startSession(req, reply, { userId, accountId: account.id, verified: true });
-      return me(db, (await findSession(db, session))!);
+      return me(db, (await findSession(db, session))!, session);
     });
   };
 }
 
-async function me(db: Db, session: Session): Promise<Me> {
+async function me(db: Db, session: Session, token: string): Promise<Me> {
   const accounts = await membershipsOf(db, session.userId);
   const current = accounts.find((a) => a.id === session.accountId)!;
   return {
@@ -251,5 +252,6 @@ async function me(db: Db, session: Session): Promise<Me> {
     accounts,
     operator: session.operator,
     spaces: session.spaces,
+    otherSessions: await countOtherSessions(db, session.userId, token),
   };
 }

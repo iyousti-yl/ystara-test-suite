@@ -399,6 +399,15 @@ export async function switchSessionAccount(db: Queryable, token: string, account
   return rows.length === 1;
 }
 
+/** How many other live, verified sessions the user has besides the one behind `token`. */
+export async function countOtherSessions(db: Queryable, userId: string, token: string): Promise<number> {
+  const { rows } = await db.query<{ n: number }>(
+    "select count(*)::int as n from sessions where user_id = $1 and token_hash <> $2 and verified and expires_at > now()",
+    [userId, hashToken(token)],
+  );
+  return rows[0].n;
+}
+
 export async function deleteSession(db: Queryable, token: string): Promise<void> {
   await db.query("delete from sessions where token_hash = $1 or expires_at < now()", [hashToken(token)]);
 }
