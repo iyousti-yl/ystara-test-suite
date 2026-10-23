@@ -273,7 +273,8 @@ export function authRoutes(db: Db, secrets: SecretBox) {
       // Someone who already uses Ystara (in another account) joins by signing in as that email first.
       const existing = await findUserByEmail(db, invitation.email);
       if (existing) {
-        if (req.auth?.userId !== existing.id) return reply.code(401).send({ error: `Sign in as ${invitation.email} first, then open the link again` });
+        // 409, not 401: someone signed in as another person has a sign-in that is fine, and the page must not say it ended.
+        if (req.auth?.userId !== existing.id) return reply.code(409).send({ error: `Sign in as ${invitation.email} first, then open the link again` });
         const joined = await acceptInvitation(db, token, { existingUserId: existing.id });
         if (!joined) return reply.code(404).send({ error: INVITATION_GONE });
         await switchSessionAccount(db, req.sessionToken!, joined.accountId);

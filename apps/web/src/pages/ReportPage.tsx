@@ -108,6 +108,9 @@ function Report({ report }: { report: PipelineReportJson }) {
                 pipeline as it is.
               </p>
             )}
+            {signOff.outdatedBy === "result" && (
+              <p className="report-warning">Since then, a later result fails, changed or found no rows in the output. This sign-off no longer covers the pipeline as it is.</p>
+            )}
           </>
         ) : (
           <p>Not signed off yet.</p>

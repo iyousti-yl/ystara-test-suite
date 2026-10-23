@@ -368,7 +368,8 @@ async function discoverPages(cookie: string, who: { role: string; operator: bool
     }
   }
   if (who.role === "admin") pages.push({ label: "users", path: "/users", signedIn: true });
-  if (who.role === "admin") pages.push({ label: "alerts", path: "/alerts", signedIn: true });
+  if (who.role === "admin") pages.push({ label: "settings", path: "/settings", signedIn: true });
+  pages.push({ label: "security", path: "/security", signedIn: true });
   if (who.role === "admin") pages.push({ label: "audit", path: "/audit", signedIn: true });
   if (who.operator) pages.push({ label: "operator", path: "/operator", signedIn: true });
   return pages;

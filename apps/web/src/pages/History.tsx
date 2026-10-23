@@ -181,9 +181,13 @@ export function SignOffTag({ pipelineId }: { pipelineId: string }) {
   const state = useSignOffs(pipelineId).data;
   const latest = state?.latest;
   if (!latest) return null;
-  if (latest.verdict === "approved" && state.changedSince?.length) {
+  if (latest.verdict === "approved" && state.outdatedBy) {
+    const since =
+      state.outdatedBy === "scan" && state.changedSince?.length
+        ? `a later scan changed ${counted(state.changedSince.length, "step")} since`
+        : "a result that came in since fails, changed or found no rows";
     return (
-      <Tag design="Critical" title={`Approved on ${formatDateTime(latest.signedAt)}; a later scan changed ${counted(state.changedSince.length, "step")} since`}>
+      <Tag design="Critical" title={`Approved on ${formatDateTime(latest.signedAt)}; ${since}`}>
         Approval outdated
       </Tag>
     );
@@ -247,6 +251,12 @@ function SignOffSection({ pipelineId, state, error }: { pipelineId: string; stat
         <MessageStrip design="Critical" hideCloseButton>
           A later scan changed {counted(state.changedSince.length, "step")} of the pipeline since this sign-off:{" "}
           <span className="mono">{state.changedSince.map((c) => `${c.technicalName} (${c.change})`).join(", ")}</span>. Check the results again and sign off anew.
+        </MessageStrip>
+      )}
+      {latest && state.outdatedBy === "result" && (
+        <MessageStrip design="Critical" hideCloseButton>
+          A result that came in after this approval fails, changed or found no rows in the output: the approval no longer covers the pipeline as it is.
+          Check the latest results and sign off anew.
         </MessageStrip>
       )}
       {signing && state && <SignOffDialog pipelineId={pipelineId} state={state} onClose={() => setSigning(false)} />}
