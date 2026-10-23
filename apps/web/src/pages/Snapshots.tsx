@@ -4,16 +4,17 @@ import { useNavigate, useParams } from "react-router";
 import { emailDelivery, teamsDelivery } from "../alerts";
 import { useSchedule, useSnapshot, useSnapshots, type SnapshotJson } from "../api";
 import { monoColumnWidth } from "../columns";
-import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
+import { ErrorStrip, Loading, ScanStatusTag, ShowOlder } from "../components/Feedback";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
-import { counted, formatDateTime, formatDateTimesApart, formatNumber } from "../format";
+import { counted, countedLatest, formatDateTime, formatDateTimesApart, formatExact, formatNumber, formatSeconds } from "../format";
 import { notMeasurableLabel } from "../lineage/model";
 import { typeLabel } from "../objectTypes";
 import { useInTenant } from "../tenantScope";
 
 /**
- * A saved pipeline's snapshots, newest first; refreshed while one is taken, and every minute while
- * the pipeline has a schedule. `canTake`: a step is measurable.
+ * A saved pipeline's snapshots, newest first, the latest 50 and older ones on request; refreshed while one
+ * is taken, and every minute while the pipeline has a schedule. `canTake`: a step is measurable.
  * Compare opens the latest two successful ones side by side; other pairs are picked there.
  */
 export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; canTake: boolean }) {
@@ -24,7 +25,7 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
   return (
     <section className="block">
       <div className="list-toolbar section-toolbar">
-        <Title level="H2" size="H4">{snapshots.data ? counted(snapshots.data.length, "snapshot") : "Snapshots"}</Title>
+        <Title level="H2" size="H4">{snapshots.data ? countedLatest(snapshots.data.length, snapshots.hasNextPage, "snapshot") : "Snapshots"}</Title>
         <Button
           icon="compare"
           disabled={succeeded < 2}
@@ -68,12 +69,13 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
               <ScanStatusTag status={s.status} />
             </TableCell>
             <TableCell>{s.scheduled ? (s.alert ? "Scheduled, alert" : "Scheduled") : "By hand"}</TableCell>
-            <TableCell horizontalAlign="End" className="mono">{s.counts.measured}</TableCell>
-            <TableCell horizontalAlign="End" className="mono">{s.counts.notMeasurable}</TableCell>
-            <TableCell horizontalAlign="End" className="mono">{s.counts.failed || "–"}</TableCell>
+            <TableCell horizontalAlign="End" className="mono">{formatNumber(s.counts.measured)}</TableCell>
+            <TableCell horizontalAlign="End" className="mono">{formatNumber(s.counts.notMeasurable)}</TableCell>
+            <TableCell horizontalAlign="End" className="mono">{s.counts.failed ? formatNumber(s.counts.failed) : "–"}</TableCell>
           </TableRow>
         ))}
       </Table>
+      <ShowOlder list={snapshots} what="snapshots" />
     </section>
   );
 }
@@ -90,7 +92,7 @@ export function SnapshotPage() {
   useInTenant(snapshot.data?.tenantId);
 
   if (snapshot.isPending) return <Loading />;
-  if (!snapshot.data) return <ErrorStrip error={snapshot.error} />;
+  if (!snapshot.data) return <PageError error={snapshot.error} what="snapshot" />;
   const s = snapshot.data;
   const measured = s.objects.filter((o) => o.status === "measured");
 
@@ -132,7 +134,8 @@ export function SnapshotPage() {
             <span className="mono wrap-anywhere">{o.technicalName}</span>
           </Title>
           <p className="muted">
-            {typeLabel(o.type)}: {formatNumber(o.rows)} rows, {o.columns?.length ?? 0} columns, measured in {((o.tookMs ?? 0) / 1000).toFixed(1)} s
+            {typeLabel(o.type)}: {counted(o.rows ?? 0, "row")}, {counted(o.columns?.length ?? 0, "column")}
+            {o.tookMs !== null && <>, measured in {formatSeconds(o.tookMs)}</>}
           </p>
           <ColumnsTable columns={o.columns ?? []} />
         </section>
@@ -188,14 +191,14 @@ function Counts({ snapshot: s }: { snapshot: SnapshotJson }) {
   if (!total) return null;
   return (
     <span>
-      {s.counts.measured} of {total} steps measured{s.counts.failed ? `, ${s.counts.failed} failed` : ""}
+      {formatNumber(s.counts.measured)} of {counted(total, "step")} measured{s.counts.failed ? `, ${formatNumber(s.counts.failed)} failed` : ""}
     </span>
   );
 }
 
 /** Measured, why not (as on the pipeline page, where each step's details say more), or why it failed. */
 function StepResult({ object: o }: { object: SnapshotObject }) {
-  if (o.status === "measured") return <span>Measured: {formatNumber(o.rows)} rows</span>;
+  if (o.status === "measured") return <span>Measured: {counted(o.rows ?? 0, "row")}</span>;
   if (o.status === "failed") return <span className="text-negative">Failed: {o.reason}</span>;
   return <span className="muted">{notMeasurableLabel(o.reason as Parameters<typeof notMeasurableLabel>[0])}</span>;
 }
@@ -231,7 +234,7 @@ function ColumnsTable({ columns }: { columns: ColumnMeasures[] }) {
           <TableHeaderCell minWidth="7rem" horizontalAlign="End">
             Max
           </TableHeaderCell>
-          <TableHeaderCell minWidth={monoColumnWidth(columns.map((c) => c.sum))} horizontalAlign="End">
+          <TableHeaderCell minWidth={monoColumnWidth(columns.map((c) => c.sum && formatExact(c.sum)))} horizontalAlign="End">
             Sum
           </TableHeaderCell>
         </TableHeaderRow>
@@ -250,7 +253,7 @@ function ColumnsTable({ columns }: { columns: ColumnMeasures[] }) {
             {"maxHash" in c ? <Fingerprint hash={c.maxHash} what="Max" /> : "–"}
           </TableCell>
           <TableCell horizontalAlign="End" className="mono">
-            {c.sum ?? <Fingerprint hash={c.sumHash} what="Sum" />}
+            {typeof c.sum === "string" ? formatExact(c.sum) : <Fingerprint hash={c.sumHash} what="Sum" />}
           </TableCell>
         </TableRow>
       ))}

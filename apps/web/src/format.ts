@@ -42,8 +42,22 @@ const number = new Intl.NumberFormat(locale);
 /** "1,234" (or "1.234") in the app's locale, or a dash. */
 export const formatNumber = (n: number | null | undefined) => (n === null || n === undefined ? "–" : number.format(n));
 
-/** "1 scan", "3 scans": English plurals with an s. */
-export const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+/** "1 scan", "3 scans", "1,204 scans": English plurals with an s. */
+export const counted = (n: number, what: string) => `${formatNumber(n)} ${what}${n === 1 ? "" : "s"}`;
+
+/** A list's heading: "12 snapshots", or "Latest 50 snapshots" while older ones are left to load (Show older). */
+export const countedLatest = (n: number, more: boolean, what: string) => (more ? `Latest ${formatNumber(n)} ${what}s` : counted(n, what));
+
+/** A count that may stop at a page of the list: "50 or more scans" when older ones weren't loaded. */
+export const countedAtLeast = (n: number, more: boolean, what: string) => (more ? `${formatNumber(n)} or more ${what}s` : counted(n, what));
+
+const seconds = new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+/** A duration in milliseconds as seconds: "1.2 s" (or "1,2 s"), or a dash. */
+export const formatSeconds = (ms: number | null | undefined) => (ms === null || ms === undefined ? "–" : `${seconds.format(ms / 1000)} s`);
+
+/** A percentage the person set or reads as a number: "25 %", with a space, as formatDifference writes it. */
+export const formatPercent = (n: number) => `${number.format(n)} %`;
 
 const decimalSeparator = number.formatToParts(1.5).find((p) => p.type === "decimal")?.value ?? ".";
 

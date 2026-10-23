@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { Label, MessageStrip, Option, Panel, Select, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Title } from "@ui5/webcomponents-react";
 import { refKey, type ColumnComparison, type DspObjectRef, type StepNotCompared, type StepState, type Verdict } from "@ystara/shared";
 import { useParams, useSearchParams } from "react-router";
-import { useComparison, useSavedPipeline, useSnapshots, type SnapshotComparisonJson, type SnapshotJson } from "../api";
+import { useComparison, useSavedPipeline, useSnapshot, useSnapshots, type SnapshotComparisonJson, type SnapshotJson } from "../api";
 import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading } from "../components/Feedback";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
 import { counted, formatDateTimesApart, formatDifference, formatExact, formatNumber } from "../format";
 import { LineageGraph } from "../lineage/LineageGraph";
@@ -32,14 +33,22 @@ export function ComparePage() {
   // Without a pair, wait for the list of snapshots: with fewer than two there is nothing to ask the API for.
   const tooFew = !pair && snapshots.data !== undefined && succeeded < 2;
   const comparison = useComparison(pipelineId, pair, pair !== undefined || (snapshots.data !== undefined && !tooFew));
+  // The list has the latest 50: a pair from before them (a link, an alert) is fetched on its own, so the pickers can show it.
+  const unlisted = (id: string | undefined) => id !== undefined && snapshots.data !== undefined && !snapshots.data.some((s) => s.id === id);
+  const olderBefore = useSnapshot(comparison.data?.before.id ?? "", unlisted(comparison.data?.before.id));
+  const olderAfter = useSnapshot(comparison.data?.after.id ?? "", unlisted(comparison.data?.after.id));
   const definition = saved.data?.definition;
   useInTenant(definition?.tenantId);
 
   if (saved.isPending) return <Loading />;
-  if (!saved.data || !definition) return <ErrorStrip error={saved.error} />;
+  if (!saved.data || !definition) return <PageError error={saved.error} what="pipeline" />;
   const c = comparison.data;
-  // A failed snapshot keeps what it measured, so it can be picked too.
-  const finished = (snapshots.data ?? []).filter((s) => s.status === "succeeded" || s.status === "failed");
+  // A failed snapshot keeps what it measured, so it can be picked too. Newest first, as the list.
+  const listed: SnapshotJson[] = [...(snapshots.data ?? [])];
+  for (const s of [olderBefore.data, olderAfter.data]) if (s && !listed.some((l) => l.id === s.id)) listed.push(s);
+  const finished = listed
+    .filter((s) => s.status === "succeeded" || s.status === "failed")
+    .sort((a, b) => taken(b).localeCompare(taken(a)));
   const pick = (which: "from" | "to", id: string) => c && setParams({ from: which === "from" ? id : c.before.id, to: which === "to" ? id : c.after.id });
 
   return (

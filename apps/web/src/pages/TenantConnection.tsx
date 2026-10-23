@@ -1,16 +1,16 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label, MessageStrip, Tag, Title } from "@ui5/webcomponents-react";
+import { Button, Input, Label, MessageStrip, Tag, Title } from "@ui5/webcomponents-react";
 import { useSearchParams } from "react-router";
 import { useCan, useCheckConnection, useConnect, useConnection, useDisconnect, useSetConnectionSpaces, type ConnectionJson, type TenantJson } from "../api";
+import { Dialog } from "../components/Dialog";
 import { EmptyState } from "../components/EmptyState";
 import { ConnectionStatusTag, ErrorStrip, Loading } from "../components/Feedback";
 import { MoreActions } from "../components/MoreActions";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
+import { spaceIdsOf, tokenUrlProblem } from "../fields";
 import { formatDateTime } from "../format";
 import { useAddressTenant } from "../tenantScope";
-
-/** Space IDs, separated by commas or spaces, as the API expects them. */
-export const parseSpaces = (text: string) => [...new Set(text.split(/[\s,;]+/).filter(Boolean).map((s) => s.toUpperCase()))];
 
 /**
  * Connection › Technical client: how the worker logs in to a tenant, with its
@@ -33,7 +33,7 @@ export function TechnicalClientPage() {
   const c = connection.data;
 
   if (tenant.isPending) return <Loading />;
-  if (!tenant.data) return <ErrorStrip error={tenant.error} />;
+  if (!tenant.data) return <PageError error={tenant.error} what="tenant" />;
   const t = tenant.data;
 
   const remove = () => {
@@ -161,13 +161,22 @@ function SpaceResults({ connection: c }: { connection: ConnectionJson }) {
   );
 }
 
-function SpacesInput({ value, onInput }: { value: string; onInput: (value: string) => void }) {
+/** `problem`: what spaceIdsOf finds wrong with them, under the field. */
+function SpacesInput({ value, problem, onInput }: { value: string; problem?: string; onInput: (value: string) => void }) {
   return (
     <>
       <Label for="connection-spaces" required>
         Space IDs
       </Label>
-      <Input id="connection-spaces" className="full-width" value={value} onInput={(e) => onInput(e.target.value)} placeholder="HR, SHARED" />
+      <Input
+        id="connection-spaces"
+        className="full-width"
+        value={value}
+        onInput={(e) => onInput(e.target.value)}
+        placeholder="HR, SHARED"
+        valueState={problem ? "Negative" : "None"}
+        valueStateMessage={<div>{problem}</div>}
+      />
       <span className="muted">
         The spaces to scan, separated by commas, as in Space Management (at most 20). The worker checks that the client can read each one: a technical
         client limited to its spaces can&apos;t list them itself.
@@ -187,14 +196,14 @@ function ConnectDialog({ tenant, current, onClose }: { tenant: TenantJson; curre
   const [clientSecret, setClientSecret] = useState("");
   const [tokenUrl, setTokenUrl] = useState(current?.tokenUrl ?? "");
   const [spacesText, setSpacesText] = useState(current?.spaces.map((s) => s.space).join(", ") ?? "");
-  const spaces = parseSpaces(spacesText);
-  const ready = clientId.trim() && clientSecret.trim() && tokenUrl.trim() && spaces.length > 0;
+  const { spaces, problem } = spaceIdsOf(spacesText);
+  const tokenProblem = tokenUrlProblem(tokenUrl);
+  const ready = clientId.trim() && clientSecret.trim() && tokenUrl.trim() && !tokenProblem && spaces.length > 0 && !problem;
   const submit = () =>
     connect.mutate({ clientId: clientId.trim(), clientSecret: clientSecret.trim(), tokenUrl: tokenUrl.trim(), spaces }, { onSuccess: onClose });
 
   return (
     <Dialog
-      open
       headerText={current ? "Change the technical client" : `Connect ${tenant.name}`}
       onClose={onClose}
       footer={
@@ -244,8 +253,10 @@ function ConnectDialog({ tenant, current, onClose }: { tenant: TenantJson; curre
           value={tokenUrl}
           onInput={(e) => setTokenUrl(e.target.value)}
           placeholder="https://….authentication.eu10.hana.ondemand.com/oauth/token"
+          valueState={tokenProblem ? "Negative" : "None"}
+          valueStateMessage={<div>{tokenProblem}</div>}
         />
-        <SpacesInput value={spacesText} onInput={setSpacesText} />
+        <SpacesInput value={spacesText} problem={spacesText.trim() ? problem : undefined} onInput={setSpacesText} />
         <span className="muted">
           Ystara stores the secret encrypted, sends it only to the token URL to log in, and never shows it again. The worker checks the client as soon as
           you save.
@@ -260,16 +271,15 @@ function ConnectDialog({ tenant, current, onClose }: { tenant: TenantJson; curre
 function SpacesDialog({ tenantId, current, onClose }: { tenantId: string; current: ConnectionJson; onClose: () => void }) {
   const save = useSetConnectionSpaces(tenantId);
   const [text, setText] = useState(current.spaces.map((s) => s.space).join(", "));
-  const spaces = parseSpaces(text);
+  const { spaces, problem } = spaceIdsOf(text);
 
   return (
     <Dialog
-      open
       headerText="Change the spaces to scan"
       onClose={onClose}
       footer={
         <div className="dialog-footer">
-          <Button design="Emphasized" disabled={spaces.length === 0 || save.isPending} onClick={() => save.mutate(spaces, { onSuccess: onClose })}>
+          <Button design="Emphasized" disabled={spaces.length === 0 || !!problem || save.isPending} onClick={() => save.mutate(spaces, { onSuccess: onClose })}>
             Save and check
           </Button>
           <Button design="Transparent" onClick={onClose}>
@@ -279,7 +289,7 @@ function SpacesDialog({ tenantId, current, onClose }: { tenantId: string; curren
       }
     >
       <div className="dialog-body">
-        <SpacesInput value={text} onInput={setText} />
+        <SpacesInput value={text} problem={text.trim() ? problem : undefined} onInput={setText} />
         <ErrorStrip error={save.error} />
       </div>
     </Dialog>

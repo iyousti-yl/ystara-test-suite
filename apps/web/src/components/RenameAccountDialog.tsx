@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label } from "@ui5/webcomponents-react";
+import { Button, Input, Label } from "@ui5/webcomponents-react";
+import { NAME_MAX } from "../fields";
+import { Dialog } from "./Dialog";
 import { ErrorStrip } from "./Feedback";
 
 /**
@@ -12,7 +14,6 @@ export function RenameAccountDialog(props: { current: string; pending: boolean; 
   const changed = name.trim() !== "" && name.trim() !== props.current;
   return (
     <Dialog
-      open
       headerText={`Rename ${props.current}`}
       onClose={props.onClose}
       footer={
@@ -30,7 +31,7 @@ export function RenameAccountDialog(props: { current: string; pending: boolean; 
         <Label for="account-new-name" required>
           Account name
         </Label>
-        <Input id="account-new-name" className="full-width" value={name} maxlength={100} onInput={(e) => setName(e.target.value)} />
+        <Input id="account-new-name" className="full-width" value={name} maxlength={NAME_MAX} onInput={(e) => setName(e.target.value)} />
         <p className="muted">Every member sees the new name at once. Tenants, pipelines and sign-ins don&apos;t change.</p>
         <ErrorStrip error={props.error} />
       </div>

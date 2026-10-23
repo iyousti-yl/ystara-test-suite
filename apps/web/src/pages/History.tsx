@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   Button,
-  Dialog,
   Label,
   MessageStrip,
   RadioButton,
@@ -16,10 +15,11 @@ import {
 } from "@ui5/webcomponents-react";
 import type { SignOffVerdict } from "@ystara/shared";
 import { useNavigate } from "react-router";
-import { useCan, usePipelineHistory, useSignOff, useSignOffs, type HistoryEventJson, type SignOffJson, type SignOffStateJson } from "../api";
+import { HISTORY_EVENTS, useCan, useDownload, usePipelineHistory, useSignOff, useSignOffs, type HistoryEventJson, type SignOffJson, type SignOffStateJson } from "../api";
 import { ColumnChart, formatCompact, LineChart, type ChartPoint } from "../components/Charts";
+import { Dialog } from "../components/Dialog";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
-import { counted, formatDateTime, formatNumber } from "../format";
+import { counted, countedLatest, formatDateTime, formatNumber } from "../format";
 import { RunStatusTag } from "./Scenarios";
 
 /**
@@ -33,7 +33,10 @@ export function HistorySection({ pipelineId }: { pipelineId: string }) {
   const navigate = useNavigate();
   const history = usePipelineHistory(pipelineId);
   const signOffs = useSignOffs(pipelineId);
+  const download = useDownload();
   const events = history.data ?? [];
+  // The API sends the latest HISTORY_EVENTS; the CSV has them all.
+  const more = events.length >= HISTORY_EVENTS;
 
   // Oldest first, as the charts read left to right; the last 30 of each.
   const suites = events.filter((e) => e.kind === "suite" && e.total !== null && e.passed !== null).reverse().slice(-30);
@@ -79,15 +82,20 @@ export function HistorySection({ pipelineId }: { pipelineId: string }) {
 
       <section className="block">
         <div className="list-toolbar section-toolbar">
-          <Title level="H2" size="H4">{history.data ? counted(events.length, "event") : "Timeline"}</Title>
-          <Button icon="download" onClick={() => window.location.assign(`/api/pipelines/${pipelineId}/history.csv`)} disabled={!events.length}>
+          <Title level="H2" size="H4">{history.data ? countedLatest(events.length, more, "event") : "Timeline"}</Title>
+          <Button
+            icon="download"
+            onClick={() => download.mutate({ path: `/pipelines/${pipelineId}/history.csv`, name: "ystara-history.csv" })}
+            disabled={!events.length || download.isPending}
+          >
             Download CSV
           </Button>
           <Button icon="print" onClick={() => navigate(`/pipelines/${pipelineId}/report`)}>
             Report
           </Button>
         </div>
-        <ErrorStrip error={history.error} />
+        {more && <p className="muted">The timeline shows the latest {formatNumber(HISTORY_EVENTS)} events. Download CSV has every one of them.</p>}
+        <ErrorStrip error={history.error ?? download.error} />
         {history.isPending ? (
           <Loading />
         ) : (
@@ -173,9 +181,13 @@ export function SignOffTag({ pipelineId }: { pipelineId: string }) {
   const state = useSignOffs(pipelineId).data;
   const latest = state?.latest;
   if (!latest) return null;
-  if (latest.verdict === "approved" && state.changedSince?.length) {
+  if (latest.verdict === "approved" && state.outdatedBy) {
+    const since =
+      state.outdatedBy === "scan" && state.changedSince?.length
+        ? `a later scan changed ${counted(state.changedSince.length, "step")} since`
+        : "a result that came in since fails, changed or found no rows";
     return (
-      <Tag design="Critical" title={`Approved on ${formatDateTime(latest.signedAt)}; a later scan changed ${counted(state.changedSince.length, "step")} since`}>
+      <Tag design="Critical" title={`Approved on ${formatDateTime(latest.signedAt)}; ${since}`}>
         Approval outdated
       </Tag>
     );
@@ -241,6 +253,12 @@ function SignOffSection({ pipelineId, state, error }: { pipelineId: string; stat
           <span className="mono">{state.changedSince.map((c) => `${c.technicalName} (${c.change})`).join(", ")}</span>. Check the results again and sign off anew.
         </MessageStrip>
       )}
+      {latest && state.outdatedBy === "result" && (
+        <MessageStrip design="Critical" hideCloseButton>
+          A result that came in after this approval fails, changed or found no rows in the output: the approval no longer covers the pipeline as it is.
+          Check the latest results and sign off anew.
+        </MessageStrip>
+      )}
       {signing && state && <SignOffDialog pipelineId={pipelineId} state={state} onClose={() => setSigning(false)} />}
     </section>
   );
@@ -254,7 +272,6 @@ function SignOffDialog({ pipelineId, state, onClose }: { pipelineId: string; sta
 
   return (
     <Dialog
-      open
       headerText="Sign off the pipeline"
       onClose={onClose}
       footer={

@@ -2,17 +2,7 @@ import { useState } from "react";
 import { CheckBox, Input, Label, MessageStrip, RadioButton } from "@ui5/webcomponents-react";
 import type { SpaceScope } from "@ystara/shared";
 import { useMe } from "../api";
-
-const SPACE_ID = /^[A-Za-z0-9_]{1,64}$/;
-
-/** "SALES, STOCK" typed by hand, as space IDs; undefined while one of them isn't a space ID. */
-export function parseSpaceIds(text: string): string[] | undefined {
-  const ids = text
-    .split(/[\s,;]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return ids.every((id) => SPACE_ID.test(id)) ? ids : undefined;
-}
+import { parseSpaceIds } from "../fields";
 
 /**
  * Which spaces a member sees: every space, or only some, ticked from those the

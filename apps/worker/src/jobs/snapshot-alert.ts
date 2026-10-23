@@ -99,7 +99,7 @@ export function alertEmail(input: AlertContent): Omit<AlertMail, "bcc"> {
     lines.push("There is no earlier successful snapshot to compare it with.");
   }
   lines.push("", "The snapshot:", `${app}/snapshots/${current.id}`, "");
-  lines.push(`You get this email because you watch this pipeline in Ystara. To stop, click Unwatch on its page: ${app}/pipelines/${pipeline.id}/snapshots`);
+  lines.push(`You get this email because you watch this pipeline in Ystara. To stop, open the pipeline and click Watching at the top: ${app}/pipelines/${pipeline.id}`);
   return { subject: alertSubject(pipeline.name, reasons), text: lines.join("\n") };
 }
 

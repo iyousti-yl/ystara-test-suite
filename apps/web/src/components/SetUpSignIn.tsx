@@ -23,7 +23,7 @@ export function SetUpSignIn(props: {
   title: string;
   intro: ReactNode;
   setup: { mutate: () => void; data?: AuthenticatorSetup; error: Error | null; isPending: boolean };
-  finish: { mutate: (input: NewSignIn, opts: { onSuccess: () => void }) => void; error: Error | null; isPending: boolean };
+  finish: { mutate: (input: NewSignIn, opts: { onSuccess: () => void }) => void; error: Error | null; isPending: boolean; isSuccess: boolean };
 }) {
   const { setup, finish } = props;
   const navigate = useNavigate();
@@ -53,7 +53,7 @@ export function SetUpSignIn(props: {
     return (
       <AuthFrame title={props.title}>
         {props.intro}
-        <AuthForm key="password" onSubmit={() => passwordOk && setup.mutate()}>
+        <AuthForm key="password" onSubmit={() => passwordOk && !setup.isPending && setup.mutate()}>
           <p>Choose a password for {props.email}. Use at least {MIN_PASSWORD_LENGTH} characters; a few unrelated words work well.</p>
           {/* Tells a password manager which user the new password belongs to. */}
           <input type="email" autoComplete="username" value={props.email} readOnly hidden />
@@ -74,7 +74,8 @@ export function SetUpSignIn(props: {
     <AuthFrame title="Set up your authenticator app">
       <AuthForm
         key="authenticator"
-        onSubmit={() => codeComplete && finish.mutate({ password, code: code.trim() }, { onSuccess: () => navigate("/", { replace: true }) })}
+        // A second Enter while the code is out sends nothing: the link is used up once the first one signs in.
+        onSubmit={() => codeComplete && !finish.isPending && !finish.isSuccess && finish.mutate({ password, code: code.trim() }, { onSuccess: () => navigate("/", { replace: true }) })}
       >
         <p>
           Every sign-in asks for a code from an authenticator app (Microsoft Authenticator, Google Authenticator, 1Password or similar). Scan this

@@ -1,10 +1,10 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { deleteConnection, getConnection, markConnectionChecking, setConnection, setConnectionSpaces, type Db } from "@ystara/db";
+import { deleteConnection, getConnection, markConnectionChecking, setConnection, setConnectionSpaces, type Db, type Queryable } from "@ystara/db";
 import { isTokenUrl, JOBS, TOKEN_URL_HINT, type ConnectionCheckJobData, type ConnectionState } from "@ystara/shared";
 import { connectionSecretContext, type SecretBox } from "@ystara/shared/secrets";
 import { signedIn } from "../auth/access.js";
-import { scope } from "../scope.js";
+import { allSpaces, scope, space } from "../scope.js";
 import type { JobQueue } from "../server.js";
 import { spaceIds } from "./discovery.js";
 
@@ -38,13 +38,22 @@ export function connectionRoutes(db: Db, queue: JobQueue, secrets: SecretBox) {
   /** The tenant, when it belongs to the signed-in account (scope.ts). */
   const tenants = scope(db);
   const ownTenant = (req: FastifyRequest) => tenants.tenant(req, id.parse(req.params).id);
-  const check = (tenantId: string) => queue.send(JOBS.connectionCheck, { tenantId } satisfies ConnectionCheckJobData);
+  /** Saves with `save` and queues the check on the same transaction: a client marked "checking" always has its check coming. */
+  const savedAndChecked = <T>(tenantId: string, save: (tx: Queryable) => Promise<T | undefined>) =>
+    db.transaction(async (tx) => {
+      const saved = await save(tx);
+      if (saved) await queue.send(JOBS.connectionCheck, { tenantId } satisfies ConnectionCheckJobData, tx);
+      return saved;
+    });
 
   return async (app: FastifyInstance) => {
     app.get("/tenants/:id/connection", { config: { access: "pipelines.read" } }, async (req, reply) => {
       const tenant = await ownTenant(req);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
-      return { connection: (await getConnection(db, tenant.id)) ?? null } satisfies ConnectionState;
+      const connection = (await getConnection(db, tenant.id)) ?? null;
+      // A member limited to some spaces sees only theirs: another space's check can quote its objects' names.
+      const visible = connection && !allSpaces(req) ? { ...connection, spaces: connection.spaces.filter((s) => space(req, s.space)) } : connection;
+      return { connection: visible } satisfies ConnectionState;
     });
 
     // Enter or change the client and its spaces. It is checked at once, in the background.
@@ -53,34 +62,32 @@ export function connectionRoutes(db: Db, queue: JobQueue, secrets: SecretBox) {
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
       if (!tenant.host) return reply.code(409).send({ error: "This tenant has no Datasphere URL; it only has imported scans." });
       const input = ConnectionInput.parse(req.body);
-      const connection = await setConnection(db, {
-        tenantId: tenant.id,
-        clientId: input.clientId,
-        sealedSecret: secrets.seal(input.clientSecret, connectionSecretContext(tenant.id)),
-        tokenUrl: input.tokenUrl.replace(/\/$/, ""),
-        spaces: input.spaces,
-        updatedBy: signedIn(req).userId,
-      });
-      await check(tenant.id);
-      return connection;
+      return savedAndChecked(tenant.id, (tx) =>
+        setConnection(tx, {
+          tenantId: tenant.id,
+          clientId: input.clientId,
+          sealedSecret: secrets.seal(input.clientSecret, connectionSecretContext(tenant.id)),
+          tokenUrl: input.tokenUrl.replace(/\/$/, ""),
+          spaces: input.spaces,
+          updatedBy: signedIn(req).userId,
+        }),
+      );
     });
 
     // Change only the spaces, without entering the secret again. Checked at once, too.
     app.put("/tenants/:id/connection/spaces", { config: { access: "tenant.connect" } }, async (req, reply) => {
       const tenant = await ownTenant(req);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
-      const connection = await setConnectionSpaces(db, tenant.id, SpacesInput.parse(req.body).spaces, signedIn(req).userId);
-      if (!connection) return reply.code(404).send({ error: "This tenant has no technical client yet" });
-      await check(tenant.id);
-      return connection;
+      const { spaces } = SpacesInput.parse(req.body);
+      const connection = await savedAndChecked(tenant.id, (tx) => setConnectionSpaces(tx, tenant.id, spaces, signedIn(req).userId));
+      return connection ?? reply.code(404).send({ error: "This tenant has no technical client yet" });
     });
 
     app.post("/tenants/:id/connection/check", { config: { access: "discovery.run" } }, async (req, reply) => {
       const tenant = await ownTenant(req);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
-      const connection = await markConnectionChecking(db, tenant.id);
+      const connection = await savedAndChecked(tenant.id, (tx) => markConnectionChecking(tx, tenant.id));
       if (!connection) return reply.code(404).send({ error: "This tenant has no technical client yet" });
-      await check(tenant.id);
       return reply.code(202).send(connection);
     });
 

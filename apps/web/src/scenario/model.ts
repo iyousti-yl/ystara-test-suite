@@ -28,6 +28,16 @@ const BOOLEANS: Record<string, boolean> = { true: true, false: false, yes: true,
  * a comma or a point as the decimal sign; a value a JavaScript number would round ("0.10", 20 digits) stays
  * text, which the database reads as the exact decimal. `invalid` says what the column expects instead.
  */
+/** The cells of a grid that don't fit their column's type, in reading order: "Row 3, AMOUNT: DECIMAL(15,2) takes a number". */
+export function cellProblems(grid: Grid): string[] {
+  return grid.rows.flatMap((row, i) =>
+    grid.columns.flatMap((c) => {
+      const { invalid } = cellFromText(row[c.name] ?? "", c.type);
+      return invalid ? [`Row ${i + 1}, ${c.name}: ${invalid}`] : [];
+    }),
+  );
+}
+
 export function cellFromText(text: string, type: string): { cell: Cell | undefined; invalid?: string } {
   if (text === "") return { cell: undefined };
   switch (columnKind(type)) {

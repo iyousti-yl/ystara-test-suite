@@ -35,8 +35,12 @@ const scenario = { kind: "scenario", param: "id" } as const;
 
 /** Keyed by method and route as registered under /api, e.g. "DELETE /pipelines/:id". */
 export const AUDIT_ACTIONS: Record<string, AuditAction | null> = {
-  // Signing in. Failed attempts are not events: the sign-in limits and the server log cover them.
+  // Signing in. A failed attempt of a known user is an event in each of their accounts (not a route: routes/auth.ts
+  // writes it), so admins see someone guessing; an unknown email belongs to no account.
   "POST /auth/login": null, // the password step: the sign-in is logged once the code is checked
+  "sign-in: wrong password": { label: "Typed a wrong password", group: "Sign-in" },
+  "sign-in: wrong code": { label: "Typed a wrong authenticator code", group: "Sign-in" },
+  "sign-in: codes locked": { label: "Was locked out after too many wrong codes", group: "Sign-in" },
   "POST /auth/code": { label: "Signed in", group: "Sign-in" },
   "POST /auth/logout": null,
   "POST /auth/account": { label: "Switched to this account", group: "Sign-in" },
@@ -44,6 +48,8 @@ export const AUDIT_ACTIONS: Record<string, AuditAction | null> = {
   "POST /invitations/:token/accept": { label: "Joined the account with an invitation", group: "Users" },
   "POST /resets/:token/authenticator": null,
   "POST /resets/:token/accept": { label: "Chose a new password and authenticator with a reset link", group: "Sign-in" },
+  "POST /auth/password": { label: "Changed their password", group: "Sign-in" },
+  "POST /auth/sessions/end-others": { label: "Signed out their other browsers", group: "Sign-in" },
 
   // Users and the account
   "PATCH /team/account": { label: "Renamed the account", group: "Users", fields: ["name"] },
@@ -93,6 +99,7 @@ export const AUDIT_ACTIONS: Record<string, AuditAction | null> = {
   "PUT /account/teams-channel": { label: "Connected a Teams channel", group: "Alerts" },
   "POST /account/teams-channel/test": { label: "Sent a test card to the Teams channel", group: "Alerts" },
   "DELETE /account/teams-channel": { label: "Removed the Teams channel", group: "Alerts" },
+  "PUT /account/settings": { label: "Changed the account's settings", group: "Users", fields: ["draftingWithClaude"] },
 
   // The operator panel: kept apart from every account's log (account_id null).
   "POST /operator/accounts": { label: "Created an account", group: "Operator", fields: ["name", "adminEmail"] },

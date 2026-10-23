@@ -1,0 +1,22 @@
+# Weekly pull requests for outdated or vulnerable packages, GitHub Actions and base images.
+# Each one runs CI like any other PR; none is merged without a review.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor updates of dev tools in one PR, so they don't crowd out the rest.
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

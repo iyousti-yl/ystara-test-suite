@@ -1,5 +1,6 @@
 import type { ScenarioAlert, SnapshotAlert } from "./alerts.js";
 import type { Verdict } from "./compare.js";
+import type { ApprovalOutdatedBy } from "./health.js";
 import type { Measurability } from "./database-users.js";
 import type { DspEdge, DspObject, DspObjectRef, Pipeline } from "./objects.js";
 import type { Permission, Role, SpaceScope } from "./roles.js";
@@ -363,8 +364,13 @@ export interface ScenarioColumn {
  */
 export interface ScenarioInputs {
   scanId: string;
-  /** Whether this server can draft a scenario from its description with Claude (POST /api/pipelines/:id/scenario-draft): it has an Anthropic API key. */
+  /**
+   * Whether a scenario can be drafted from its description with Claude (POST /api/pipelines/:id/scenario-draft):
+   * the server has an Anthropic API key and the account's admin switched drafting on (AccountSettings).
+   */
   drafting: boolean;
+  /** Why drafting is off: the server has no key, or the account hasn't switched it on. */
+  draftingOff?: "server" | "account";
   tables: (DspObjectRef & { why: string; columns: ScenarioColumn[] })[];
   checkpoints: (DspObjectRef & { columns: ScenarioColumn[] | null })[];
   steps: ScenarioStepNote[];
@@ -492,6 +498,36 @@ export interface Me {
   operator: boolean;
   /** The spaces the user sees in this account: null for every space (roles.ts). */
   spaces: SpaceScope;
+  /** How many other browsers are signed in as this user right now (POST /api/auth/sessions/end-others ends them). */
+  otherSessions: number;
+}
+
+/**
+ * A session ends after this many minutes without use, on top of its 12 hours in all. Polling doesn't count as use:
+ * the web app sends ACTIVITY_HEADER only while someone uses the page (a key, a click, a scroll in the last
+ * ACTIVE_WINDOW_MINUTES), and the API counts every request that changes something.
+ */
+export const IDLE_MINUTES = 60;
+export const ACTIVE_WINDOW_MINUTES = 5;
+export const ACTIVITY_HEADER = "x-ystara-active";
+
+/**
+ * POST /api/auth/password: a signed-in user chooses a new password, with their current one and a code from their
+ * authenticator app. Every other browser signed in as them is signed out; this one stays signed in.
+ */
+export interface ChangePassword {
+  currentPassword: string;
+  newPassword: string;
+  code: string;
+}
+
+/** GET and PUT /api/account/settings (admins): what the account allows. */
+export interface AccountSettings {
+  /**
+   * Whether developers may send this account's pipeline definitions (names, columns and logic, never data) to
+   * Claude to draft a scenario. Off until an admin switches it on.
+   */
+  draftingWithClaude: boolean;
 }
 
 /** A user's membership of the signed-in account (GET /api/members). */
@@ -613,6 +649,8 @@ export interface SignOffState {
    * there is no sign-off or the scan it covered is gone.
    */
   changedSince: ChangedStep[] | null;
+  /** Why the latest sign-off, an approval, no longer holds (approvalOutdatedBy in health.ts); null while it holds. */
+  outdatedBy: ApprovalOutdatedBy | null;
   /** What signing off now would cover. */
   basis: SignOffBasis;
   /** Every sign-off, newest first. */

@@ -52,8 +52,11 @@ export interface SnapshotJobData {
   snapshotId: string;
 }
 
-/** A snapshot reads every measurable step of a pipeline once; large views take a while. No retries: a person starts it again. */
-export const SNAPSHOT_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 60 * 60 };
+/**
+ * A snapshot reads every measurable step of a pipeline once; large views take a while (each statement may run 10
+ * minutes: STATEMENT_TIMEOUT_MS in the connector). No retries: a person starts it again.
+ */
+export const SNAPSHOT_QUEUE_OPTIONS = { retryLimit: 0, expireInSeconds: 2 * 60 * 60 };
 
 /**
  * Once a minute (pg-boss's own cron): take a snapshot of every pipeline, and

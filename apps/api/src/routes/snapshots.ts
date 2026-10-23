@@ -5,6 +5,7 @@ import {
   deleteSchedule,
   getSchedule,
   getSnapshotDetails,
+  hasUnfinishedSnapshot,
   latestSucceededScan,
   listSnapshots,
   setSchedule,
@@ -17,6 +18,7 @@ import {
   checkSchedule,
   compareSnapshots,
   JOBS,
+  SNAPSHOT_QUEUE_OPTIONS,
   whyNothingMeasurable,
   type PipelineDefinition,
   type SnapshotComparison,
@@ -26,7 +28,7 @@ import {
 import { signedIn } from "../auth/access.js";
 import { scope } from "../scope.js";
 import type { JobQueue } from "../server.js";
-import { computePipeline } from "./discovery.js";
+import { computePipeline, Page } from "./discovery.js";
 
 /**
  * Snapshots of saved pipelines (Snapshot in @ystara/shared): taking one
@@ -65,7 +67,7 @@ export function snapshotRoutes(db: Db, queue: JobQueue) {
     app.get("/pipelines/:id/snapshots", { config: { access: "runs.read" } }, async (req, reply) => {
       const pipeline = await ownPipeline(req, id.parse(req.params).id);
       if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
-      return listSnapshots(db, pipeline.id);
+      return listSnapshots(db, pipeline.id, Page.parse(req.query));
     });
 
     // Take a snapshot now. Refused when none of the steps can be measured, saying what would change that.
@@ -75,8 +77,15 @@ export function snapshotRoutes(db: Db, queue: JobQueue) {
       const { pipeline } = own;
       const why = await whyNoSnapshot(own);
       if (why) return reply.code(409).send({ error: why });
-      const snapshot = await createSnapshot(db, { tenantId: pipeline.tenantId, pipelineId: pipeline.id, requestedBy: signedIn(req).userId });
-      await queue.send(JOBS.snapshot, { snapshotId: snapshot.id } satisfies SnapshotJobData);
+      // One at a time per pipeline (one older than the snapshot queue's time limit is stuck, and the worker's sweep ends it).
+      if (await hasUnfinishedSnapshot(db, pipeline.id, new Date(Date.now() - SNAPSHOT_QUEUE_OPTIONS.expireInSeconds * 1000))) {
+        return reply.code(409).send({ error: "A snapshot of this pipeline is still being taken. Take the next one once it has finished." });
+      }
+      const snapshot = await db.transaction(async (tx) => {
+        const created = await createSnapshot(tx, { tenantId: pipeline.tenantId, pipelineId: pipeline.id, requestedBy: signedIn(req).userId });
+        await queue.send(JOBS.snapshot, { snapshotId: created.id } satisfies SnapshotJobData, tx);
+        return created;
+      });
       return reply.code(202).send(snapshot);
     });
 

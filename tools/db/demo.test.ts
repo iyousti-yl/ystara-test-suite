@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { acceptInvitation, createAccount, createInvitation, getSchedule, getSnapshotDetails, listPipelines, listTenants, pipelineHistory, type Db } from "@ystara/db";
+import { acceptInvitation, createAccount, createInvitation, getSchedule, getSnapshotDetails, listAuditEvents, listPipelines, listTenants, pipelineHistory, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import { compareSnapshots } from "@ystara/shared";
 import { DEMO_COLUMNS, DEMO_NAMES, DEMO_SCENARIO, DEMO_SPACE, DEMO_TENANT, loadDemo } from "./demo.js";
@@ -64,6 +64,11 @@ describe("the demo tenant", () => {
     // Before that, the account's admin approved the pipeline on a suite that passed.
     expect(signOff).toMatchObject({ verdict: "approved", signedBy: "admin@customer.example.com", suite: { status: "passed", passed: 1, total: 1 }, snapshot: { id: snapshots[1].id } });
     expect((await pipelineHistory(db, pipeline.id)).map((e) => e.kind)).toEqual(["suite", "signoff", "suite", "run", "snapshot", "snapshot"]);
+    // And the Audit page tells the same story, as the admin.
+    const log = await listAuditEvents(db, { accountId, limit: 20 });
+    expect(log.map((e) => [e.label, e.userEmail])).toEqual(
+      ["Signed off the pipeline", "Ran all the pipeline's scenarios", "Created a scenario", "Set the snapshot schedule", "Saved a pipeline", "Added a tenant"].map((label) => [label, "admin@customer.example.com"]),
+    );
   });
 
   it("refuses to load it twice into one account, and adds nothing", async () => {

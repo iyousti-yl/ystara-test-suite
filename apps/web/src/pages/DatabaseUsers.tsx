@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { Button, Dialog, Input, Label, MessageStrip, Panel } from "@ui5/webcomponents-react";
+import { Button, Input, Label, MessageStrip, Panel } from "@ui5/webcomponents-react";
 import { DATABASE_HOST_HINT, databaseUserProblem, databaseUserSpace, isDatabaseHost } from "@ystara/shared";
 import { useCan, useCheckDatabaseUser, useDatabaseUsers, useRemoveDatabaseUser, useSetDatabaseUser, type DatabaseUserJson } from "../api";
+import { Dialog } from "../components/Dialog";
 import { EmptyState } from "../components/EmptyState";
 import { ConnectionStatusTag, ErrorStrip, Loading } from "../components/Feedback";
 import { MoreActions } from "../components/MoreActions";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateTime } from "../format";
 import { useAddressTenant } from "../tenantScope";
@@ -24,7 +26,7 @@ export function DatabaseUsersPage() {
   const [editing, setEditing] = useState<DatabaseUserJson | "new">();
 
   if (tenant.isPending) return <Loading />;
-  if (!tenant.data) return <ErrorStrip error={tenant.error} />;
+  if (!tenant.data) return <PageError error={tenant.error} what="tenant" />;
   const host = tenant.data.host;
 
   const confirmRemove = (u: DatabaseUserJson) => {
@@ -181,7 +183,6 @@ function DatabaseUserDialog(props: { tenantId: string; current: DatabaseUserJson
 
   return (
     <Dialog
-      open
       headerText={current ? `Change the database user of ${current.space}` : "Add a database user"}
       onClose={onClose}
       footer={

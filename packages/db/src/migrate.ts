@@ -35,6 +35,9 @@ export async function migrate(db: Db): Promise<string[]> {
     if (done.has(file)) continue;
     const sql = await readFile(path.join(MIGRATIONS_DIR, file), "utf8");
     await db.transaction(async (tx) => {
+      // A migration that waits more than 10 seconds for a table that the running API or worker holds stops (and
+      // can be run again) instead of making every request behind it wait too.
+      await tx.exec("set local lock_timeout = '10s'");
       await tx.exec(sql);
       await tx.query("insert into schema_migrations (name) values ($1)", [file]);
     });

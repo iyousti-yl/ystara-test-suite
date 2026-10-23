@@ -1,11 +1,12 @@
-import { BusyIndicator, MessageStrip, Tag } from "@ui5/webcomponents-react";
+import { BusyIndicator, Button, MessageStrip, Tag } from "@ui5/webcomponents-react";
 import { HEALTH_LABEL, type HealthState } from "@ystara/shared";
 import type { ConnectionJson, ScanJson } from "../api";
+import { SignInEnded } from "../errors";
 import { formatDateTime, formatRelative } from "../format";
 
-/** A failed request, in the API's own words. */
+/** A failed request, in the API's own words. Not a sign-in that ended: "Your sign-in ended" (SignInAgain) says that over the page. */
 export function ErrorStrip({ error }: { error: Error | null | undefined }) {
-  if (!error) return null;
+  if (!error || error instanceof SignInEnded) return null;
   return (
     <MessageStrip design="Negative" hideCloseButton className="block">
       {error.message}
@@ -15,6 +16,18 @@ export function ErrorStrip({ error }: { error: Error | null | undefined }) {
 
 export function Loading({ text = "Loading…" }: { text?: string }) {
   return <BusyIndicator active text={text} className="block" />;
+}
+
+/** Under a list that comes a page at a time (useOlderPages in api.ts): the next older page, while there may be one. */
+export function ShowOlder({ list, what }: { list: { hasNextPage: boolean; isFetchingNextPage: boolean; fetchNextPage: () => unknown }; what: string }) {
+  if (!list.hasNextPage) return null;
+  return (
+    <div className="load-more">
+      <Button disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
+        {list.isFetchingNextPage ? "Loading…" : `Show older ${what}`}
+      </Button>
+    </div>
+  );
 }
 
 const SCAN_STATUS = {
@@ -44,6 +57,7 @@ export function ConnectionStatusTag({ status }: { status: ConnectionJson["status
 const HEALTH_DESIGN = {
   failing: "Negative",
   changed: "Critical",
+  empty: "Critical",
   untested: "Neutral",
   running: "Information",
   ok: "Positive",

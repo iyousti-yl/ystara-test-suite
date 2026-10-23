@@ -17,6 +17,7 @@ import {
   type Db,
 } from "@ystara/db";
 import {
+  approvalOutdatedBy,
   compareSnapshots,
   refKey,
   toCsv,
@@ -26,6 +27,7 @@ import {
   type PipelineHistory,
   type PipelineReport,
   type PipelineSummary,
+  type ApprovalOutdatedBy,
   type SignOff,
   type SignOffState,
 } from "@ystara/shared";
@@ -63,6 +65,13 @@ export function resultRoutes(db: Db) {
     return changedSteps(before, after, pipeline);
   }
 
+  /** Why the latest sign-off no longer holds, given the steps changed since (changedSince): a later scan, or a later result. */
+  async function outdatedBy(userId: string, pipeline: PipelineDefinition, signOff: SignOff | null, changed: ChangedStep[] | null): Promise<ApprovalOutdatedBy | null> {
+    if (signOff?.verdict !== "approved") return null;
+    const [summary] = await pipelineSummaries(db, pipeline.tenantId, userId, pipeline.id);
+    return summary ? approvalOutdatedBy(summary, signOff.signedAt, !!changed?.length) : null;
+  }
+
   return async (app: FastifyInstance) => {
     // The Pipelines board: each pipeline's latest results (pipelineHealth in @ystara/shared reads them), for the spaces the user sees.
     app.get("/tenants/:id/pipeline-summaries", { config: read }, async (req, reply) => {
@@ -77,9 +86,11 @@ export function resultRoutes(db: Db) {
         summaries.map(async ({ signOff, ...s }): Promise<PipelineSummary> => {
           if (!signOff) return { ...s, signOff: null };
           const { scanId, ...kept } = signOff;
-          const later = signOff.verdict === "approved" && scanId && latest && latest.id !== scanId;
-          const outdated = later ? changedSteps(await graph(scanId), await graph(latest.id), pipelines.get(s.pipelineId)!).length > 0 : false;
-          return { ...s, signOff: { ...kept, outdated } };
+          if (signOff.verdict !== "approved") return { ...s, signOff: { ...kept, outdated: false, outdatedBy: null } };
+          const later = scanId && latest && latest.id !== scanId;
+          const scanChanged = later ? changedSteps(await graph(scanId), await graph(latest.id), pipelines.get(s.pipelineId)!).length > 0 : false;
+          const by = approvalOutdatedBy(s, signOff.signedAt, scanChanged);
+          return { ...s, signOff: { ...kept, outdated: by !== null, outdatedBy: by } };
         }),
       );
     });
@@ -89,7 +100,8 @@ export function resultRoutes(db: Db) {
       if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
       const all = await listSignOffs(db, pipeline.id);
       const latest = all[0] ?? null;
-      return { latest, changedSince: await changedSince(pipeline, latest), basis: await signOffBasis(db, pipeline.id), all } satisfies SignOffState;
+      const changed = await changedSince(pipeline, latest);
+      return { latest, changedSince: changed, outdatedBy: await outdatedBy(signedIn(req).userId, pipeline, latest, changed), basis: await signOffBasis(db, pipeline.id), all } satisfies SignOffState;
     });
 
     // Signs the pipeline off as it stands: the latest scan, suite and snapshot (signOffBasis). Rejecting needs a reason.
@@ -142,6 +154,7 @@ export function resultRoutes(db: Db) {
 
       const signOffs = await listSignOffs(db, pipeline.id, 1);
       const latest = signOffs[0] ?? null;
+      const changed = await changedSince(pipeline, latest);
 
       const basis = await signOffBasis(db, pipeline.id);
       const suite = basis.suite ? await getScenarioSuite(db, basis.suite.id) : undefined;
@@ -173,7 +186,7 @@ export function resultRoutes(db: Db) {
         tenant: { id: tenant.id, name: tenant.name, host: tenant.host },
         pipeline,
         steps,
-        signOff: { latest, changedSince: await changedSince(pipeline, latest) },
+        signOff: { latest, changedSince: changed, outdatedBy: await outdatedBy(signedIn(req).userId, pipeline, latest, changed) },
         suite: suite
           ? {
               id: suite.id,

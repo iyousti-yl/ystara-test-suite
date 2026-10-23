@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { auditTarget, recordAuditEvent, type Db } from "@ystara/db";
+import { accountsConcerned, auditTarget, recordAuditEvent, type Db } from "@ystara/db";
 import { AUDIT_ACTIONS, auditKey, type AuditAction, type AuditTarget } from "@ystara/shared";
 
 /**
@@ -11,6 +11,9 @@ import { AUDIT_ACTIONS, auditKey, type AuditAction, type AuditTarget } from "@ys
  * What a request acts on is read before it runs (its name or email), so the
  * event still names a pipeline the request deleted. Only the body fields the
  * action lists are kept, never a secret or a scenario's test rows.
+ *
+ * The operator panel's events belong to no account; a copy goes to the account
+ * they concern, so its admins can see what Ystara's operator did there.
  *
  * Every route that isn't a GET must be in AUDIT_ACTIONS: the API refuses to
  * start otherwise, so a new route can't go unlogged by mistake.
@@ -47,15 +50,21 @@ export function installAudit(app: FastifyInstance, db: Db): void {
     const actor = req.auditActor ?? (req.auth && { userId: req.auth.userId, accountId: req.auth.accountId });
     if (!actor) return;
     try {
-      await recordAuditEvent(db, {
-        // The operator panel acts across accounts, so its events belong to none of them.
-        accountId: action.group === "Operator" ? null : actor.accountId,
+      const event = {
         userId: actor.userId,
         action: auditKey(req.method, req.routeOptions.url!),
         target: req.auditTarget ?? null,
         detail: detailOf(req, action),
         ip: req.ip ?? null,
-      });
+      };
+      if (action.group !== "Operator") {
+        await recordAuditEvent(db, { ...event, accountId: actor.accountId });
+      } else {
+        // The operator panel acts across accounts: its own log holds the event, and the account it was done to
+        // gets a copy, so its admins see what Ystara's operator changed (a rename, a reset link for one of them).
+        await recordAuditEvent(db, { ...event, accountId: null });
+        for (const accountId of event.target ? await accountsConcerned(db, event.target) : []) await recordAuditEvent(db, { ...event, accountId });
+      }
     } catch (err) {
       // The request already did its work; a lost event is logged for the operator rather than failing it afterwards.
       req.log.error({ err, action: auditKey(req.method, req.routeOptions.url!) }, "audit event not written");

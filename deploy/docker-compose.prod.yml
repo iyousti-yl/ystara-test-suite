@@ -46,6 +46,8 @@ services:
       # Caddy, on the same machine, says who the client is (X-Forwarded-For) and that it came over HTTPS,
       # so sign-in limits count per real client and the session cookie is marked Secure.
       YSTARA_TRUST_PROXY: 1
+      # Over https: the session cookie is only ever sent over https (apps/api/src/auth/access.ts).
+      YSTARA_PUBLIC_URL: https://${YSTARA_DOMAIN:?set YSTARA_DOMAIN in /etc/ystara/ystara.env}
     ports: !reset []
     secrets: [database_url, master_key]
 
@@ -82,17 +84,23 @@ services:
       - caddy_data:/data # the certificates: kept, so a restart doesn't ask Let's Encrypt again
       - caddy_config:/config
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
   # One-off admin commands, run by hand and removed after: deploy/compose run --rm tools npm run <script> -- ...
   # The build with its dev packages and tools/ (Dockerfile, stage "tools"); never started by `up`.
   tools:
-    image: ystara-tools:latest
+    image: ystara-tools:${YSTARA_VERSION:-dev}
     pull_policy: build
     build:
       context: .
       target: tools
+      args:
+        YSTARA_VERSION: ${YSTARA_VERSION:-dev}
     profiles: [tools]
+    init: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     environment:
       DATABASE_URL_FILE: /run/secrets/database_url
       MASTER_KEY_FILE: /run/secrets/master_key

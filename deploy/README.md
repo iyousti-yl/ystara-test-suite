@@ -106,26 +106,36 @@ sudo journalctl -u ystara-backup -u ystara-restore-test --since today   # "Backu
 
 The backup runs every night at 03:30. It keeps one backup a day for 14 days, one a week for 8 weeks and one a month for 6 months. The restore test runs every Sunday at 05:00.
 
-**8. Being told when something stops.** Two free checks are enough to start:
-- An uptime check on `https://app.<your domain>/api/health` (any uptime service).
+**8. Being told when something stops.** Three free checks are enough to start:
+- An uptime check on `https://app.<your domain>/api/health` (any uptime service). It answers 503 when the API can't reach its database.
+- An uptime check on `https://app.<your domain>/api/health/worker`. It answers 503 when no worker has taken the once-a-minute schedule tick for 3 minutes: scans, snapshots, scenario runs and alerts have stopped.
 - A ping check for the backups (healthchecks.io or similar). Put its URL in `YSTARA_BACKUP_PING_URL`. Each successful backup and restore test calls it, a failure calls it with `/fail`, and the service emails you when the calls stop.
 
 ## Day to day
 
 | What | How |
 |---|---|
-| **Update** to the latest `main` | `cd /opt/ystara && sudo git pull && sudo deploy/backup.sh && sudo deploy/compose up -d --build`. Migrations run on their own (the `migrate` service), before the API and worker start. Expect a few seconds of downtime. |
-| **Go back** to an earlier version | `sudo git checkout <commit> && sudo deploy/compose up -d --build`. A migration is never undone. If the newer version changed the database, restore the backup taken before the update (`deploy/restore.sh <snapshot>`). |
+| **Update** to the latest `main` | `cd /opt/ystara && sudo git pull && sudo deploy/backup.sh && sudo deploy/compose up -d --build`. Migrations run on their own (the `migrate` service), before the API and worker start. Caddy holds requests up to 10 seconds while the API restarts, and the worker finishes its running jobs first (up to 45 seconds); a job it couldn't finish is marked "Ystara restarted while it ran. Start it again." `curl https://app.<your domain>/api/health` shows the version (the commit) that runs. |
+| **Go back** to an earlier version | Each update leaves the previous image on the server, tagged with its commit (`docker images ystara`). `cd /opt/ystara && sudo git checkout <commit> && sudo deploy/compose up -d` starts it again without a build. Migrations only ever add (a column, a table, an index), so an earlier version runs on the newer database; if a release says otherwise, restore the backup taken before the update (`deploy/restore.sh <snapshot>`). Then `sudo git checkout main` for the next update. |
 | **See what runs** | `sudo deploy/compose ps`, and `systemctl list-timers 'ystara-*'` |
 | **Logs** | `sudo deploy/compose logs -f --since 1h api worker`. Logs rotate on their own (5 files of 20 MB per service). |
 | **List backups** | `sudo sh -c 'set -a; . /etc/ystara/backup.env; restic snapshots'` |
 | **Restore test by hand** | `sudo deploy/restore-test.sh`, or `sudo deploy/restore-test.sh <snapshot>` |
 | **Undo a mistake** (a deleted tenant, say) | `sudo deploy/restore.sh <snapshot>`. It asks first, keeps the database as it was in `/var/lib/ystara-backup/`, and puts the backup back. Everything since that backup is lost, for every account. |
 | **Change the mail server** | Edit `/etc/ystara/secrets/smtp_url`, then `sudo deploy/compose up -d --force-recreate worker` |
-| **Admin commands** | `sudo deploy/compose run --rm tools npm run <account:create, operator:grant> -- ...` |
+| **Admin commands** | `sudo deploy/compose run --rm tools npm run <account:create, operator:grant, user:erase, account:delete> -- ...` |
+| **Erase a person** (a GDPR request) | `sudo deploy/compose run --rm tools npm run user:erase -- --email <email>` shows what it does; add `--yes` to do it. Their sign-in and memberships go, and the audit log and sign-offs keep what was done without their name or address. Refused while they are an account's only admin. Backups keep the person until they age out (6 months at most): say so in the answer to the request. |
+| **Delete an account** (the end of a contract) | `sudo deploy/compose run --rm tools npm run account:delete -- --name "<Account>"` shows what goes; add `--yes` to delete its tenants, results, members and audit log. It lists the people who belonged to that account only, to erase next. |
 | **Disk space** | `docker system df`. After updates, `sudo docker image prune` removes old images. |
 
 Never change `master_key`: Ystara can't re-seal its secrets with a new key yet.
+
+## Backups nobody on the server can delete
+
+Someone who takes over the server has the storage keys in `backup.env`, and with keys that can delete they can erase the backups too. To close that:
+
+1. At the storage provider, make the server's keys able to write and read but not delete (an append-only or "no delete" policy on the bucket; Scaleway and Hetzner both offer bucket policies), and set `YSTARA_BACKUP_PRUNE=0` in `/etc/ystara/backup.env`. The server then never removes an old backup.
+2. Keep a second pair of keys that can delete in the password manager only, and once a month, from your own machine: `restic -r <repository> forget --tag ystara --host ystara --keep-daily 14 --keep-weekly 8 --keep-monthly 6 --prune`.
 
 ## Restore after losing the server
 
@@ -153,5 +163,6 @@ For backups, point `YSTARA_BACKUP_SETTINGS` at a `backup.env` whose `RESTIC_REPO
 
 - One server, so it is down while it restarts or is updated (seconds), or if it fails (until restored).
 - The image is built on the server from the checkout. There is no image registry and no deployment from CI.
-- No metrics or log search: only the logs on the server, an uptime check and the backup pings.
+- No metrics or log search: only the logs on the server (one JSON line per event from the worker, one per request from the API, each with its request id), the uptime checks and the backup pings. A 500 tells the user a reference: `sudo deploy/compose logs api | grep <reference>` finds the cause.
+- Storage grows with every scan and snapshot: nothing is removed on a schedule yet. `docker system df` and the database's size (`deploy/compose exec postgres psql -U ystara -c "select pg_size_pretty(pg_database_size('ystara'))"`) say how much.
 - The server's own disk isn't backed up. Everything that matters is in the database, and the files in `/etc/ystara` are in the password manager or easy to make again.

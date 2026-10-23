@@ -163,11 +163,12 @@ export async function getScenarioRun(db: Queryable, id: string): Promise<Scenari
   return rows[0] && toRun(rows[0]);
 }
 
-/** A scenario's runs, newest first, without what each one gave back. */
-export async function listScenarioRuns(db: Queryable, scenarioId: string, limit = 50): Promise<ScenarioRunSummary[]> {
+/** A scenario's runs, newest first, without what each one gave back; `before` gives the next older page. */
+export async function listScenarioRuns(db: Queryable, scenarioId: string, page: { before?: Date; limit?: number } = {}): Promise<ScenarioRunSummary[]> {
   const { rows } = await db.query<RunRow>(
-    "select id, status, requested_at, finished_at, passed, total from scenario_runs where scenario_id = $1 order by requested_at desc limit $2",
-    [scenarioId, limit],
+    `select id, status, requested_at, finished_at, passed, total from scenario_runs
+     where scenario_id = $1 and ($3::timestamptz is null or requested_at < $3) order by requested_at desc limit $2`,
+    [scenarioId, page.limit ?? 50, page.before ?? null],
   );
   return rows.map((r) => ({ id: r.id, status: r.status, requestedAt: r.requested_at, finishedAt: r.finished_at, passed: r.passed, total: r.total }));
 }

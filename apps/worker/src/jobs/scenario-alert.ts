@@ -105,7 +105,7 @@ export function scenarioAlertEmail(input: ScenarioAlertContent): Omit<AlertMail,
     "What each scenario's checks gave back:",
     `${app}/scenario-suites/${input.suiteId}`,
     "",
-    `You get this email because you watch this pipeline in Ystara. To stop, click Unwatch on its page: ${app}/pipelines/${input.pipeline.id}/snapshots`,
+    `You get this email because you watch this pipeline in Ystara. To stop, open the pipeline and click Watching at the top: ${app}/pipelines/${input.pipeline.id}`,
   ];
   return { subject: scenarioAlertSubject(input.pipeline.name, input.broken), text: lines.join("\n") };
 }

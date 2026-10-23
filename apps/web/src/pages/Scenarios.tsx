@@ -58,15 +58,18 @@ import {
 } from "../api";
 import { emailDelivery, teamsDelivery } from "../alerts";
 import { monoColumnWidth } from "../columns";
-import { ErrorStrip, Loading } from "../components/Feedback";
+import { ErrorStrip, Loading, ShowOlder } from "../components/Feedback";
 import { EmptyState } from "../components/EmptyState";
 import { MoreActions } from "../components/MoreActions";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
-import { counted, formatDateTime, formatDateTimesApart } from "../format";
+import { SCENARIO_NAME_MAX } from "../fields";
+import { saveFile } from "../files";
+import { counted, countedLatest, formatDateTime, formatDateTimesApart, formatNumber } from "../format";
 import { typeLabel } from "../objectTypes";
 import { CheckDialog, type Checkpoint } from "../scenario/CheckDialog";
 import { readWorkbook, workbookOf } from "../scenario/excel";
-import { assertionLabel, cellFromText, gridFromRows, kindLabel, KINDS, rowsFromGrid, shownColumns, type Grid } from "../scenario/model";
+import { assertionLabel, cellProblems, gridFromRows, kindLabel, KINDS, rowsFromGrid, shownColumns, type Grid } from "../scenario/model";
 import { PASTE_HELP, RowsGrid } from "../scenario/RowsGrid";
 import { useInTenant } from "../tenantScope";
 
@@ -188,7 +191,7 @@ export function ScenariosSection({ pipelineId, tenantId }: { pipelineId: string;
                         <RunStatusTag status={s.lastRun.status} />
                         {s.lastRun.total !== null && (
                           <span>
-                            {s.lastRun.passed} of {s.lastRun.total} passed
+                            {formatNumber(s.lastRun.passed)} of {formatNumber(s.lastRun.total)} passed
                           </span>
                         )}
                       </span>
@@ -208,7 +211,7 @@ export function ScenariosSection({ pipelineId, tenantId }: { pipelineId: string;
       </section>
       {!!suites.data?.length && (
         <section className="block">
-          <Title level="H2" size="H4">All scenarios together</Title>
+          <Title level="H2" size="H4">{suites.hasNextPage ? `All scenarios together: the latest ${formatNumber(suites.data.length)} runs` : "All scenarios together"}</Title>
           <p className="muted section-intro">
             Each time Run all was clicked, or a scan changed a step of this pipeline and its scenarios ran again on their own.
           </p>
@@ -237,10 +240,11 @@ export function ScenariosSection({ pipelineId, tenantId }: { pipelineId: string;
                 <TableCell>
                   <RunStatusTag status={s.status} />
                 </TableCell>
-                <TableCell horizontalAlign="End" className="mono">{s.passed === null || s.total === null ? "–" : `${s.passed} of ${s.total}`}</TableCell>
+                <TableCell horizontalAlign="End" className="mono">{s.passed === null || s.total === null ? "–" : `${formatNumber(s.passed)} of ${formatNumber(s.total)}`}</TableCell>
               </TableRow>
             ))}
           </Table>
+          <ShowOlder list={suites} what="runs of all scenarios" />
         </section>
       )}
     </>
@@ -260,8 +264,8 @@ export function ScenarioPage() {
   const inputs = useScenarioInputs(pipelineId);
   useInTenant(pipeline.data?.definition.tenantId);
 
-  if (scenarioId && !scenario.data) return scenario.isPending ? <Loading /> : <ErrorStrip error={scenario.error} />;
-  if (!pipeline.data || !inputs.data) return pipeline.isPending || inputs.isPending ? <Loading /> : <ErrorStrip error={pipeline.error ?? inputs.error} />;
+  if (scenarioId && !scenario.data) return scenario.isPending ? <Loading /> : <PageError error={scenario.error} what="scenario" />;
+  if (!pipeline.data || !inputs.data) return pipeline.isPending || inputs.isPending ? <Loading /> : <PageError error={pipeline.error ?? inputs.error} what="pipeline" />;
   return (
     <Builder
       // A saved scenario starts again from what was saved.
@@ -391,10 +395,8 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
   const compile = useScenarioCompile(pipelineId, settled.expect.length ? { ...settled, name: settled.name || "Unsaved scenario" } : undefined);
   const compiled = compile.data;
 
-  const invalidCells = Object.values(grids).reduce(
-    (n, g) => n + g.rows.reduce((m, r) => m + g.columns.filter((c) => cellFromText(r[c.name] ?? "", c.type).invalid).length, 0),
-    0,
-  );
+  const problems = useMemo(() => Object.fromEntries(Object.entries(grids).map(([key, g]) => [key, cellProblems(g)])), [grids]);
+  const invalidCells = Object.values(problems).reduce((n, p) => n + p.length, 0);
   const whyNotSave = !name.trim()
     ? "Give the scenario a name"
     : !expect.length
@@ -577,8 +579,12 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
                   disabled: remove.isPending,
                   onClick: () => {
                     if (window.confirm(`Delete the scenario "${saved.name}" and its runs? Nothing changes in Datasphere.`)) {
-                      leaving.current = true;
-                      remove.mutate(saved.id, { onSuccess: () => navigate(`/pipelines/${pipelineId}/scenarios`) });
+                      remove.mutate(saved.id, {
+                        onSuccess: () => {
+                          leaving.current = true;
+                          navigate(`/pipelines/${pipelineId}/scenarios`);
+                        },
+                      });
                     }
                   },
                 },
@@ -598,7 +604,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
           <Label for="scenario-name" required>
             Name
           </Label>
-          <Input id="scenario-name" value={name} readonly={!editable} placeholder="What this scenario shows, in a few words" onInput={(e) => setName(e.target.value)} />
+          <Input id="scenario-name" value={name} maxlength={SCENARIO_NAME_MAX} readonly={!editable} placeholder="What this scenario shows, in a few words" onInput={(e) => setName(e.target.value)} />
         </div>
         <div className="scenario-field">
           <Label for="scenario-kind">Kind</Label>
@@ -642,7 +648,23 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
                 ? "Claude is reading the pipeline's logic and working out what each step should give. This can take a minute or two."
                 : inputs.drafting
                   ? "Sends the description and the pipeline's definitions (names, columns and logic) to Claude, never the tenant's data."
-                  : "Drafting with Claude isn't set up yet: Ystara's operator enters an Anthropic API key on the operator panel."}
+                  : inputs.draftingOff === "account"
+                    ? "Drafting with Claude is off for this account. An admin can switch it on under Settings."
+                    : "Drafting with Claude isn't set up yet: Ystara's operator enters an Anthropic API key on the operator panel."}
+              {!drafting.isPending && !inputs.drafting && inputs.draftingOff === "account" && can("account.manage") && (
+                <>
+                  {" "}
+                  <Link
+                    href="/settings"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigate("/settings");
+                    }}
+                  >
+                    Open Settings
+                  </Link>
+                </>
+              )}
             </span>
           </div>
         )}
@@ -725,6 +747,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
                 pasteHelp={false}
               />
             )}
+            <CellProblems problems={problems[t.key] ?? []} />
           </div>
         ))}
         {shape.kept.map((f) => (
@@ -905,14 +928,17 @@ function NoteStrip({ note, onClose }: { note: Note; onClose: () => void }) {
   );
 }
 
-/** Hands the browser a file to save, as a download. */
-function saveFile(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = name.replace(/[\\/:*?"<>|]/g, "_");
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+/** Under a table's grid: which cells don't fit their column, so Save's reason can be found. The first ten, then how many more. */
+function CellProblems({ problems }: { problems: string[] }) {
+  if (!problems.length) return null;
+  return (
+    <ul className="cell-problems text-negative">
+      {problems.slice(0, 10).map((p) => (
+        <li key={p}>{p}</li>
+      ))}
+      {problems.length > 10 && <li>…and {formatNumber(problems.length - 10)} more</li>}
+    </ul>
+  );
 }
 
 function StepsTable({ steps }: { steps: ScenarioStepNote[] }) {
@@ -953,7 +979,7 @@ function RunsSection({ scenarioId }: { scenarioId: string }) {
   const time = formatDateTimesApart((runs.data ?? []).map((r) => r.requestedAt));
   return (
     <section className="block">
-      <Title level="H2" size="H4">{runs.data ? counted(runs.data.length, "run") : "Runs"}</Title>
+      <Title level="H2" size="H4">{runs.data ? countedLatest(runs.data.length, runs.hasNextPage, "run") : "Runs"}</Title>
       <ErrorStrip error={runs.error} />
       <Table
         loading={runs.isPending}
@@ -980,10 +1006,11 @@ function RunsSection({ scenarioId }: { scenarioId: string }) {
             <TableCell>
               <RunStatusTag status={r.status} />
             </TableCell>
-            <TableCell horizontalAlign="End" className="mono">{r.total === null ? "–" : `${r.passed} of ${r.total}`}</TableCell>
+            <TableCell horizontalAlign="End" className="mono">{r.total === null ? "–" : `${formatNumber(r.passed)} of ${formatNumber(r.total)}`}</TableCell>
           </TableRow>
         ))}
       </Table>
+      <ShowOlder list={runs} what="runs" />
     </section>
   );
 }
@@ -996,7 +1023,7 @@ export function ScenarioRunPage() {
   useInTenant(run.data?.tenantId);
 
   if (run.isPending) return <Loading />;
-  if (!run.data) return <ErrorStrip error={run.error} />;
+  if (!run.data) return <PageError error={run.error} what="scenario run" />;
   const r = run.data;
   const busy = r.status === "queued" || r.status === "running";
 
@@ -1014,7 +1041,7 @@ export function ScenarioRunPage() {
             <RunStatusTag status={r.status} />
             {r.total !== null && (
               <span>
-                {r.passed} of {counted(r.total, "check")} passed
+                {formatNumber(r.passed)} of {counted(r.total, "check")} passed
               </span>
             )}
             {r.requestedBy && <span>Asked for by {r.requestedBy}</span>}
@@ -1106,7 +1133,7 @@ export function ScenarioSuitePage() {
   useInTenant(suite.data?.tenantId);
 
   if (suite.isPending) return <Loading />;
-  if (!suite.data) return <ErrorStrip error={suite.error} />;
+  if (!suite.data) return <PageError error={suite.error} what="run of all scenarios" />;
   const s = suite.data;
   const busy = s.status === "queued" || s.status === "running";
   const errors = s.runs.some((r) => r.error);
@@ -1124,7 +1151,7 @@ export function ScenarioSuitePage() {
             <RunStatusTag status={s.status} />
             {s.runs.length > 0 && s.status !== "queued" && (
               <span>
-                {s.runs.filter((r) => r.status === "passed").length} of {counted(s.runs.length, "scenario")} passed
+                {formatNumber(s.runs.filter((r) => r.status === "passed").length)} of {counted(s.runs.length, "scenario")} passed
               </span>
             )}
             {s.cause === "scan" ? (

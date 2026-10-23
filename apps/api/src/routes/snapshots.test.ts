@@ -75,6 +75,8 @@ describe("snapshots", () => {
     const snapshot = res.json();
     expect(snapshot).toMatchObject({ pipelineId: pipeline.id, status: "queued", counts: { measured: 0, notMeasurable: 0, failed: 0 } });
     expect(sent).toEqual([{ name: JOBS.snapshot, data: { snapshotId: snapshot.id } }]);
+    const twice = await call("POST", `/pipelines/${pipeline.id}/snapshots`, coordinator);
+    expect([twice.statusCode, twice.json().error]).toEqual([409, expect.stringMatching(/^A snapshot of this pipeline is still being taken/)]);
 
     // As the worker leaves it.
     await startSnapshot(db, snapshot.id, null);

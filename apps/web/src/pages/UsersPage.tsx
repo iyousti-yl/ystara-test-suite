@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Button,
-  Dialog,
   Input,
   Label,
+  MessageStrip,
   Option,
   Select,
+  type SelectDomRef,
   Table,
   TableCell,
   TableHeaderCell,
@@ -15,9 +16,11 @@ import {
 } from "@ui5/webcomponents-react";
 import { ROLES, type Role, type SpaceScope } from "@ystara/shared";
 import { useCan, useChangeRole, useInvite, useMe, useRemoveMember, useRenameAccount, useTeam, useTeamSpaces, useWithdrawInvitation, type TeamJson } from "../api";
+import { Dialog } from "../components/Dialog";
 import { ErrorStrip, Loading, When } from "../components/Feedback";
 import { LinkToSend } from "../components/LinkToSend";
 import { MoreActions } from "../components/MoreActions";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
 import { RenameAccountDialog } from "../components/RenameAccountDialog";
 import { SpacesPicker, spacesLabel } from "../components/SpacesPicker";
@@ -44,16 +47,16 @@ export function UsersPage() {
     setRenaming(false);
     rename.reset();
   };
-  // A refused role change (e.g. the last admin) puts each Select back to the role the API has.
-  const [attempt, setAttempt] = useState(0);
+  // The role picked in a member's Select, waiting for the admin to confirm it, and that Select, to put back on Cancel.
+  const [changing, setChanging] = useState<{ member: TeamJson["members"][number]; role: Role }>();
+  const changedSelect = useRef<SelectDomRef>(null);
+  const cancelChange = () => {
+    if (changing && changedSelect.current) changedSelect.current.value = changing.member.role;
+    setChanging(undefined);
+    changeRole.reset();
+  };
 
-  if (!can("users.manage")) {
-    return (
-      <div className="page">
-        <ErrorStrip error={new Error("Only admins can manage users and roles.")} />
-      </div>
-    );
-  }
+  if (!can("users.manage")) return <PageError heading="You can't open Users and roles" sentence="Only admins of the account manage its users and roles." />;
 
   return (
     <div className="page">
@@ -69,7 +72,7 @@ export function UsersPage() {
           </>
         }
       />
-      <ErrorStrip error={changeRole.error ?? remove.error ?? withdraw.error ?? team.error} />
+      <ErrorStrip error={remove.error ?? withdraw.error ?? team.error} />
       {team.isPending ? (
         <Loading />
       ) : (
@@ -101,12 +104,13 @@ export function UsersPage() {
                   </TableCell>
                   <TableCell>
                     <Select
-                      key={`${m.role}-${attempt}`}
+                      key={m.role}
                       value={m.role}
                       accessibleName={`Role of ${m.email}`}
-                      onChange={(e) =>
-                        changeRole.mutate({ userId: m.userId, role: e.detail.selectedOption.value as Role }, { onSettled: () => setAttempt((n) => n + 1) })
-                      }
+                      onChange={(e) => {
+                        changedSelect.current = e.target;
+                        setChanging({ member: m, role: e.detail.selectedOption.value as Role });
+                      }}
                     >
                       {ROLES.map((r) => (
                         <Option key={r} value={r}>
@@ -196,6 +200,18 @@ export function UsersPage() {
       )}
       {inviting && <InviteDialog onClose={() => setInviting(false)} />}
       {limiting && <SpacesDialog member={limiting} onClose={() => setLimiting(undefined)} />}
+      {changing && (
+        <ChangeRoleDialog
+          email={changing.member.email}
+          from={changing.member.role}
+          to={changing.role}
+          yourself={changing.member.userId === me.user.id}
+          pending={changeRole.isPending}
+          error={changeRole.error}
+          onChange={() => changeRole.mutate({ userId: changing.member.userId, role: changing.role }, { onSuccess: () => setChanging(undefined) })}
+          onCancel={cancelChange}
+        />
+      )}
       {renaming && (
         <RenameAccountDialog
           current={me.account.name}
@@ -219,7 +235,6 @@ function InviteDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog
-      open
       headerText={invite.data ? "Send this link" : "Invite someone"}
       onClose={onClose}
       footer={
@@ -290,7 +305,6 @@ function SpacesDialog({ member, onClose }: { member: TeamJson["members"][number]
 
   return (
     <Dialog
-      open
       headerText={`Spaces of ${member.email}`}
       onClose={onClose}
       footer={
@@ -344,5 +358,48 @@ function ResetNote({ resets }: { resets: TeamJson["members"][number]["signInRese
       )}
       {resets.length > 1 && ` (${resets.length} in 30 days)`}
     </div>
+  );
+}
+
+/** What the new role allows, before it is given: it takes effect at once, on the member's next request. */
+function ChangeRoleDialog(props: {
+  email: string;
+  from: Role;
+  to: Role;
+  yourself: boolean;
+  pending: boolean;
+  error: Error | null;
+  onChange: () => void;
+  onCancel: () => void;
+}) {
+  const who = props.yourself ? "your role" : `the role of ${props.email}`;
+  return (
+    <Dialog
+      headerText={`Change ${who} to ${ROLE_LABEL[props.to]}?`}
+      onClose={props.onCancel}
+      footer={
+        <div className="dialog-footer">
+          <Button design="Emphasized" disabled={props.pending} onClick={props.onChange}>
+            Change role
+          </Button>
+          <Button design="Transparent" onClick={props.onCancel}>
+            Cancel
+          </Button>
+        </div>
+      }
+    >
+      <div className="dialog-body">
+        <p>
+          {ROLE_LABEL[props.from]} becomes {ROLE_LABEL[props.to]}: {ROLE_SUMMARY[props.to].charAt(0).toLowerCase() + ROLE_SUMMARY[props.to].slice(1)}
+        </p>
+        <p className="muted">It takes effect at once, in every browser {props.yourself ? "you are" : "they are"} signed in to.</p>
+        {props.yourself && props.from === "admin" && (
+          <MessageStrip design="Critical" hideCloseButton>
+            You won&apos;t be able to manage users and roles here any more. Another admin can give the role back.
+          </MessageStrip>
+        )}
+        <ErrorStrip error={props.error} />
+      </div>
+    </Dialog>
   );
 }

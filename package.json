@@ -29,6 +29,8 @@
     "db:demo": "tsc -b && tsx tools/db/load-demo.ts",
     "account:create": "tsc -b && tsx tools/db/create-account.ts",
     "operator:grant": "tsc -b && tsx tools/db/operator-grant.ts",
+    "user:erase": "tsc -b && tsx tools/db/erase-user.ts",
+    "account:delete": "tsc -b && tsx tools/db/delete-account.ts",
     "check:browser": "tsc -b && tsx tools/check/browser.ts",
     "check:tenant-content": "tsc -b && tsx tools/check/tenant-content.ts"
   },

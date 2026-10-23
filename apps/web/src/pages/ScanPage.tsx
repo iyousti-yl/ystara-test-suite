@@ -19,8 +19,9 @@ import { useNavigate, useParams } from "react-router";
 import { pipelineQuery, usePipelines, useScan, useScanGraph } from "../api";
 import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading, ScanStatusTag } from "../components/Feedback";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
-import { formatDateTime } from "../format";
+import { counted, formatDateTime, formatNumber } from "../format";
 import { typeColor, typeLabel } from "../objectTypes";
 import { useInTenant } from "../tenantScope";
 
@@ -35,7 +36,7 @@ export function ScanPage() {
   const graph = useScanGraph(scanId, scan.data?.status === "succeeded");
 
   if (scan.isPending) return <Loading />;
-  if (!scan.data) return <ErrorStrip error={scan.error} />;
+  if (!scan.data) return <PageError error={scan.error} what="scan" />;
   const s = scan.data;
 
   return (
@@ -50,7 +51,7 @@ export function ScanPage() {
             {s.finishedAt && <span>Finished {formatDateTime(s.finishedAt)}</span>}
             {s.objectCount !== null && (
               <span>
-                {s.objectCount} objects, {s.edgeCount} links
+                {counted(s.objectCount, "object")}, {counted(s.edgeCount ?? 0, "link")}
               </span>
             )}
           </span>
@@ -65,12 +66,12 @@ export function ScanPage() {
       )}
       {s.warnings.length > 0 && (
         <MessageStrip design="Critical" hideCloseButton className="block">
-          {s.warnings.length} {s.warnings.length === 1 ? "object" : "objects"} could not be read or understood; the lineage may miss links to them.
+          {counted(s.warnings.length, "object")} could not be read or understood; the lineage may miss links to them.
           <ul className="warnings">
             {s.warnings.slice(0, 20).map((w) => (
               <li key={w}>{w}</li>
             ))}
-            {s.warnings.length > 20 && <li>…and {s.warnings.length - 20} more</li>}
+            {s.warnings.length > 20 && <li>…and {formatNumber(s.warnings.length - 20)} more</li>}
           </ul>
         </MessageStrip>
       )}
@@ -122,10 +123,10 @@ function ObjectList({ scanId, tenantId, graph }: { scanId: string; tenantId: str
         <Title level="H2" size="H4">Objects</Title>
         <SegmentedButton onSelectionChange={(e) => setFilter(e.detail.selectedItems[0]?.dataset.filter as Filter)}>
           <SegmentedButtonItem data-filter="outputs" selected={filter === "outputs"}>
-            Likely outputs ({outputs.length})
+            Likely outputs ({formatNumber(outputs.length)})
           </SegmentedButtonItem>
           <SegmentedButtonItem data-filter="all" selected={filter === "all"}>
-            All ({rows.length})
+            All ({formatNumber(rows.length)})
           </SegmentedButtonItem>
         </SegmentedButton>
         <Select onChange={(e) => setType(e.detail.selectedOption.dataset.type ?? "")} accessibleName="Type">

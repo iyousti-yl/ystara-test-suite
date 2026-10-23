@@ -8,9 +8,15 @@
 # shell or in .env (the only settings .env may hold: Compose reads that file and can print its values;
 # app settings live in .env.local). The API and the worker need the key file .master-key (see README).
 
+# The image is tagged with YSTARA_VERSION (deploy/compose sets it to the checkout's commit on a server), so an
+# earlier version's image stays on the machine to go back to. The containers keep no privileges they don't
+# need, can't gain any, and run with a small init that passes on signals and reaps child processes.
 x-app: &app
-  image: ystara:dev
+  image: ystara:${YSTARA_VERSION:-dev}
   pull_policy: never # built once, by the migrate service below
+  init: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
 
 services:
   postgres:
@@ -34,7 +40,10 @@ services:
   migrate:
     <<: *app
     pull_policy: build
-    build: .
+    build:
+      context: .
+      args:
+        YSTARA_VERSION: ${YSTARA_VERSION:-dev}
     command: ["node", "packages/db/dist/run-migrations.js"]
     environment:
       DATABASE_URL: postgres://ystara:ystara@postgres:5432/ystara
@@ -54,6 +63,16 @@ services:
       YSTARA_TRUST_PROXY: ${YSTARA_TRUST_PROXY:-}
     ports:
       - "127.0.0.1:${YSTARA_API_PORT:-4000}:4000"
+    # The API writes nothing to disk: its files can't be changed, and /tmp is in memory.
+    read_only: true
+    tmpfs: [/tmp]
+    # Healthy once it answers and reaches the database (GET /api/health); Caddy waits for that on a server.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     # Only the key, not .env.local: the API needs nothing else from it here.
     secrets: [master_key]
     depends_on:
@@ -68,6 +87,10 @@ services:
   worker:
     <<: *app
     command: ["node", "apps/worker/dist/main.js"]
+    # On a stop, the worker finishes the jobs it is on for up to 45 seconds (apps/worker/src/main.ts) before it is killed.
+    stop_grace_period: 60s
+    # The Datasphere CLI's files for each job (its login, its command list) are in memory, gone at a restart.
+    tmpfs: [/tmp]
     environment:
       DATABASE_URL: postgres://ystara:ystara@postgres:5432/ystara
       MASTER_KEY_FILE: /run/secrets/master_key

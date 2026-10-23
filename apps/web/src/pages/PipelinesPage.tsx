@@ -6,6 +6,7 @@ import { monoColumnWidth } from "../columns";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorStrip, HealthTag, Loading, When } from "../components/Feedback";
 import { healthOf, NextStep } from "../components/Health";
+import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
 import { SpacesNote } from "../components/SpacesPicker";
 import { formatNumber } from "../format";
@@ -34,7 +35,7 @@ export function PipelinesPage() {
   const scanned = scans.data?.find((s) => s.status === "succeeded");
 
   if (tenant.isPending) return <Loading />;
-  if (!tenant.data) return <ErrorStrip error={tenant.error} />;
+  if (!tenant.data) return <PageError error={tenant.error} what="tenant" />;
 
   const byId = new Map(summaries.data?.map((s) => [s.pipelineId, s]));
   const rows: Row[] = (pipelines.data ?? [])
@@ -44,6 +45,13 @@ export function PipelinesPage() {
     })
     .sort((a, b) => rank(a.health?.state) - rank(b.health?.state) || a.pipeline.name.localeCompare(b.pipeline.name));
   const counts = HEALTH_STATES.map((state) => [state, rows.filter((r) => r.health?.state === state).length] as const).filter(([, n]) => n > 0);
+  // Two pipelines on one output are usually one saved twice (with other writers left out, or by two people).
+  const onOutput = new Map<string, string[]>();
+  for (const p of pipelines.data ?? []) {
+    const key = `${p.output.space}.${p.output.technicalName}`;
+    onOutput.set(key, [...(onOutput.get(key) ?? []), p.name]);
+  }
+  const sameOutputAs = (p: PipelineDefinitionJson) => (onOutput.get(`${p.output.space}.${p.output.technicalName}`) ?? []).filter((name) => name !== p.name);
 
   const newPipeline = can("pipelines.write") && (
     <Button
@@ -102,17 +110,18 @@ export function PipelinesPage() {
           onRowClick={(e) => navigate(`/pipelines/${e.detail.row.rowKey}`)}
           headerRow={
             <TableHeaderRow>
-              <TableHeaderCell minWidth="15rem" importance={1}>
+              {/* The sentence is what the board is for: the other columns keep a fixed width and leave it the room. */}
+              <TableHeaderCell minWidth="18rem" importance={1}>
                 Status
               </TableHeaderCell>
               {/* As wide as the longest output, so a technical name stays on one line where the table has room. */}
               <TableHeaderCell minWidth={monoColumnWidth(pipelines.data?.map((p) => `${p.output.space}.${p.output.technicalName}`) ?? [], 18)} importance={1}>
                 Pipeline
               </TableHeaderCell>
-              <TableHeaderCell minWidth="7rem">Scenarios</TableHeaderCell>
-              <TableHeaderCell minWidth="9rem">Last snapshot</TableHeaderCell>
-              <TableHeaderCell minWidth="8rem">Sign-off</TableHeaderCell>
-              <TableHeaderCell minWidth="8rem">Next snapshot</TableHeaderCell>
+              <TableHeaderCell width="8rem">Scenarios</TableHeaderCell>
+              <TableHeaderCell width="9rem">Last snapshot</TableHeaderCell>
+              <TableHeaderCell width="10rem">Sign-off</TableHeaderCell>
+              <TableHeaderCell width="9rem">Next snapshot</TableHeaderCell>
             </TableHeaderRow>
           }
         >
@@ -133,11 +142,16 @@ export function PipelinesPage() {
                 <div className="board-name">
                   <span>
                     {p.name}
-                    {s?.watching && <Icon name="bell" className="board-watching" showTooltip accessibleName="You get its alerts" />}
+                    {s?.watching && (
+                      <span title="You watch it: you get its alerts by email">
+                        <Icon name="bell" className="board-watching" accessibleName="You watch it: you get its alerts by email" />
+                      </span>
+                    )}
                   </span>
                   <span className="mono muted wrap-anywhere">
                     {p.output.space}.{p.output.technicalName}
                   </span>
+                  {sameOutputAs(p).length > 0 && <span className="text-attention">Same output as {sameOutputAs(p).join(", ")}</span>}
                 </div>
               </TableCell>
               <TableCell>{s ? scenarios(s) : "–"}</TableCell>
@@ -175,10 +189,20 @@ function scenarios(s: PipelineSummaryJson): string {
 function signOff(s: PipelineSummaryJson | undefined) {
   const o = s?.signOff;
   if (!o) return <span className="muted">Not signed off</span>;
-  const text = o.verdict === "rejected" ? "Rejected" : o.outdated ? "Approval outdated" : "Approved";
+  if (o.verdict === "approved" && o.outdated) {
+    // Approved earlier, but not what the board shows now: say since what.
+    return (
+      <div className="board-name">
+        <span className="text-attention">Approval outdated</span>
+        <span className="muted">
+          Approved <When iso={o.signedAt} />, before {o.outdatedBy === "result" ? "a later result" : "a scan that changed it"}
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="board-name">
-      <span className={o.verdict === "rejected" || o.outdated ? "text-attention" : undefined}>{text}</span>
+      <span className={o.verdict === "rejected" ? "text-attention" : undefined}>{o.verdict === "rejected" ? "Rejected" : "Approved"}</span>
       <When iso={o.signedAt} />
     </div>
   );

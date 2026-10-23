@@ -3,16 +3,18 @@ import cookie from "@fastify/cookie";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import PgBoss from "pg-boss";
 import { ZodError } from "zod";
-import { assertYstaraDatabase, connect, databaseUrl, type Db } from "@ystara/db";
+import { assertMasterKey, assertYstaraDatabase, connect, databaseUrl, lastHeartbeat, type Db, type Queryable } from "@ystara/db";
 import { postToTeams, ROLES, type PostToTeams } from "@ystara/shared";
-import { loadLocalEnv } from "@ystara/shared/env";
+import { appVersion, loadLocalEnv } from "@ystara/shared/env";
 import { masterKeyFromEnv, secretBox, type SecretBox } from "@ystara/shared/secrets";
 import { installAudit } from "./audit.js";
 import { installAccess } from "./auth/access.js";
+import { PasswordCheckBusy } from "./auth/passwords.js";
 import { checkClaudeKey, claudeDrafter, currentClaudeKey, keyFromEnv, type ClaudeAccess, type ScenarioDrafter } from "./drafting.js";
 import { auditRoutes } from "./routes/audit.js";
 import { authRoutes } from "./routes/auth.js";
@@ -50,8 +52,12 @@ import { teamsRoutes } from "./routes/teams.js";
 
 /** Where background jobs go: pg-boss in the running app, a list in tests. */
 export interface JobQueue {
-  send(name: string, data: object): Promise<unknown>;
+  /** With `tx`, the job is sent on that transaction: it exists only if the row it works on is saved too. */
+  send(name: string, data: object, tx?: Queryable): Promise<unknown>;
 }
+
+/** A worker that took no tick for this long is reported as silent by /api/health/worker. */
+const WORKER_SILENT_MS = 3 * 60_000;
 
 export interface ServerOptions {
   logger?: boolean;
@@ -111,15 +117,32 @@ export async function buildServer(
   // A count of proxies: believe the forwarded addresses up to that many hops back (what Fastify does with a number,
   // which its types don't take).
   const { trustProxy = false } = opts;
-  const app = Fastify({ logger, trustProxy: typeof trustProxy === "number" ? (_address: string, hop: number) => hop < trustProxy : trustProxy });
+  const app = Fastify({
+    logger,
+    trustProxy: typeof trustProxy === "number" ? (_address: string, hop: number) => hop < trustProxy : trustProxy,
+    // Each request gets an id of its own (never one a client sends), in the log and in the X-Request-Id answer header,
+    // so "something went wrong" from a customer can be found in the log.
+    genReqId: () => randomUUID(),
+    requestIdHeader: false,
+  });
+  app.addHook("onSend", async (req, reply) => {
+    reply.header("x-request-id", req.id);
+    // The app uses no camera, microphone, location or payment, so no page of it (or anything injected into one) may.
+    reply.header("permissions-policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
+    // API answers hold account data: no browser or proxy keeps a copy.
+    if (req.url.startsWith("/api/") && !reply.hasHeader("cache-control")) reply.header("cache-control", "no-store");
+  });
   // An empty JSON body is no body: scripts often send `content-type: application/json` on a DELETE. Any other
   // body is parsed as Fastify does by default, refusing __proto__ and constructor keys.
   const json = app.getDefaultJsonParser("error", "error");
   app.removeContentTypeParser("application/json");
   app.addContentTypeParser("application/json", { parseAs: "string" }, (req, body: string, done) => (body === "" ? done(null, undefined) : json(req, body, done)));
   await app.register(cookie);
-  // Only routes that ask for it are limited (sign-in, codes, invitation links).
-  await app.register(rateLimit, { global: false });
+  // Only routes that ask for it are limited (sign-in, codes, invitation links, drafting). The answer says when to try again.
+  await app.register(rateLimit, {
+    global: false,
+    errorResponseBuilder: (_req, limit) => Object.assign(new Error(`Too many tries in a short time. Try again in ${limit.after}.`), { statusCode: limit.statusCode }),
+  });
   await app.register(helmet, {
     contentSecurityPolicy: {
       directives: {
@@ -134,11 +157,17 @@ export async function buildServer(
     },
   });
 
-  app.setErrorHandler((err: FastifyError | ZodError, _req, reply) => {
+  app.setErrorHandler((err: FastifyError | ZodError, req, reply) => {
     if (err instanceof ZodError) return reply.code(400).send({ error: "Invalid request", issues: err.issues });
+    if (err instanceof PasswordCheckBusy) return reply.code(503).header("retry-after", "5").send({ error: err.message });
     if (err.code === "23505") return reply.code(409).send({ error: "That name is already taken" }); // unique_violation
+    if (err.statusCode && err.statusCode < 500) {
+      reply.log.info({ err }, "request refused");
+      return reply.code(err.statusCode).send({ error: err.message });
+    }
     reply.log.error(err);
-    return reply.code(err.statusCode ?? 500).send({ error: err.statusCode ? err.message : "Internal error" });
+    // Nothing of the cause reaches the browser; the id finds it in the log.
+    return reply.code(500).send({ error: `Something went wrong on Ystara's side. If it happens again, give Ystara's support this reference: ${req.id}`, requestId: req.id });
   });
 
   await app.register(
@@ -146,8 +175,18 @@ export async function buildServer(
       installAccess(api, deps.db);
       installAudit(api, deps.db);
       const open = { config: { access: "public" } } as const;
-      api.get("/health", open, async () => ({ status: "ok", service: "ystara-api", time: new Date().toISOString() }));
-      api.get("/meta", open, async () => ({ roles: ROLES, version: process.env.npm_package_version ?? "dev" }));
+      // For Docker's health check and an uptime monitor: the API answers and reaches its database (503 when it can't).
+      api.get("/health", open, async (_req, reply) => {
+        const database = await reachable(deps.db);
+        return reply.code(database ? 200 : 503).send({ status: database ? "ok" : "unavailable", service: "ystara-api", version: appVersion(), database: database ? "ok" : "unreachable", time: new Date().toISOString() });
+      });
+      // For the uptime monitor: a worker takes jobs (it took the once-a-minute tick lately). 503 when none did for 3 minutes.
+      api.get("/health/worker", open, async (_req, reply) => {
+        const beat = await lastHeartbeat(deps.db).catch(() => undefined);
+        const working = !!beat && Date.now() - beat.seenAt.getTime() < WORKER_SILENT_MS;
+        return reply.code(working ? 200 : 503).send({ status: working ? "ok" : "silent", lastSeenAt: beat?.seenAt ?? null, version: beat?.version ?? null });
+      });
+      api.get("/meta", open, async () => ({ roles: ROLES, version: appVersion() }));
       await api.register(authRoutes(deps.db, deps.secrets));
       await api.register(teamRoutes(deps.db));
       await api.register(operatorRoutes(deps.db, deps.secrets, claude));
@@ -182,6 +221,14 @@ export async function buildServer(
   return app;
 }
 
+/** Whether the database answers within 3 seconds. */
+async function reachable(db: Db): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), 3000)));
+  const answered = db.query("select 1").then(() => true, () => false);
+  return Promise.race([answered, late]).finally(() => clearTimeout(timer));
+}
+
 // pathToFileURL keeps this check working on Windows (C:\... vs file:///C:/...).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   loadLocalEnv(fileURLToPath(new URL("../../../", import.meta.url)));
@@ -189,8 +236,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const trustProxy = trustProxyFromEnv(); // and so does a bad YSTARA_TRUST_PROXY
 
   const url = databaseUrl();
-  const db = connect(url);
+  // No request needs a statement longer than 30 seconds; one that runs longer is stopped instead of holding a connection.
+  const db = connect(url, { application: "ystara-api", statementTimeoutMs: 30_000 });
   await assertYstaraDatabase(db); // before pg-boss creates its own tables in someone else's database
+  await assertMasterKey(db, secrets); // a wrong key would fail every sign-in code later, one by one
   // The API only sends jobs: the once-a-minute schedule tick is sent by the workers, so none piles up while no worker runs.
   const boss = new PgBoss({ connectionString: url, schedule: false });
   boss.on("error", (err) => console.error("[api] queue error", err));
@@ -198,7 +247,24 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
   const claude = { fromEnvironment: keyFromEnv(), check: checkClaudeKey };
-  const app = await buildServer({ db, queue: boss, secrets, claude }, { webRoot: existsSync(webRoot) ? webRoot : undefined, trustProxy });
+  const queue: JobQueue = {
+    send: (name, data, tx) => boss.send(name, data, tx ? { db: { executeSql: (text: string, values: unknown[]) => tx.query(text, values) } } : {}),
+  };
+  const app = await buildServer({ db, queue, secrets, claude }, { webRoot: existsSync(webRoot) ? webRoot : undefined, trustProxy });
   if (claude.fromEnvironment) app.log.info("Drafting scenarios with Claude uses this server's ANTHROPIC_API_KEY");
   await app.listen({ port: Number(process.env.YSTARA_API_PORT ?? 4000), host: process.env.API_HOST ?? "127.0.0.1" });
+  app.log.info({ version: appVersion() }, "started");
+
+  // A deploy stops the API with SIGTERM: it takes no new request, lets those under way finish (10 seconds at most),
+  // then closes its connections. Caddy holds requests meanwhile and sends them to the new API (lb_try_duration).
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, async () => {
+      app.log.info({ signal }, "stopping");
+      setTimeout(() => process.exit(0), 10_000).unref();
+      await app.close();
+      await boss.stop({ graceful: false, wait: true });
+      await db.close();
+      process.exit(0);
+    });
+  }
 }

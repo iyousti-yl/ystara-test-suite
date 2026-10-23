@@ -74,6 +74,20 @@ export async function listAuditEvents(db: Queryable, q: AuditQuery): Promise<Aud
   });
 }
 
+/** How many times an account did `action` since `since`: drafting with Claude counts its drafts of the day this way. */
+export async function countAuditEvents(db: Queryable, q: { accountId: string; action: string; since: Date }): Promise<number> {
+  const { rows } = await db.query<{ n: number }>("select count(*)::int as n from audit_events where account_id = $1 and action = $2 and at >= $3", [q.accountId, q.action, q.since]);
+  return rows[0]!.n;
+}
+
+/** The accounts an operator event concerns, so each sees it in its own log: the account itself, or each one the user belongs to. */
+export async function accountsConcerned(db: Queryable, target: AuditTarget): Promise<string[]> {
+  if (target.kind === "account") return [target.id];
+  if (target.kind !== "user") return [];
+  const { rows } = await db.query<{ account_id: string }>("select account_id from memberships where user_id = $1", [target.id]);
+  return rows.map((r) => r.account_id);
+}
+
 /** The emails that appear in an account's log, for the Audit page's filter. */
 export async function auditUserEmails(db: Queryable, accountId: string): Promise<string[]> {
   const { rows } = await db.query<{ user_email: string }>(

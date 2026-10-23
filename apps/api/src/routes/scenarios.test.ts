@@ -141,7 +141,16 @@ describe("drafting a scenario with Claude", () => {
     const post = (url: string, as: TestUser, payload: object) => withClaude.inject({ method: "POST", url: `/api${url}`, headers: { cookie: as.cookie }, payload });
     try {
       const pipeline = await pipelineOf("Drafted");
-      expect((await withClaude.inject({ method: "GET", url: `/api/pipelines/${pipeline.id}/scenario-inputs`, headers: { cookie: viewer.cookie } })).json().drafting).toBe(true);
+      const inputs = () => withClaude.inject({ method: "GET", url: `/api/pipelines/${pipeline.id}/scenario-inputs`, headers: { cookie: viewer.cookie } }).then((r) => r.json());
+      // The server has a key, but the account's admin hasn't agreed to send definitions to Anthropic yet.
+      expect(await inputs()).toMatchObject({ drafting: false, draftingOff: "account" });
+      const off = await post(`/pipelines/${pipeline.id}/scenario-draft`, coordinator, { description: "Closed rows are left out." });
+      expect([off.statusCode, off.json().error]).toEqual([409, expect.stringMatching(/^Drafting with Claude is off for this account. An admin can switch it on under Settings/)]);
+      const settings = (as: TestUser, draftingWithClaude: boolean) => withClaude.inject({ method: "PUT", url: "/api/account/settings", headers: { cookie: as.cookie }, payload: { draftingWithClaude } });
+      expect((await settings(coordinator, true)).statusCode).toBe(403);
+      expect((await settings(admin, true)).json()).toEqual({ draftingWithClaude: true });
+      expect(await inputs()).toMatchObject({ drafting: true });
+      expect((await inputs()).draftingOff).toBeUndefined();
       expect((await post(`/pipelines/${pipeline.id}/scenario-draft`, viewer, { description: "Closed rows are left out." })).statusCode).toBe(403);
       expect((await post(`/pipelines/${pipeline.id}/scenario-draft`, stranger, { description: "Closed rows are left out." })).statusCode).toBe(404);
       expect((await post(`/pipelines/${pipeline.id}/scenario-draft`, coordinator, { description: "  " })).json().issues[0].message).toBe("Describe the scenario first");
@@ -161,6 +170,16 @@ describe("drafting a scenario with Claude", () => {
       expect([declined.statusCode, declined.json().error]).toEqual([502, "Claude declined to draft this scenario."]);
       answer = "unreachable";
       expect((await post(`/pipelines/${pipeline.id}/scenario-draft`, coordinator, { description: "Closed rows are left out." })).json().error).toMatch(/^Claude couldn't be reached/);
+
+      // 50 drafts a day per account: the one above, and 49 more.
+      const { rows } = await db.query<{ account_id: string }>("select account_id from tenants where id = $1", [pipeline.tenantId]);
+      await db.query("insert into audit_events (account_id, action) select $1, 'POST /pipelines/:id/scenario-draft' from generate_series(1, 49)", [rows[0]!.account_id]);
+      answer = "draft";
+      const capped = await post(`/pipelines/${pipeline.id}/scenario-draft`, admin, { description: "Closed rows are left out." }); // the coordinator used their 5 a minute
+
+      expect([capped.statusCode, capped.json().error]).toEqual([429, expect.stringMatching(/^This account drafted 50 scenarios with Claude in the last 24 hours/)]);
+      expect(briefs).toHaveLength(3);
+      await settings(admin, false);
     } finally {
       await withClaude.close();
     }
@@ -242,6 +261,11 @@ describe("running all of a pipeline's scenarios", () => {
       ["Open rows", "queued"],
     ]);
     expect(sent).toEqual([{ name: JOBS.scenarioSuite, data: { suiteId: suite.id } }]);
+    // One at a time: the same scenarios again would only repeat the first.
+    const twice = await call("POST", `/pipelines/${pipeline.id}/scenario-suites`, coordinator);
+    expect([twice.statusCode, twice.json().error]).toEqual([409, "This pipeline's scenarios are still running. Run them again once they have finished."]);
+    // A page at a time: older than the oldest is nothing.
+    expect((await call("GET", `/pipelines/${pipeline.id}/scenario-suites?before=${encodeURIComponent(suite.requestedAt)}`, viewer)).json()).toEqual([]);
 
     expect((await call("GET", `/pipelines/${pipeline.id}/scenario-suites`, viewer)).json()).toEqual([expect.objectContaining({ id: suite.id, cause: "manual", total: 2 })]);
     expect((await call("GET", `/scenario-suites/${suite.id}`, viewer)).json()).toMatchObject({ id: suite.id, pipelineName: "Run all" });

@@ -148,7 +148,25 @@ describe("signing off a pipeline", () => {
     const state: SignOffState = (await call("GET", `/pipelines/${pipeline.id}/signoffs`, viewer)).json();
     expect(state.changedSince).toEqual([{ space: "S", technicalName: "V_OUT", type: "sql_view", change: "definition" }]);
     const board: PipelineSummary[] = (await call("GET", `/tenants/${pipeline.tenantId}/pipeline-summaries`, viewer)).json();
-    expect(board.find((s) => s.pipelineId === pipeline.id)?.signOff).toMatchObject({ verdict: "approved", outdated: true });
+    expect(board.find((s) => s.pipelineId === pipeline.id)?.signOff).toMatchObject({ verdict: "approved", outdated: true, outdatedBy: "scan" });
+    expect(state.outdatedBy).toBe("scan");
+  });
+
+  it("says when a result that came in after an approval contradicts it", async () => {
+    const pipeline = await pipelineOf("Emptied");
+    await snapshotOf(pipeline, 4);
+    await call("POST", `/pipelines/${pipeline.id}/signoffs`, coordinator, { verdict: "approved" });
+    await db.query("update pipeline_signoffs set signed_at = now() - interval '1 minute' where pipeline_id = $1", [pipeline.id]);
+    const before: SignOffState = (await call("GET", `/pipelines/${pipeline.id}/signoffs`, viewer)).json();
+    expect(before.outdatedBy).toBeNull();
+
+    await snapshotOf(pipeline, 0); // the output is empty now
+    const after: SignOffState = (await call("GET", `/pipelines/${pipeline.id}/signoffs`, viewer)).json();
+    expect(after.outdatedBy).toBe("result");
+    const board: PipelineSummary[] = (await call("GET", `/tenants/${pipeline.tenantId}/pipeline-summaries`, viewer)).json();
+    const row = board.find((s) => s.pipelineId === pipeline.id)!;
+    expect(row.signOff).toMatchObject({ verdict: "approved", outdated: true, outdatedBy: "result" });
+    expect(pipelineHealth(row).state).toBe("empty");
   });
 });
 

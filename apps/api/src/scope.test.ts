@@ -10,6 +10,7 @@ import {
   createSnapshot,
   createTenant,
   saveScanResult,
+  setConnection,
   setDatabaseUser,
   watchPipeline,
   watcherEmails,
@@ -162,6 +163,29 @@ describe("a member limited to some spaces", () => {
     expect((await call("GET", `/scans/${scanId}/objects/STOCK/V_ITEMS?within=STOCK.V_ITEMS`, sales)).statusCode).toBe(404);
     expect((await call("GET", `/scans/${scanId}/pipeline?output=STOCK.V_ITEMS`, sales)).statusCode).toBe(404);
     expect((await call("GET", `/scans/${scanId}/pipeline?output=SALES.V_ORDERS`, sales)).statusCode).toBe(200);
+  });
+
+  it("sees only their spaces in the list of scans, with their warnings only, and a failure's cause left to an admin", async () => {
+    const stockOnly = await createScan(db, tenant.id, ["STOCK"], "import");
+    const both = await createScan(db, tenant.id, ["SALES", "STOCK"], "import");
+    const warnings = JSON.stringify(["STOCK.V_ITEMS (view): its definition couldn't be read", "SALES: could not list the space's tables"]);
+    for (const id of [stockOnly.id, both.id]) {
+      await db.query("update scans set status = 'failed', error = 'The tenant answered 403 for STOCK.V_ITEMS', warnings = $2::jsonb, finished_at = now() where id = $1", [id, warnings]);
+    }
+    const scans = async (as: TestUser) => (await call("GET", `/tenants/${tenant.id}/scans`, as)).json() as { id: string; spaces: string[]; warnings: string[]; error: string | null }[];
+    const mine = await scans(sales);
+    expect(mine.map((s) => s.id)).not.toContain(stockOnly.id);
+    expect(mine.find((s) => s.id === both.id)).toMatchObject({ spaces: ["SALES"], warnings: ["SALES: could not list the space's tables"], error: "The scan failed. An admin can see why on this page." });
+    expect((await call("GET", `/scans/${stockOnly.id}`, sales)).statusCode).toBe(404);
+    expect((await scans(admin)).find((s) => s.id === both.id)).toMatchObject({ spaces: ["SALES", "STOCK"], error: "The tenant answered 403 for STOCK.V_ITEMS" });
+  });
+
+  it("sees only their spaces in the tenant's technical client", async () => {
+    await setConnection(db, { tenantId: tenant.id, clientId: "synthetic-client", sealedSecret: "v1.sealed", tokenUrl: "https://synthetic.authentication.eu10.hana.ondemand.com/oauth/token", spaces: ["SALES", "STOCK"], updatedBy: null });
+    const spaces = async (as: TestUser) => ((await call("GET", `/tenants/${tenant.id}/connection`, as)).json().connection.spaces as { space: string }[]).map((s) => s.space);
+    expect(await spaces(sales)).toEqual(["SALES"]);
+    expect(await spaces(everyone)).toEqual(["SALES", "STOCK"]);
+    await db.query("delete from tenant_connections where tenant_id = $1", [tenant.id]);
   });
 
   it("can't scan, or save a pipeline in, another space, nor change the tenant's scan schedule", async () => {

@@ -6,6 +6,7 @@ import {
   Menu,
   MenuItem,
   MenuSeparator,
+  MessageStrip,
   NavigationLayout,
   ShellBar,
   ShellBarBranding,
@@ -36,6 +37,8 @@ import { setThemePreference, THEME_PREFERENCES, useThemePreference, type ThemePr
  */
 export function AppFrame({ me, children }: { me: Me; children: ReactNode }) {
   const layout = useRef<NavigationLayoutDomRef>(null);
+  // Here rather than in the user menu, which has closed by the time a switch fails: the page says so.
+  const switchAccount = useSwitchAccount();
   // The avatar the user menu opens from, and the button the tenant menu opens from, while open.
   const [userMenuFor, setUserMenuFor] = useState<HTMLElement>();
   const [tenantMenuFor, setTenantMenuFor] = useState<HTMLElement>();
@@ -51,24 +54,35 @@ export function AppFrame({ me, children }: { me: Me; children: ReactNode }) {
         header={<TopBar me={me} onMenu={toggleMenu} onTenantMenu={setTenantMenuFor} onUserMenu={setUserMenuFor} />}
         sideContent={<AppMenu me={me} />}
       >
-        <main className="app-main">{children}</main>
+        <main className="app-main">
+          {switchAccount.error && (
+            <MessageStrip design="Negative" className="frame-strip" onClose={() => switchAccount.reset()}>
+              Ystara couldn&apos;t switch accounts: {switchAccount.error.message}
+            </MessageStrip>
+          )}
+          {children}
+        </main>
       </NavigationLayout>
       {/* Popovers: outside the layout, whose slots take only the bar, the menu and the page. */}
       <TenantMenu opener={tenantMenuFor} onClose={() => setTenantMenuFor(undefined)} />
-      <AccountMenu me={me} opener={userMenuFor} onClose={() => setUserMenuFor(undefined)} />
+      <AccountMenu me={me} switchAccount={switchAccount} opener={userMenuFor} onClose={() => setUserMenuFor(undefined)} />
     </>
   );
 }
 
 /** The apps, and which one an address belongs to: scans are Discovery's; pipelines, snapshots, scenarios and their runs Pipelines'. */
-type App = "home" | "discovery" | "pipelines" | "connection" | "database-users" | "tenants" | "users" | "alerts" | "audit" | "operator";
+type App = "home" | "discovery" | "pipelines" | "connection" | "database-users" | "tenants" | "users" | "settings" | "security" | "audit" | "operator";
+
+/** The pages of the account or of the user rather than of a tenant. */
+const ACCOUNT_APPS = new Set<App>(["users", "settings", "security", "audit", "operator"]);
 
 function appOf(pathname: string): App | undefined {
   const [first, , app] = pathname.split("/").filter(Boolean);
   if (first === "tenants") return pathname === "/tenants" ? "tenants" : ((app as App | undefined) ?? "home");
   if (first === "scans") return "discovery";
   if (first === "pipelines" || first === "snapshots" || first === "scenarios" || first === "scenario-runs" || first === "scenario-suites") return "pipelines";
-  if (first === "users" || first === "alerts" || first === "audit" || first === "operator") return first;
+  if (first === "alerts") return "settings";
+  if (ACCOUNT_APPS.has(first as App)) return first as App;
   return undefined;
 }
 
@@ -107,7 +121,7 @@ function AppMenu({ me, slot }: { me: Me; slot?: string }) {
         <>
           <SideNavigationItem icon="it-system" text="Tenants" data-to="/tenants" selected={app === "tenants"} />
           {me.permissions.includes("users.manage") && <SideNavigationItem icon="group" text="Users and roles" data-to="/users" selected={app === "users"} />}
-          {me.permissions.includes("account.manage") && <SideNavigationItem icon="bell" text="Alerts" data-to="/alerts" selected={app === "alerts"} />}
+          {me.permissions.includes("account.manage") && <SideNavigationItem icon="settings" text="Settings" data-to="/settings" selected={app === "settings"} />}
           {me.permissions.includes("audit.read") && <SideNavigationItem icon="history" text="Audit log" data-to="/audit" selected={app === "audit"} />}
           {me.operator && <SideNavigationItem icon="action-settings" text="Operator" data-to="/operator" selected={app === "operator"} />}
         </>
@@ -181,11 +195,11 @@ function TopBar(props: { me: Me; slot?: string; onMenu: () => void; onTenantMenu
   );
 }
 
-/** The accounts to switch between, light or dark, and signing out. */
-function AccountMenu({ me, opener, onClose }: { me: Me; opener?: HTMLElement; onClose: () => void }) {
+/** The accounts to switch between, the user's password and browsers, light or dark, and signing out. */
+function AccountMenu(props: { me: Me; switchAccount: ReturnType<typeof useSwitchAccount>; opener?: HTMLElement; onClose: () => void }) {
+  const { me, switchAccount, opener, onClose } = props;
   const navigate = useNavigate();
   const signOut = useSignOut();
-  const switchAccount = useSwitchAccount();
   const theme = useThemePreference();
   return (
     <UserMenu
@@ -194,8 +208,9 @@ function AccountMenu({ me, opener, onClose }: { me: Me; opener?: HTMLElement; on
       showOtherAccounts={me.accounts.length > 1}
       onClose={onClose}
       onItemClick={(e) => {
-        const picked = e.detail.item.dataset.theme;
+        const { theme: picked, to } = e.detail.item.dataset;
         if (picked) setThemePreference(picked as ThemePreference);
+        if (to) navigate(to);
       }}
       onSignOutClick={() =>
         signOut.mutate(undefined, {
@@ -204,7 +219,10 @@ function AccountMenu({ me, opener, onClose }: { me: Me; opener?: HTMLElement; on
       }
       onChangeAccount={(e) => {
         const accountId = e.detail.selectedAccount.dataset.accountId;
-        if (accountId && accountId !== me.account.id) switchAccount.mutate(accountId, { onSuccess: () => navigate("/") });
+        if (accountId && accountId !== me.account.id) {
+          switchAccount.reset();
+          switchAccount.mutate(accountId, { onSuccess: () => navigate("/") });
+        }
       }}
       // The account worked in first; the others are listed under "Other accounts".
       accounts={[...me.accounts]
@@ -221,6 +239,7 @@ function AccountMenu({ me, opener, onClose }: { me: Me; opener?: HTMLElement; on
           />
         ))}
     >
+      <UserMenuItem icon="key" text="Sign-in and security" data-to="/security" />
       <UserMenuItem icon="palette" text="Appearance" showSelection>
         <UserMenuItemGroup checkMode="Single">
           {THEME_PREFERENCES.map((t) => (
@@ -272,7 +291,7 @@ function TenantMenu({ opener, onClose }: { opener?: HTMLElement; onClose: () => 
         if (!picked) return;
         const app = appOf(pathname);
         // The admin pages show no tenant: the pick only changes the menu. Every other page opens on the picked tenant, which picks it.
-        if (app === "users" || app === "alerts" || app === "operator") pick(picked);
+        if (app && ACCOUNT_APPS.has(app)) pick(picked);
         else navigate(appPath(app === undefined || app === "tenants" ? "home" : app, picked));
       }}
     >
