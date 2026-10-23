@@ -122,8 +122,11 @@ export function AuditPage() {
               <TableCell>{formatDateTime(e.at)}</TableCell>
               <TableCell className="wrap-anywhere">{e.userEmail ?? <span className="muted">A user since deleted</span>}</TableCell>
               <TableCell>
-                <div>{e.label}</div>
-                <Target event={e} />
+                {/* One block: the cell lays its children side by side, which ran a short label into its target. */}
+                <div>
+                  <div>{e.label}</div>
+                  <Target event={e} />
+                </div>
               </TableCell>
               <TableCell className="wrap-anywhere">{details(e.detail)}</TableCell>
               <TableCell className="mono">{e.ip ?? "–"}</TableCell>
@@ -188,7 +191,9 @@ export function details(detail: Record<string, unknown> | null): string {
           : Array.isArray(value)
             ? value.join(", ") || "none"
             : typeof value === "object"
-              ? JSON.stringify(value)
+              ? "space" in value && "technicalName" in value
+                ? `${String(value.space)}.${String(value.technicalName)}`
+                : JSON.stringify(value)
               : key === "role" && String(value) in ROLE_LABEL
                 ? ROLE_LABEL[value as keyof typeof ROLE_LABEL]
                 : key === "kind"

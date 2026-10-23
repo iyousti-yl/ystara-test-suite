@@ -381,7 +381,7 @@ export async function loadDemo(
       const onPipeline = { kind: "pipeline" as const, id: pipeline.id, name: pipeline.name, tenantId: tenant.id };
       const events: [string, typeof onTenant | typeof onPipeline | null, Record<string, unknown> | null][] = [
         ["POST /tenants", null, { name: tenant.name, host: null }],
-        ["POST /tenants/:id/pipelines", onTenant, { name: pipeline.name, output }],
+        ["POST /tenants/:id/pipelines", onTenant, { name: pipeline.name, output: refKey(output) }],
         ["PUT /pipelines/:id/schedule", onPipeline, { cron, timeZone }],
         ["POST /pipelines/:id/scenarios", onPipeline, { name: scenario.name, kind: DEMO_SCENARIO.kind }],
         ["POST /pipelines/:id/scenario-suites", onPipeline, null],

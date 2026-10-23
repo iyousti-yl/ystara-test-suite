@@ -177,7 +177,8 @@ describe("invitation links", () => {
     expect((await call("GET", `/invitations/${token}`)).json().existingUser).toBe(true);
     expect((await call("POST", `/invitations/${token}/authenticator`)).statusCode).toBe(409);
     expect((await call("POST", `/invitations/${token}/accept`, { payload: {} })).json().error).toMatch(/Sign in as consultant@example.com/);
-    expect((await call("POST", `/invitations/${token}/accept`, { payload: {}, cookie: stranger.cookie })).statusCode).toBe(401);
+    // 409, not 401: the stranger is signed in all right, so the page must not say their sign-in ended.
+    expect((await call("POST", `/invitations/${token}/accept`, { payload: {}, cookie: stranger.cookie })).statusCode).toBe(409);
 
     const joined = await call("POST", `/invitations/${token}/accept`, { payload: {}, cookie: consultant.cookie });
     expect(joined.json()).toMatchObject({ account: { name: "Customer two" }, role: "viewer" });
