@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Button, Input, Label, MessageStrip, Panel } from "@ui5/webcomponents-react";
+import { Button, Input, Label, Panel } from "@ui5/webcomponents-react";
 import { DATABASE_HOST_HINT, databaseUserProblem, databaseUserSpace, isDatabaseHost } from "@ystara/shared";
 import { useCan, useCheckDatabaseUser, useDatabaseUsers, useRemoveDatabaseUser, useSetDatabaseUser, type DatabaseUserJson } from "../api";
 import { Dialog } from "../components/Dialog";
 import { EmptyState } from "../components/EmptyState";
 import { ConnectionStatusTag, ErrorStrip, Loading } from "../components/Feedback";
+import { InfoButton, QuietNote } from "../components/Info";
 import { MoreActions } from "../components/MoreActions";
 import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
@@ -39,7 +40,16 @@ export function DatabaseUsersPage() {
     <div className="page">
       <PageHeader
         title="Database users"
-        subtitle="Snapshots measure the data of a space with SQL, through a database user of that space with read access only."
+        subtitle={
+          <>
+            Read-only database users, one per space, that snapshots and scenarios send their SQL through.
+            {host && (
+              <InfoButton label="What a database user sees">
+                Such a user sees only the views exposed for consumption, so those are the steps a snapshot can measure.
+              </InfoButton>
+            )}
+          </>
+        }
         actions={
           host &&
           can("tenant.connect") &&
@@ -50,13 +60,7 @@ export function DatabaseUsersPage() {
           )
         }
       />
-      {host ? (
-        <p className="muted page-intro">Such a user sees only the views exposed for consumption, so those are the steps a snapshot can measure.</p>
-      ) : (
-        <MessageStrip design="Information" hideCloseButton>
-          This tenant only has imported scans, so there is no database to read.
-        </MessageStrip>
-      )}
+      {!host && <QuietNote>This tenant only has imported scans, so there is no database to read.</QuietNote>}
       <ErrorStrip error={users.error ?? check.error ?? remove.error} />
       {!host ? null : users.isPending ? (
         <Loading />
@@ -146,20 +150,24 @@ function UserVerdict({ user: u }: { user: DatabaseUserJson }) {
   if (u.status === "checking") {
     return <p className="muted">The worker is signing in with this user and listing what it sees. This section refreshes on its own.</p>;
   }
+  // A line each, not a banner: a tenant can have a user per space, and each would get one.
   if (u.status === "failed") {
     return (
-      <MessageStrip design="Negative" hideCloseButton className="block">
-        The check failed, so snapshots can&apos;t use this user.
+      <>
+        <QuietNote tone="error">The check failed, so snapshots can&apos;t use this user.</QuietNote>
         {u.error && <pre className="cli-output">{u.error}</pre>}
-      </MessageStrip>
+      </>
     );
   }
   if (u.visible?.length === 0) {
     return (
-      <MessageStrip design="Critical" hideCloseButton className="block">
-        This user signs in but sees nothing in {u.space}: none of its views is exposed for consumption yet. A Datasphere modeler can switch on Expose for
-        Consumption in a view&apos;s properties. Ystara never changes the tenant.
-      </MessageStrip>
+      <QuietNote
+        tone="warn"
+        moreLabel="How a view gets exposed"
+        more="A Datasphere modeler can switch on Expose for Consumption in a view's properties. Ystara never changes the tenant."
+      >
+        It signs in but sees nothing in {u.space}: none of its views is exposed for consumption yet.
+      </QuietNote>
     );
   }
   return null;

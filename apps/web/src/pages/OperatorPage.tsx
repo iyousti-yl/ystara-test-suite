@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Input, Label, MessageStrip, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Title } from "@ui5/webcomponents-react";
+import { Button, Input, Label, Table, TableCell, TableHeaderCell, TableHeaderRow, TableRow, Tag, Title } from "@ui5/webcomponents-react";
 import type { Json, UserOverview } from "@ystara/shared";
 import {
   useAccountOverviews,
@@ -14,6 +14,7 @@ import {
 } from "../api";
 import { Dialog } from "../components/Dialog";
 import { ErrorStrip, Loading } from "../components/Feedback";
+import { InfoButton, QuietNote } from "../components/Info";
 import { LinkToSend } from "../components/LinkToSend";
 import { MoreActions } from "../components/MoreActions";
 import { PageHeader } from "../components/PageHeader";
@@ -195,11 +196,16 @@ function ClaudeSection() {
   const s = setting.data;
   return (
     <section className="block">
-      <Title level="H2" size="H4">Drafting scenarios with Claude</Title>
-      <p className="muted section-intro">
-        With an Anthropic API key, the scenario builder drafts test rows and checks from a scenario&apos;s description. Each draft sends the description and
-        the pipeline&apos;s definitions (object and column names, types and each step&apos;s SQL) to Anthropic, never tenant data, and is paid on this key.
-      </p>
+      <span className="title-with-info">
+        <Title level="H2" size="H4">
+          Drafting scenarios with Claude
+        </Title>
+        <InfoButton label="About drafting with Claude">
+          With an Anthropic API key, the scenario builder drafts test rows and checks from a scenario&apos;s description. Each draft sends the description and
+          the pipeline&apos;s definitions (object and column names, types and each step&apos;s SQL) to Anthropic, never tenant data, and is paid on this key.
+          Each account&apos;s admins switch it on for their account under Settings.
+        </InfoButton>
+      </span>
       <ErrorStrip error={setting.error ?? setKey.error} />
       {s && (
         <p>
@@ -211,9 +217,7 @@ function ClaudeSection() {
         </p>
       )}
       {setKey.isSuccess && setKey.variables !== null && (
-        <MessageStrip design="Positive" className="block" onClose={() => setKey.reset()}>
-          Anthropic accepted the key. It is kept sealed and isn&apos;t shown again.
-        </MessageStrip>
+        <QuietNote tone="ok">Anthropic accepted the key. It is kept sealed and isn&apos;t shown again.</QuietNote>
       )}
       <div className="claude-key">
         <Label for="claude-key">{s?.operatorKey ? "Replace the key" : "Anthropic API key"}</Label>

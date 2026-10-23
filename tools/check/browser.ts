@@ -4,7 +4,10 @@
  * and warnings, uncaught exceptions, Content-Security-Policy violations,
  * requests to any other site, failed API calls, pages wider than the
  * window, text a box cuts off, technical names broken mid-word in a column
- * too narrow for them, and lineage nodes the minimap covers when the picture opens. Every page and width gets a screenshot, and a page taller than the
+ * too narrow for them, lineage nodes the minimap covers when the picture opens,
+ * and a page that says too much: more than one notice (a message strip) at a
+ * time, or a line of help that runs over three lines on a wide window (the
+ * rest of it belongs behind an (i)). Every page and width gets a screenshot, and a page taller than the
  * window one more per screenful. It only opens pages: it clicks nothing and
  * changes nothing in the app.
  *
@@ -71,7 +74,7 @@ class Stop extends Error {}
 
 /** One thing worth a look on one page at one width. */
 interface Problem {
-  kind: "console" | "exception" | "csp" | "outside-request" | "http" | "request-failed" | "overflow" | "clipped" | "broken-name" | "covered";
+  kind: "console" | "exception" | "csp" | "outside-request" | "http" | "request-failed" | "overflow" | "clipped" | "broken-name" | "covered" | "crowded" | "wordy";
   detail: string;
 }
 interface PageResult {
@@ -258,6 +261,39 @@ async function check(context: BrowserContext, target: PageToOpen, width: number,
       .map((n) => n.querySelector(".lineage-node-name")?.textContent ?? "a node");
   });
   for (const name of covered) problems.push({ kind: "covered", detail: `the lineage minimap covers ${name} when the picture opens` });
+  // Calm pages: one notice at a time, and help in a line or two (more goes behind an (i), components/Info.tsx).
+  const notices = await page.evaluate(
+    () => [...document.querySelectorAll(".app-main ui5-message-strip")].filter((el) => el.getBoundingClientRect().height > 0 && !el.closest("ui5-dialog")).length,
+  );
+  if (notices > 1) problems.push({ kind: "crowded", detail: `${notices} notices (message strips) show at once: keep one, and make the others a quiet line or an (i)` });
+  if (width >= 1024) {
+    const wordy = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>(".app-main p.muted, .app-main .section-intro, .app-main .page-header-subtitle")]
+        .filter((el) => !el.closest("ui5-dialog, ui5-popover"))
+        .filter((el) => {
+          // Lines of text, not the box's height: an empty chart's note sits in a tall box.
+          // Pieces less than half a line apart, such as a status tag beside text, share a line.
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const half = (parseFloat(getComputedStyle(el).lineHeight) || 20) / 2;
+          const tops = [...range.getClientRects()]
+            .filter((r) => r.width > 0 && r.height > 0)
+            .map((r) => r.top)
+            .sort((a, b) => a - b);
+          let lines = 0;
+          let last = -Infinity;
+          for (const top of tops) {
+            if (top - last > half) {
+              lines++;
+              last = top;
+            }
+          }
+          return lines > 3;
+        })
+        .map((el) => el.textContent?.trim().slice(0, 60) ?? ""),
+    );
+    for (const text of wordy) problems.push({ kind: "wordy", detail: `"${text}…" runs over three lines: say it in one, and put the rest behind an (i)` });
+  }
 
   const screenshot = path.join(outDir, `${target.label}@${width}${values.dark ? "-dark" : ""}.png`);
   await page.screenshot({ path: screenshot, fullPage: true });
@@ -365,6 +401,21 @@ async function discoverPages(cookie: string, who: { role: string; operator: bool
       }
       const [suite] = await get<ScenarioSuiteSummary[]>(`/pipelines/${pipeline.id}/scenario-suites`);
       if (suite) add("scenario-suite", `/scenario-suites/${suite.id}`);
+    }
+    // And the pipeline with the most to warn about (tables with several loaders, loops), where a page gets crowded first.
+    const warned = await Promise.all(
+      candidates
+        .filter((c) => c !== chosen)
+        .map(async (c) => {
+          const res = await fetch(`${base}/api/pipelines/${c.pipeline.id}`, { headers: { cookie } });
+          const body = res.ok ? ((await res.json()) as { pipeline: { ambiguousWriters: unknown[]; cycles: unknown[]; steps: unknown[] } }) : undefined;
+          return { pipeline: c.pipeline, warnings: body ? body.pipeline.ambiguousWriters.length + body.pipeline.cycles.length : -1, steps: body?.pipeline.steps.length ?? 0 };
+        }),
+    );
+    const busiest = warned.filter((w) => w.warnings > 0).sort((a, b) => b.warnings - a.warnings || b.steps - a.steps)[0];
+    if (busiest) {
+      add("busy-pipeline", `/pipelines/${busiest.pipeline.id}`);
+      add("busy-scenario-new", `/pipelines/${busiest.pipeline.id}/scenarios/new`);
     }
   }
   if (who.role === "admin") pages.push({ label: "users", path: "/users", signedIn: true });

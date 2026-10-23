@@ -5,6 +5,7 @@ import { emailDelivery, teamsDelivery } from "../alerts";
 import { useSchedule, useSnapshot, useSnapshots, type SnapshotJson } from "../api";
 import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading, ScanStatusTag, ShowOlder } from "../components/Feedback";
+import { InfoButton } from "../components/Info";
 import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
 import { counted, countedLatest, formatDateTime, formatDateTimesApart, formatExact, formatNumber, formatSeconds } from "../format";
@@ -43,7 +44,7 @@ export function SnapshotsSection({ pipelineId, canTake }: { pipelineId: string; 
         onRowClick={(e) => navigate(`/snapshots/${e.detail.row.rowKey}`)}
         headerRow={
           <TableHeaderRow>
-            <TableHeaderCell minWidth="13rem" importance={1}>
+            <TableHeaderCell minWidth="15rem" importance={1}>
               Taken
             </TableHeaderCell>
             <TableHeaderCell minWidth="8rem" importance={1}>
@@ -112,23 +113,21 @@ export function SnapshotPage() {
           </span>
         }
       />
-      {s.error && (
-        <MessageStrip design="Negative" hideCloseButton className="block">
-          {s.error}
-        </MessageStrip>
+      {/* An alert already says the snapshot failed, and why: one notice, not two. */}
+      {s.alert ? (
+        <AlertStrip alert={s.alert} pipelineId={s.pipelineId} snapshotId={s.id} />
+      ) : (
+        s.error && (
+          <MessageStrip design="Negative" hideCloseButton className="block">
+            {s.error}
+          </MessageStrip>
+        )
       )}
-      {s.alert && <AlertStrip alert={s.alert} pipelineId={s.pipelineId} snapshotId={s.id} />}
       {(s.status === "queued" || s.status === "running") && (
         <p className="muted">The worker is measuring the steps the database users can see. This page refreshes on its own.</p>
       )}
 
-      {measured.length > 0 && (
-        <MessageStrip design="Information" hideCloseButton className="block">
-          Min and max are stored only as a fingerprint, a hash made with this tenant&apos;s secret in its own database, never as the value. So is the sum
-          of an object with fewer than 10 rows. Equal fingerprints mean equal values, which is what a comparison of two snapshots needs.
-        </MessageStrip>
-      )}
-      {measured.map((o) => (
+      {measured.map((o, i) => (
         <section className="block" key={`${o.space}.${o.technicalName}`}>
           <Title level="H2" size="H4">
             <span className="mono wrap-anywhere">{o.technicalName}</span>
@@ -137,7 +136,7 @@ export function SnapshotPage() {
             {typeLabel(o.type)}: {counted(o.rows ?? 0, "row")}, {counted(o.columns?.length ?? 0, "column")}
             {o.tookMs !== null && <>, measured in {formatSeconds(o.tookMs)}</>}
           </p>
-          <ColumnsTable columns={o.columns ?? []} />
+          <ColumnsTable columns={o.columns ?? []} explain={i === 0} />
         </section>
       ))}
       <section className="block">
@@ -209,8 +208,11 @@ function Fingerprint({ hash, what }: { hash: string | null | undefined; what: st
   return <Icon name="locked" className="fingerprint" showTooltip accessibleName={`${what}: kept only as the fingerprint ${hash.slice(0, 8)}…, never as the value`} />;
 }
 
-/** On a narrow screen the type goes under the column name first, then the measures from the right. The name and the sum keep their width. */
-function ColumnsTable({ columns }: { columns: ColumnMeasures[] }) {
+/**
+ * On a narrow screen the type goes under the column name first, then the measures from the right. The name and the sum keep their width.
+ * `explain`: the (i) on Min that says why min and max are locks, on the page's first table only.
+ */
+function ColumnsTable({ columns, explain }: { columns: ColumnMeasures[]; explain?: boolean }) {
   return (
     <Table
       overflowMode="Popin"
@@ -229,7 +231,17 @@ function ColumnsTable({ columns }: { columns: ColumnMeasures[] }) {
             Distinct
           </TableHeaderCell>
           <TableHeaderCell minWidth="7rem" horizontalAlign="End">
-            Min
+            {explain ? (
+              <span className="title-with-info">
+                Min
+                <InfoButton label="Why min and max are locks">
+                  Min and max are stored only as a fingerprint, a hash made with this tenant&apos;s secret in its own database, never as the value. So is the
+                  sum of an object with fewer than 10 rows. Equal fingerprints mean equal values, which is all a comparison of two snapshots needs.
+                </InfoButton>
+              </span>
+            ) : (
+              "Min"
+            )}
           </TableHeaderCell>
           <TableHeaderCell minWidth="7rem" horizontalAlign="End">
             Max

@@ -18,6 +18,7 @@ import {
   listTenants,
   loadGraph,
   loadObject,
+  setIgnoredLoaders,
   setScanSchedule,
   watchPipeline,
   type Db,
@@ -98,6 +99,7 @@ const PipelineInput = z.object({
   output: objectRef.refine((o) => o.includes("."), "Use SPACE.NAME"),
   excludeWriters: patterns.default([]),
 });
+const IgnoredLoaders = z.object({ excludeWriters: patterns }).strict();
 const PipelineQuery = z.object({
   output: objectRef,
   excludeWriter: z.union([z.string(), z.array(z.string())]).optional(),
@@ -281,6 +283,14 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
         return reply.code(409).send({ error: `${space}.${technicalName} is not in the latest scan`, scanId: scan.id, definition });
       }
       return { definition, ...computed };
+    });
+
+    // The loaders a saved pipeline ignores, changed in place: saving the pipeline again from a scan would make a second one.
+    app.put("/pipelines/:id/ignored-loaders", { config: { access: "pipelines.write" } }, async (req, reply) => {
+      const definition = await own.pipeline(req, id.parse(req.params).id);
+      if (!definition) return reply.code(404).send({ error: "Pipeline not found" });
+      const { excludeWriters } = IgnoredLoaders.parse(req.body);
+      return await setIgnoredLoaders(db, definition.id, [...new Set(excludeWriters)]);
     });
 
     app.delete("/pipelines/:id", { config: { access: "pipelines.write" } }, async (req, reply) => {

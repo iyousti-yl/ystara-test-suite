@@ -1,4 +1,5 @@
-import { Button, MessageStrip, Panel, Tag, Text, Title } from "@ui5/webcomponents-react";
+import type { ReactNode } from "react";
+import { Button, Icon, MessageStrip, Panel, Tag, Text, Title } from "@ui5/webcomponents-react";
 import { refKey, type DspObjectRef } from "@ystara/shared";
 import { useObject } from "../api";
 import { typeColor, typeLabel } from "../objectTypes";
@@ -14,7 +15,7 @@ export function ObjectPanel(props: {
   node: LineageNode;
   /** The pipeline's output (SPACE.NAME): its steps open whatever spaces the member is limited to. */
   within: string;
-  /** Present when exclusions can be changed here (trying a pipeline, not a saved one). */
+  /** Present when exclusions can be changed here (trying a pipeline, or a saved one by someone who may change it). */
   onExclude?: () => void;
   onFollow?: () => void;
   onShowPipeline?: () => void;
@@ -43,16 +44,8 @@ export function ObjectPanel(props: {
         {node.measurement?.measurable && <Tag design="Information">Snapshots can measure it</Tag>}
       </div>
       {node.measurement && !node.measurement.measurable && <Text className="muted">{whyNotMeasurable(node.measurement.reason, ref)}</Text>}
-      {node.severalWriters && (
-        <MessageStrip design="Critical" hideCloseButton>
-          Several flows load this table, and all of them were followed. Select the loader that belongs to another process and ignore it.
-        </MessageStrip>
-      )}
-      {node.inLoop && (
-        <MessageStrip design="Negative" hideCloseButton>
-          This object is part of a loop, so the order of the steps around it can't be determined.
-        </MessageStrip>
-      )}
+      {node.severalWriters && <PanelNote>Several flows load this table, and all of them were followed. Select the one of another process and ignore it.</PanelNote>}
+      {node.inLoop && <PanelNote>Part of a loop: the order of the steps around it can&apos;t be worked out, and a scenario can&apos;t run through it.</PanelNote>}
 
       <div className="object-panel-actions">
         {onExclude && node.competingWriter && !node.excluded && (
@@ -88,6 +81,16 @@ export function ObjectPanel(props: {
         {details.isPending ? <Text>Loading…</Text> : <pre className="mono">{JSON.stringify(details.data?.object.definition, null, 2)}</pre>}
       </Panel>
     </aside>
+  );
+}
+
+/** Something to check about the object, in a quiet line with a warning mark. */
+function PanelNote({ children }: { children: ReactNode }) {
+  return (
+    <p className="panel-note">
+      <Icon name="message-warning" className="panel-note-icon" />
+      <span>{children}</span>
+    </p>
   );
 }
 

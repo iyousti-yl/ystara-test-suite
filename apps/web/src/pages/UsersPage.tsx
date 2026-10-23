@@ -331,7 +331,7 @@ function SpacesDialog({ member, onClose }: { member: TeamJson["members"][number]
 }
 
 /**
- * The latest sign-in reset Ystara's operator made for a member, in one short line; every reset
+ * The latest sign-in reset Ystara's operator made for a member, in a few words; every reset
  * of the last 30 days, with its times, on hover.
  */
 function ResetNote({ resets }: { resets: TeamJson["members"][number]["signInResets"] }) {
@@ -354,9 +354,8 @@ function ResetNote({ resets }: { resets: TeamJson["members"][number]["signInRese
           Reset link waiting, made <When iso={latest.madeAt} />
         </>
       ) : (
-        "Reset link not used, no longer valid"
+        "Reset link expired"
       )}
-      {resets.length > 1 && ` (${resets.length} in 30 days)`}
     </div>
   );
 }

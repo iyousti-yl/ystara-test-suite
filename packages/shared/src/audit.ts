@@ -77,6 +77,7 @@ export const AUDIT_ACTIONS: Record<string, AuditAction | null> = {
   // Pipelines
   "POST /tenants/:id/pipelines": { label: "Saved a pipeline", group: "Pipelines", target: tenant, fields: ["name", "output", "excludeWriters"] },
   "DELETE /pipelines/:id": { label: "Deleted the pipeline", group: "Pipelines", target: pipeline },
+  "PUT /pipelines/:id/ignored-loaders": { label: "Changed the ignored loaders", group: "Pipelines", target: pipeline, fields: ["excludeWriters"] },
   "PUT /pipelines/:id/watch": { label: "Started watching the pipeline", group: "Pipelines", target: pipeline },
   "DELETE /pipelines/:id/watch": { label: "Stopped watching the pipeline", group: "Pipelines", target: pipeline },
   "POST /pipelines/:id/signoffs": { label: "Signed off the pipeline", group: "Pipelines", target: pipeline, fields: ["verdict", "comment"] },

@@ -60,6 +60,7 @@ import { emailDelivery, teamsDelivery } from "../alerts";
 import { monoColumnWidth } from "../columns";
 import { ErrorStrip, Loading, ShowOlder } from "../components/Feedback";
 import { EmptyState } from "../components/EmptyState";
+import { Fold, InfoButton, QuietNote } from "../components/Info";
 import { MoreActions } from "../components/MoreActions";
 import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
@@ -132,7 +133,17 @@ export function ScenariosSection({ pipelineId, tenantId }: { pipelineId: string;
     <>
       <section className="block">
         <div className="list-toolbar section-toolbar">
-          <Title level="H2" size="H4">{scenarios.data ? counted(scenarios.data.length, "scenario") : "Scenarios"}</Title>
+          <span className="title-with-info">
+            <Title level="H2" size="H4">
+              {scenarios.data ? counted(scenarios.data.length, "scenario") : "Scenarios"}
+            </Title>
+            {!empty && (
+              <InfoButton label="About scenarios">
+                A scenario gives test rows to the pipeline&apos;s tables and says what to expect at its steps. It runs on those rows only, compiled from the
+                definitions of the latest scan: nothing is written to the tenant and none of its data is read.
+              </InfoButton>
+            )}
+          </span>
           {!empty && can("runs.execute") && (
             <Button
               icon="media-play"
@@ -153,10 +164,6 @@ export function ScenariosSection({ pipelineId, tenantId }: { pipelineId: string;
           </EmptyState>
         ) : (
           <>
-            <p className="muted section-intro">
-              A scenario gives test rows to the pipeline&apos;s tables and says what to expect at its steps. It runs on those rows only, compiled from the
-              definitions of the latest scan: nothing is written to the tenant and none of its data is read.
-            </p>
             <Table
               loading={scenarios.isPending}
               overflowMode="Popin"
@@ -211,10 +218,14 @@ export function ScenariosSection({ pipelineId, tenantId }: { pipelineId: string;
       </section>
       {!!suites.data?.length && (
         <section className="block">
-          <Title level="H2" size="H4">{suites.hasNextPage ? `All scenarios together: the latest ${formatNumber(suites.data.length)} runs` : "All scenarios together"}</Title>
-          <p className="muted section-intro">
-            Each time Run all was clicked, or a scan changed a step of this pipeline and its scenarios ran again on their own.
-          </p>
+          <span className="title-with-info">
+            <Title level="H2" size="H4">
+              {suites.hasNextPage ? `All scenarios together: the latest ${formatNumber(suites.data.length)} runs` : "All scenarios together"}
+            </Title>
+            <InfoButton label="About runs of all scenarios">
+              Each time Run all was clicked, or a scan changed a step of this pipeline and its scenarios ran again on their own.
+            </InfoButton>
+          </span>
           <Table
             overflowMode="Popin"
             onRowClick={(e) => navigate(`/scenario-suites/${e.detail.row.rowKey}`)}
@@ -373,6 +384,8 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
   const [editing, setEditing] = useState<{ expectation: number; assertion: number } | { checkpoint: string } | undefined>();
   // Tables whose grid shows every column, not only the keys and those the pipeline reads.
   const [allColumns, setAllColumns] = useState<Record<string, boolean>>({});
+  // Tables opened or folded by hand; the others are open when they have rows (or are the only table).
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
   const [drafted, setDrafted] = useState<{ notes: string[]; problems: string[] }>();
   const [rowsNote, setRowsNote] = useState<Note>();
   const [fileNote, setFileNote] = useState<Note>();
@@ -464,6 +477,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
     setGrids(next.grids);
     setExpect(next.expect);
     setShape({ tables: next.tables, kept: next.kept, tags: next.tags });
+    setOpened({});
     setEditing(undefined);
     // What an earlier upload or draft said is about rows that are gone now.
     setRowsNote(undefined);
@@ -568,7 +582,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
           { label: props.pipelineName, to: `/pipelines/${pipelineId}/scenarios` },
         ]}
         title={saved ? saved.name : "New scenario"}
-        subtitle="Test rows for the pipeline's tables and what each step should give for them, compiled on the latest successful scan."
+        subtitle="Made-up rows for the pipeline's input tables, and what its steps should give for them."
         actions={
           <MoreActions
             actions={[
@@ -593,11 +607,6 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
         }
       />
       <ErrorStrip error={save.error ?? run.error ?? remove.error} />
-      {saved && whyNoRun && can("runs.execute") && (
-        <MessageStrip design="Information" hideCloseButton>
-          {whyNoRun}
-        </MessageStrip>
-      )}
 
       <section className="block scenario-about">
         <div className="scenario-field">
@@ -615,7 +624,6 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
               </Option>
             ))}
           </Select>
-          <span className="muted">{KINDS.find((k) => k.kind === kind)?.hint}</span>
         </div>
         <div className="scenario-field scenario-field-wide">
           <Label for="scenario-description">Description</Label>
@@ -645,12 +653,12 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
             </Button>
             <span className="muted">
               {drafting.isPending
-                ? "Claude is reading the pipeline's logic and working out what each step should give. This can take a minute or two."
+                ? "Claude is reading the pipeline's logic. This can take a minute or two."
                 : inputs.drafting
-                  ? "Sends the description and the pipeline's definitions (names, columns and logic) to Claude, never the tenant's data."
+                  ? ""
                   : inputs.draftingOff === "account"
-                    ? "Drafting with Claude is off for this account. An admin can switch it on under Settings."
-                    : "Drafting with Claude isn't set up yet: Ystara's operator enters an Anthropic API key on the operator panel."}
+                    ? "Off for this account."
+                    : "Not set up yet: Ystara's operator adds an API key on the operator panel."}
               {!drafting.isPending && !inputs.drafting && inputs.draftingOff === "account" && can("account.manage") && (
                 <>
                   {" "}
@@ -666,6 +674,10 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
                 </>
               )}
             </span>
+            <InfoButton label="About drafting with Claude">
+              Claude gets the description and the pipeline&apos;s definitions (names, columns and logic), never the tenant&apos;s data, and drafts test rows and
+              checks from them. Check the draft before you save: Claude works the expected values out from the logic, and can be wrong.
+            </InfoButton>
           </div>
         )}
         {drafting.error && (
@@ -680,7 +692,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
                 design: drafted.problems.length ? "Critical" : "Information",
                 title: drafted.problems.length
                   ? `Claude's draft still has problems: ${drafted.problems.join(" ")} Fix them below, or describe the case differently and draft again.`
-                  : "Claude drafted the rows and checks below. Check them before you save: Claude works the expected values out from the logic, and can be wrong.",
+                  : "Claude drafted the rows and checks below. Check them before you save.",
                 lines: drafted.notes,
               }}
               onClose={() => setDrafted(undefined)}
@@ -691,7 +703,19 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
 
       <section className="block">
         <div className="list-toolbar section-toolbar">
-          <Title level="H2" size="H4">Test rows</Title>
+          <span className="title-with-info">
+            <Title level="H2" size="H4">
+              Test rows
+            </Title>
+            <InfoButton label="About test rows">
+              <p>
+                These rows stand in for the pipeline&apos;s input tables. A table you give no rows is empty in this scenario. Use made-up values, not rows copied
+                from the tenant: the scenario is stored in Ystara.
+              </p>
+              <p>Each grid shows a table&apos;s keys and the columns the pipeline reads. The others stay NULL unless you show them.</p>
+              {editable && <p>{PASTE_HELP}</p>}
+            </InfoButton>
+          </span>
           {shape.tables.length > 0 && (
             <Button icon="excel-attachment" tooltip="One sheet per table, with the columns the grids show and the rows they have" onClick={() => void downloadRows()}>
               Download Excel template
@@ -717,44 +741,74 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
           )}
         </div>
         {rowsNote && <NoteStrip note={rowsNote} onClose={() => setRowsNote(undefined)} />}
-        <p className="muted page-intro">
-          These rows stand in for the pipeline&apos;s tables. A table you give no rows is empty in this scenario. Use made-up values, not rows copied from the
-          tenant: the scenario is stored in Ystara.{editable && shape.tables.length > 0 && ` ${PASTE_HELP}`}
-        </p>
-        {shape.tables.length === 0 && (
+        {shape.tables.length === 0 ? (
           <MessageStrip design="Critical" hideCloseButton>
-            No table of this pipeline takes rows: every one is loaded by a step that can&apos;t be compiled. The steps below say why.
+            No table of this pipeline takes rows: every one is loaded by a step that can&apos;t be compiled. How each step is simulated, below, says why.
           </MessageStrip>
+        ) : (
+          <p className="muted section-intro">
+            {shape.tables.length === 1
+              ? "Rows for the pipeline's input table. Without rows, it is empty in this scenario."
+              : `Rows for the pipeline's ${shape.tables.length} input tables. A table without rows is empty in this scenario.`}
+          </p>
         )}
-        {shape.tables.map((t) => (
-          <div className="scenario-table" key={t.key}>
-            <div className="scenario-table-head">
-              <span className="mono scenario-table-name">{t.technicalName}</span>
-              {t.type && <span className="muted">{typeLabel(t.type)}</span>}
-              <span className="muted">{t.why ? `Takes rows: ${t.why}.` : "Not a table the builder offers rows for; kept as the scenario had it."}</span>
-              <span className="muted">{counted(grids[t.key].rows.length, "row")}</span>
-            </div>
-            {grids[t.key].rows.length === 0 && !editable ? (
-              <p className="muted">No rows: the table is empty in this scenario.</p>
-            ) : (
-              <RowsGrid
-                label={`Rows of ${t.technicalName}`}
-                grid={grids[t.key]}
-                readOnly={!editable}
-                onChange={(g) => setGrids((all) => ({ ...all, [t.key]: g }))}
-                allColumns={allColumns[t.key] ?? false}
-                onAllColumns={(all) => setAllColumns((current) => ({ ...current, [t.key]: all }))}
-                pasteHelp={false}
-              />
-            )}
-            <CellProblems problems={problems[t.key] ?? []} />
-          </div>
-        ))}
-        {shape.kept.map((f) => (
-          <MessageStrip key={f.table} design="Information" hideCloseButton>
-            The rows of <span className="mono">{f.table}</span> come from a CSV file, which the builder doesn&apos;t edit. They are kept as they are.
-          </MessageStrip>
-        ))}
+        {shape.tables.length > 0 && (
+          <ul className="fold-list">
+            {shape.tables.map((t) => {
+              const rows = grids[t.key].rows.length;
+              const wrong = problems[t.key]?.length ?? 0;
+              const open = opened[t.key] ?? (rows > 0 || shape.tables.length === 1);
+              return (
+                <li key={t.key}>
+                  <Fold
+                    open={open}
+                    onToggle={(o) => setOpened((current) => ({ ...current, [t.key]: o }))}
+                    title={<span className="mono">{t.technicalName}</span>}
+                    summary={
+                      <>
+                        {wrong > 0 && <span className="text-negative">{counted(wrong, "cell")} to fix · </span>}
+                        {rows ? counted(rows, "row") : "No rows"}
+                      </>
+                    }
+                  >
+                    <p className="muted fold-note">
+                      {t.type && `${typeLabel(t.type)}. `}
+                      {t.why ? `${t.why[0].toUpperCase()}${t.why.slice(1)}.` : "Not a table the builder offers rows for; kept as the scenario had it."}
+                    </p>
+                    {rows === 0 && !editable ? (
+                      <p className="muted">No rows: the table is empty in this scenario.</p>
+                    ) : (
+                      <RowsGrid
+                        label={`Rows of ${t.technicalName}`}
+                        grid={grids[t.key]}
+                        readOnly={!editable}
+                        onChange={(g) => {
+                          setGrids((all) => ({ ...all, [t.key]: g }));
+                          setOpened((current) => ({ ...current, [t.key]: true }));
+                        }}
+                        allColumns={allColumns[t.key] ?? false}
+                        onAllColumns={(all) => setAllColumns((current) => ({ ...current, [t.key]: all }))}
+                        pasteHelp={false}
+                      />
+                    )}
+                    <CellProblems problems={problems[t.key] ?? []} />
+                  </Fold>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {shape.kept.length > 0 && (
+          <p className="muted">
+            The rows of {shape.kept.map((f, i) => (
+              <span key={f.table}>
+                {i > 0 && ", "}
+                <span className="mono">{f.table}</span>
+              </span>
+            ))}{" "}
+            come from a CSV file, which the builder doesn&apos;t edit. They are kept as they are.
+          </p>
+        )}
       </section>
 
       <section className="block">
@@ -767,7 +821,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
           )}
         </div>
         <CompileStrip compiled={compiled} error={compile.error} empty={!expect.length} busy={compile.isFetching} />
-        {expect.length === 0 && <p className="muted">No checks yet. A check says what a step should give for these rows, such as its number of rows.</p>}
+        {expect.length === 0 && <p className="muted section-intro">No checks yet. A check says what a step should give for these rows, such as its number of rows.</p>}
         {expect.map((e, i) => (
           <div className="scenario-checks" key={`${e.checkpoint}-${i}`}>
             <div className="scenario-table-head">
@@ -780,7 +834,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
                 return (
                   <li key={k}>
                     <span className="mono">{assertionLabel(a)}</span>
-                    {problem ? <span className="text-negative">{problem}</span> : compiled && !compiled.problems.length && <span className="muted">Compiles</span>}
+                    {problem && <span className="text-negative">{problem}</span>}
                     {editable && (
                       <span className="check-actions">
                         <Button design="Transparent" icon="edit" tooltip="Change" accessibleName="Change" onClick={() => setEditing({ expectation: i, assertion: k })} />
@@ -850,6 +904,7 @@ function Builder(props: { pipelineId: string; pipelineName: string; output: stri
               </span>
             )}
           </span>
+          {saved && can("runs.execute") && whyNoRun && <InfoButton label="Why this scenario can't run">{whyNoRun}</InfoButton>}
           {saved && can("runs.execute") && (
             <Button
               icon="media-play"
@@ -892,13 +947,13 @@ function CompileStrip({ compiled, error, empty, busy }: { compiled: ScenarioComp
       </MessageStrip>
     );
   const ready = compiled.checks.filter((c) => !c.problem).length;
-  return (
-    <MessageStrip design={ready === compiled.checks.length ? "Positive" : "Critical"} hideCloseButton>
-      {ready === compiled.checks.length
-        ? `It compiles: ${counted(ready, "check")} ready to run.`
-        : `${ready} of ${counted(compiled.checks.length, "check")} can run. The others say why.`}{" "}
-      Compiled from the definitions alone; nothing was sent to the tenant.
-    </MessageStrip>
+  // Ready is the normal state: a quiet line. Checks that can't run say why beside them.
+  return ready === compiled.checks.length ? (
+    <QuietNote tone="ok">Compiles: {counted(ready, "check")} ready to run. Nothing was sent to the tenant.</QuietNote>
+  ) : (
+    <QuietNote tone="warn">
+      {ready} of {counted(compiled.checks.length, "check")} can run. The others say why.
+    </QuietNote>
   );
 }
 
@@ -1093,10 +1148,9 @@ export function ScenarioRunPage() {
         </section>
       )}
       {r.steps && (
-        <section className="block">
-          <Title level="H2" size="H4">How each step was simulated</Title>
+        <Panel className="block" headerText="How each step was simulated" collapsed>
           <StepsTable steps={r.steps} />
-        </section>
+        </Panel>
       )}
     </div>
   );
@@ -1119,7 +1173,7 @@ function suiteNext(s: ScenarioSuiteJson): string {
   const parts: string[] = [];
   if (failed) {
     parts.push(
-      `Open ${failed === 1 ? "the failing scenario" : "a failing scenario"} to see which check broke and what the pipeline returned. If the pipeline changed on purpose, update what the scenario expects; if not, the change broke it${afterScan ? ", and it is among the steps the scan changed, below" : ""}.`,
+      `Open ${failed === 1 ? "the failing scenario" : "a failing scenario"} to see which check broke. If the pipeline changed on purpose, update what the scenario expects.${afterScan ? " If not, the cause is among the steps below." : ""}`,
     );
   }
   if (errored) parts.push(`${errored === 1 ? "One scenario" : `${errored} scenarios`} couldn't run: the reason is in the table.`);
@@ -1177,9 +1231,7 @@ export function ScenarioSuitePage() {
         </MessageStrip>
       )}
       {busy ? (
-        <p className="muted">
-          The worker runs the scenarios one after the other, each on its own test rows, signing in to the database once. This page refreshes on its own.
-        </p>
+        <p className="muted">The scenarios run one after the other. This page refreshes on its own.</p>
       ) : (
         <p>{suiteNext(s)}</p>
       )}

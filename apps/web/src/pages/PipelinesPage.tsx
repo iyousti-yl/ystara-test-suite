@@ -21,9 +21,10 @@ interface Row {
 /**
  * Pipelines: the tenant's saved pipelines as a board, problems first. Each row
  * says in a word and a sentence what its latest results say (pipelineHealth),
- * with the step that follows; then its scenarios, latest snapshot, sign-off
- * and next scheduled snapshot. A row opens the pipeline; "New pipeline" opens
- * the latest scan to pick an output.
+ * with the step that follows; then its scenarios, and what it has of a latest
+ * snapshot, a sign-off and a next scheduled snapshot (nothing for what it
+ * hasn't). A row opens the pipeline; "New pipeline" opens the latest scan to
+ * pick an output.
  */
 export function PipelinesPage() {
   const { tenantId, tenant } = useAddressTenant();
@@ -119,9 +120,7 @@ export function PipelinesPage() {
                 Pipeline
               </TableHeaderCell>
               <TableHeaderCell width="8rem">Scenarios</TableHeaderCell>
-              <TableHeaderCell width="9rem">Last snapshot</TableHeaderCell>
-              <TableHeaderCell width="10rem">Sign-off</TableHeaderCell>
-              <TableHeaderCell width="9rem">Next snapshot</TableHeaderCell>
+              <TableHeaderCell width="15rem">Latest</TableHeaderCell>
             </TableHeaderRow>
           }
         >
@@ -156,17 +155,8 @@ export function PipelinesPage() {
               </TableCell>
               <TableCell>{s ? scenarios(s) : "–"}</TableCell>
               <TableCell>
-                {s?.snapshot ? (
-                  <div className="board-name">
-                    <When iso={s.snapshot.finishedAt ?? s.snapshot.requestedAt} />
-                    {s.snapshot.outputRows !== null && <span className="muted">{formatNumber(s.snapshot.outputRows)} rows out</span>}
-                  </div>
-                ) : (
-                  <span className="muted">None yet</span>
-                )}
+                <Latest summary={s} />
               </TableCell>
-              <TableCell>{signOff(s)}</TableCell>
-              <TableCell>{s?.schedule ? <When iso={s.schedule.nextRunAt} /> : <span className="muted">Not scheduled</span>}</TableCell>
             </TableRow>
           ))}
         </Table>
@@ -186,24 +176,35 @@ function scenarios(s: PipelineSummaryJson): string {
   return `${s.scenarios}, not run together`;
 }
 
-function signOff(s: PipelineSummaryJson | undefined) {
+/** What a pipeline has of a latest snapshot, a sign-off and a next snapshot, a short line each; a dash when it has none of them. */
+function Latest({ summary: s }: { summary: PipelineSummaryJson | undefined }) {
   const o = s?.signOff;
-  if (!o) return <span className="muted">Not signed off</span>;
-  if (o.verdict === "approved" && o.outdated) {
-    // Approved earlier, but not what the board shows now: say since what.
-    return (
-      <div className="board-name">
-        <span className="text-attention">Approval outdated</span>
-        <span className="muted">
-          Approved <When iso={o.signedAt} />, before {o.outdatedBy === "result" ? "a later result" : "a scan that changed it"}
-        </span>
-      </div>
-    );
-  }
+  if (!s?.snapshot && !o && !s?.schedule) return <span className="muted">–</span>;
   return (
-    <div className="board-name">
-      <span className={o.verdict === "rejected" ? "text-attention" : undefined}>{o.verdict === "rejected" ? "Rejected" : "Approved"}</span>
-      <When iso={o.signedAt} />
+    <div className="board-name board-latest">
+      {s?.snapshot && (
+        <span>
+          Snapshot <When iso={s.snapshot.finishedAt ?? s.snapshot.requestedAt} />
+          {s.snapshot.outputRows !== null && <span className="muted"> · {formatNumber(s.snapshot.outputRows)} rows out</span>}
+        </span>
+      )}
+      {o &&
+        (o.verdict === "approved" && o.outdated ? (
+          // Approved earlier, but not what the board shows now: since what is on the pipeline's History tab.
+          <span className="text-attention" title={`Approved before ${o.outdatedBy === "result" ? "a later result" : "a scan that changed it"}`}>
+            Approval outdated
+          </span>
+        ) : (
+          <span>
+            <span className={o.verdict === "rejected" ? "text-attention" : undefined}>{o.verdict === "rejected" ? "Rejected" : "Approved"}</span>{" "}
+            <When iso={o.signedAt} />
+          </span>
+        ))}
+      {s?.schedule && (
+        <span className="muted">
+          Next snapshot <When iso={s.schedule.nextRunAt} />
+        </span>
+      )}
     </div>
   );
 }

@@ -46,6 +46,7 @@ import {
   type Snapshot,
   type Tenant,
 } from "@ystara/shared";
+import { BUSY_OUTPUT, BUSY_PIPELINE_NAME, BUSY_RAW } from "./demo-busy.js";
 
 /**
  * A synthetic tenant for looking at the web app without a real one: a scan
@@ -80,6 +81,10 @@ import {
  * which has no database): the flow now counts the event in transit too, so
  * the output's rows check fails and the suite raised an alert, which nobody
  * got either.
+ *
+ * The same space has a second, busier process (demo-busy.ts) with its own
+ * pipeline, not tested yet: sixteen input tables, tables loaded by several
+ * flows and two loops, as a real tenant has them.
  */
 /** "Synthetic" in the name keeps the tenant-content check from taking it for a real tenant's, as it does with the demo's object names. */
 export const DEMO_TENANT = "Synthetic demo";
@@ -173,6 +178,7 @@ export const DEMO_RAW: RawObject[] = [
     `SELECT s."routeSegmentId", COUNT(*) AS "deliveredShipments", SUM(s."${c.share}") AS "${c.share}"\nFROM "${n.enrichedTable}" s\nGROUP BY s."routeSegmentId"`,
     { "@DataWarehouse.consumption.external": true },
   ),
+  ...BUSY_RAW,
 ];
 
 /** Three shipment events, two of them deliveries, on one route segment: the output has one row that counts two shipments. */
@@ -304,6 +310,7 @@ export async function loadDemo(
     const scan = await saveScanResult(db, (await createScan(db, tenant.id, [DEMO_SPACE], "import")).id, DEMO_RAW, graph);
     const output = { space: DEMO_SPACE, technicalName: n.output };
     const pipeline = await createPipeline(db, { tenantId: tenant.id, name: "Delivered shipments (demo)", output, excludeWriters: [] });
+    await createPipeline(db, { tenantId: tenant.id, name: BUSY_PIPELINE_NAME, output: { space: DEMO_SPACE, technicalName: BUSY_OUTPUT }, excludeWriters: [] });
     const { steps } = buildPipeline(graph, output);
     const definitionHashes = new Map(graph.nodes.map((node) => [refKey(node), node.definitionHash]));
 

@@ -1,24 +1,28 @@
 import { useMemo, useState } from "react";
-import { MessageStrip, SegmentedButton, SegmentedButtonItem } from "@ui5/webcomponents-react";
+import { SegmentedButton, SegmentedButtonItem } from "@ui5/webcomponents-react";
 import { matchesPattern, refKey, type PipelineResult } from "@ystara/shared";
+import { counted } from "../format";
 import { typeLabel } from "../objectTypes";
 import { useDarkMode } from "../theme";
 import { LineageGraph } from "./LineageGraph";
 import { exclusionFor, lineageModel } from "./model";
 import { ObjectPanel } from "./ObjectPanel";
+import { PipelineChecks } from "./PipelineChecks";
 
 /**
- * A pipeline: what needs attention (several writers, loops), the lineage
- * picture with the selected object's details beside it, and the steps in order.
- * Used for a pipeline being tried on a scan and for a saved one.
+ * A pipeline: what to check in it (several writers, loops) in one quiet line,
+ * the lineage picture with the selected object's details beside it, and the
+ * steps in order. Used for a pipeline being tried on a scan and for a saved one.
  */
 export function PipelineView(props: {
   result: PipelineResult;
-  /** Given when exclusions can be changed here. */
+  /** Given when exclusions can be changed here: on a scan, or on a saved pipeline by someone who may change it. */
   onExclusionsChange?: (excludeWriters: string[]) => void;
+  /** While a change of exclusions is being saved. */
+  busy?: boolean;
   onShowPipeline?: (output: string) => void;
 }) {
-  const { result, onExclusionsChange, onShowPipeline } = props;
+  const { result, onExclusionsChange, onShowPipeline, busy } = props;
   const { pipeline } = result;
   const model = useMemo(() => lineageModel(pipeline, result.graph, result.measurement), [pipeline, result.graph, result.measurement]);
   const [selected, setSelected] = useState<string>();
@@ -28,7 +32,8 @@ export function PipelineView(props: {
   // After an exclusion the selection stays if the object is still drawn, and is simply gone if it isn't.
   const node = model.nodes.find((n) => n.key === selected);
 
-  const exclude = (pattern: string) => onExclusionsChange?.([...result.excludeWriters, pattern]);
+  const exclude = (...patterns: string[]) => onExclusionsChange?.([...new Set([...result.excludeWriters, ...patterns])]);
+  const measurable = Object.values(result.measurement).filter((m) => m.measurable).length;
   const follow = (writerKey: string) =>
     onExclusionsChange?.(
       result.excludeWriters.filter((p) => !pipeline.excludedWriters.some((x) => refKey(x.writer) === writerKey && matchesPattern(p, x.writer))),
@@ -36,28 +41,25 @@ export function PipelineView(props: {
 
   return (
     <div className="pipeline">
-      {pipeline.ambiguousWriters.map((a) => (
-        <MessageStrip key={refKey(a.table)} design="Critical" hideCloseButton>
-          <span className="mono">{a.table.technicalName}</span> is loaded by several flows:{" "}
-          <span className="mono">{a.writers.map((w) => w.technicalName).join(", ")}</span>. All of them were followed, so this pipeline may include
-          another process.{" "}
-          {onExclusionsChange ? "Select the loader that doesn't belong in the picture and ignore it." : "Ignore the one that doesn't belong: More actions › Change ignored loaders."}
-        </MessageStrip>
-      ))}
-      {pipeline.cycles.map((c) => (
-        <MessageStrip key={c.map(refKey).join()} design="Negative" hideCloseButton>
-          Loop: <span className="mono">{c.map((r) => r.technicalName).join(" → ")}</span>. The order of these steps can't be determined.
-        </MessageStrip>
-      ))}
+      <PipelineChecks
+        pipeline={pipeline}
+        busy={busy}
+        onIgnore={onExclusionsChange && ((writers) => exclude(...writers.map((w) => exclusionFor(w, pipeline))))}
+      />
 
-      <SegmentedButton onSelectionChange={(e) => setView(e.detail.selectedItems[0]?.dataset.view === "steps" ? "steps" : "lineage")}>
-        <SegmentedButtonItem data-view="lineage" selected={view === "lineage"}>
-          Picture
-        </SegmentedButtonItem>
-        <SegmentedButtonItem data-view="steps" selected={view === "steps"}>
-          Steps in order ({pipeline.steps.length})
-        </SegmentedButtonItem>
-      </SegmentedButton>
+      <div className="pipeline-bar">
+        <SegmentedButton onSelectionChange={(e) => setView(e.detail.selectedItems[0]?.dataset.view === "steps" ? "steps" : "lineage")}>
+          <SegmentedButtonItem data-view="lineage" selected={view === "lineage"}>
+            Picture
+          </SegmentedButtonItem>
+          <SegmentedButtonItem data-view="steps" selected={view === "steps"}>
+            Steps in order ({pipeline.steps.length})
+          </SegmentedButtonItem>
+        </SegmentedButton>
+        <span className="muted">
+          {counted(pipeline.entryPoints.length, "input table")} · {measurable} measurable by snapshots
+        </span>
+      </div>
 
       {view === "lineage" ? (
         <div className="pipeline-main">

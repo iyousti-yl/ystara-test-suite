@@ -5,6 +5,7 @@ import { useAccountSettings, useCan, useRemoveTeamsChannel, useSetAccountSetting
 import { Dialog } from "../components/Dialog";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorStrip, Loading } from "../components/Feedback";
+import { InfoButton, QuietNote } from "../components/Info";
 import { MoreActions } from "../components/MoreActions";
 import { PageError } from "../components/PageError";
 import { PageHeader } from "../components/PageHeader";
@@ -28,13 +29,16 @@ export function SettingsPage() {
     <div className="page">
       <PageHeader title="Settings" subtitle="Where Ystara sends its alerts, and what this account allows." />
       <section className="block">
-        <Title level="H2" size="H4">
-          Alerts by email
-        </Title>
-        <p className="muted section-intro">
-          Ystara tells people when a scheduled snapshot found a change, or a scenario broke after a scan. Each alert is emailed to the people who watch its
-          pipeline. Anyone who can see a pipeline starts or stops watching it with Watch, at the top of the pipeline&apos;s page.
-        </p>
+        <span className="title-with-info">
+          <Title level="H2" size="H4">
+            Alerts by email
+          </Title>
+          <InfoButton label="About alerts by email">
+            Ystara tells people when a scheduled snapshot found a change, or a scenario broke after a scan. Anyone who can see a pipeline starts or stops
+            watching it with Watch, at the top of the pipeline&apos;s page.
+          </InfoButton>
+        </span>
+        <p className="muted section-intro">Each alert is emailed to the people who watch its pipeline.</p>
       </section>
       <TeamsSection />
       <DraftingSection />
@@ -69,9 +73,7 @@ function TeamsSection() {
       </div>
       <ErrorStrip error={channel.error ?? test.error ?? remove.error} />
       {test.isSuccess && (
-        <MessageStrip design="Information" hideCloseButton className="block">
-          A test card was posted. It should show in the channel within a minute.
-        </MessageStrip>
+        <QuietNote tone="ok">A test card was posted. It should show in the channel within a minute.</QuietNote>
       )}
       {channel.isPending ? (
         <Loading />
@@ -182,15 +184,22 @@ function DraftingSection() {
 
   return (
     <section className="block">
-      <Title level="H2" size="H4">
-        Drafting with Claude
-      </Title>
-      <p className="muted section-intro">
-        In a scenario&apos;s builder, someone can describe in a sentence what to test, and Claude drafts the test rows and checks for them to review. To draft,
-        Ystara sends Claude the pipeline&apos;s object names, columns and logic, never its data. Claude is made by Anthropic, which processes what is sent on
-        Ystara&apos;s behalf. Once this is on, the developers, test coordinators and admins of this account can use it. Switching it on or off is written to
-        the audit log.
-      </p>
+      <span className="title-with-info">
+        <Title level="H2" size="H4">
+          Drafting with Claude
+        </Title>
+        <InfoButton label="About drafting with Claude">
+          <p>
+            In a scenario&apos;s builder, someone describes in a sentence what to test, and Claude drafts the test rows and checks for them to review. Claude
+            is made by Anthropic, which processes what is sent on Ystara&apos;s behalf.
+          </p>
+          <p>
+            Once this is on, the developers, test coordinators and admins of this account can use it. Switching it on or off is written to the audit log. It
+            also needs Claude set up for this installation of Ystara; if it isn&apos;t, the builder says so.
+          </p>
+        </InfoButton>
+      </span>
+      <p className="muted section-intro">Claude drafts a scenario&apos;s rows and checks from its description. It gets names, columns and logic, never data.</p>
       <ErrorStrip error={settings.error ?? save.error} />
       {settings.isPending ? (
         <Loading />
@@ -210,7 +219,6 @@ function DraftingSection() {
           </div>
         )
       )}
-      <p className="muted">It also needs Claude set up for this installation of Ystara. If it isn&apos;t, the builder says so.</p>
     </section>
   );
 }

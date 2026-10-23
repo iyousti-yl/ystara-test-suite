@@ -5,9 +5,9 @@ import { addRow, cellFromText, columnKind, columnNote, fillEmpty, parsePasted, p
 
 /**
  * Test rows as a grid of plain inputs, one column per column of the table
- * (its name and type in the header). It shows the table's keys and the
- * columns the pipeline reads, or every column when asked: a hidden column is
- * NULL. Added test rows start with values that get through the pipeline's
+ * (its name and type in the header, the reason it is shown as its tooltip).
+ * It shows the table's keys and the columns the pipeline reads, or every
+ * column when asked: a hidden column is NULL. Added test rows start with values that get through the pipeline's
  * filters and joins (prefillText); expected rows start empty. Rows can be
  * duplicated and removed. Rows copied
  * from a spreadsheet are pasted in at the cell that has the focus, with a
@@ -60,7 +60,6 @@ export function RowsGrid(props: {
                   <span className="rows-grid-type">
                     {c.type || "not a column of the table"}
                     {c.key && <span className="rows-grid-key"> · key</span>}
-                    {!c.key && (c.used || c.keeps !== undefined) && <span className="rows-grid-used"> · used</span>}
                   </span>
                 </th>
               ))}
@@ -135,14 +134,16 @@ export function RowsGrid(props: {
             </Button>
           )}
           {hidden > 0 && onAllColumns && (
-            <Button design="Transparent" icon={allColumns ? "hide" : "show"} onClick={() => onAllColumns(!allColumns)}>
+            <Button
+              design="Transparent"
+              icon={allColumns ? "hide" : "show"}
+              tooltip={allColumns ? undefined : `${counted(hidden, "column")} the pipeline doesn't read ${hidden === 1 ? "is" : "are"} hidden and stay${hidden === 1 ? "s" : ""} NULL`}
+              onClick={() => onAllColumns(!allColumns)}
+            >
               {allColumns ? "Show only the columns used" : `Show all ${grid.columns.length} columns`}
             </Button>
           )}
-          <span className="muted">
-            {hidden > 0 && !allColumns ? `${counted(hidden, "column")} the pipeline doesn't read ${hidden === 1 ? "is" : "are"} hidden and stay${hidden === 1 ? "s" : ""} NULL. ` : ""}
-            {pasteHelp && PASTE_HELP}
-          </span>
+          {pasteHelp && <span className="muted">{PASTE_HELP}</span>}
         </div>
       )}
     </div>
