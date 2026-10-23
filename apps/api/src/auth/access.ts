@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { findSession, type Db, type Session } from "@ystara/db";
-import { can, type Permission } from "@ystara/shared";
+import { deleteSession, findSession, touchSession, type Db, type Session } from "@ystara/db";
+import { ACTIVITY_HEADER, can, IDLE_MINUTES, type Permission } from "@ystara/shared";
 
 /**
  * Who may call each API route, checked before the route runs. A route says it
@@ -36,8 +36,15 @@ declare module "fastify" {
 export const SESSION_COOKIE = "ystara_session";
 /** Time to type the authenticator code after the password. */
 export const PENDING_MINUTES = 10;
-/** A sign-in lasts one working day. */
+/** A sign-in lasts one working day at most, and ends sooner after IDLE_MINUTES without use. */
 export const SESSION_MINUTES = 12 * 60;
+/** How often a session's last use is written: once a minute is enough to measure an hour. */
+const TOUCH_EVERY_MS = 60_000;
+/**
+ * Over https (YSTARA_PUBLIC_URL says so on a server), the cookie is only ever sent over https. Otherwise Fastify
+ * decides per request ("auto"), which also works on http://127.0.0.1 on a developer's machine.
+ */
+const SECURE_COOKIE = process.env.YSTARA_PUBLIC_URL?.startsWith("https://") ? true : "auto";
 
 export function installAccess(app: FastifyInstance, db: Db): void {
   app.addHook("onRequest", async (req, reply) => {
@@ -51,10 +58,20 @@ export function installAccess(app: FastifyInstance, db: Db): void {
     const token = req.cookies[SESSION_COOKIE];
     const session = token ? await findSession(db, token) : undefined;
     req.sessionToken = token;
+    const access = req.routeOptions.config.access ?? "signed-in";
+    if (session?.verified && Date.now() - session.lastSeenAt.getTime() > IDLE_MINUTES * 60_000) {
+      // Unused for an hour: the session ends here, whatever the route.
+      await deleteSession(db, token!);
+      clearSessionCookie(reply);
+      if (access === "public") return;
+      return reply.code(401).send({ error: `You were signed out after ${IDLE_MINUTES} minutes without using Ystara. Sign in again to continue.` });
+    }
     if (session?.verified) req.auth = session;
     else if (session) req.pending = session;
+    // Use is a request that changes something, or one the page sends while someone is at it; polling alone isn't.
+    const used = !["GET", "HEAD"].includes(req.method) || req.headers[ACTIVITY_HEADER] === "1";
+    if (session?.verified && used && Date.now() - session.lastSeenAt.getTime() > TOUCH_EVERY_MS) await touchSession(db, token!);
 
-    const access = req.routeOptions.config.access ?? "signed-in";
     if (access === "public") return;
     if (access === "pending") {
       if (!req.pending) return reply.code(401).send({ error: "Sign in with your email and password first" });
@@ -77,13 +94,14 @@ export function signedIn(req: FastifyRequest): Session {
   return req.auth;
 }
 
-export function setSessionCookie(reply: FastifyReply, token: string, minutes: number): void {
+export function setSessionCookie(reply: FastifyReply, token: string): void {
   reply.setCookie(SESSION_COOKIE, token, {
     path: "/api",
     httpOnly: true, // scripts on the page can't read it
     sameSite: "strict", // other sites can't make the browser send it
-    secure: "auto", // https only, once Ystara is served over https
-    maxAge: minutes * 60,
+    secure: SECURE_COOKIE, // https only, once Ystara is served over https
+    // No maxAge: the browser forgets the cookie when it closes. The server ends the session too, at its
+    // expires_at or after an hour without use, whichever comes first.
   });
 }
 

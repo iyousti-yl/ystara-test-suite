@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { spaceScopeOf, type Account, type Invitation, type Member, type Role, type SpaceScope } from "@ystara/shared";
+import { IDLE_MINUTES, spaceScopeOf, type Account, type AccountSettings, type Invitation, type Member, type Role, type SpaceScope } from "@ystara/shared";
 import type { Db, Queryable } from "./db.js";
 
 /**
@@ -351,6 +351,8 @@ export interface Session {
   operator: boolean;
   /** The spaces the user sees in this account: null for every space (migration 014). */
   spaces: SpaceScope;
+  /** When the session was last used (migration 015): it ends after IDLE_MINUTES without use. */
+  lastSeenAt: Date;
 }
 
 /** Starts a session and returns the token for the cookie. */
@@ -368,8 +370,8 @@ export async function createSession(db: Queryable, input: { userId: string; acco
  * account. Undefined when it expired or the user is no longer a member there.
  */
 export async function findSession(db: Queryable, token: string): Promise<Session | undefined> {
-  const { rows } = await db.query<{ user_id: string; email: string; account_id: string; role: Role; spaces: string[] | null; verified: boolean; operator: boolean }>(
-    `select s.user_id, u.email, s.account_id, m.role, m.spaces, s.verified, u.operator
+  const { rows } = await db.query<{ user_id: string; email: string; account_id: string; role: Role; spaces: string[] | null; verified: boolean; operator: boolean; last_seen_at: Date }>(
+    `select s.user_id, u.email, s.account_id, m.role, m.spaces, s.verified, u.operator, s.last_seen_at
      from sessions s
      join users u on u.id = s.user_id
      join memberships m on m.account_id = s.account_id and m.user_id = s.user_id
@@ -385,7 +387,35 @@ export async function findSession(db: Queryable, token: string): Promise<Session
     spaces: spaceScopeOf(r.role, r.spaces),
     verified: r.verified,
     operator: r.operator,
+    lastSeenAt: r.last_seen_at,
   };
+}
+
+/** Marks the session as used now. Called at most once a minute per session (auth/access.ts). */
+export async function touchSession(db: Queryable, token: string): Promise<void> {
+  await db.query("update sessions set last_seen_at = now() where token_hash = $1", [hashToken(token)]);
+}
+
+/** Ends every session of the user except the one behind `token`; how many ended (verified ones only, the rest were half sign-ins). */
+export async function deleteOtherSessions(db: Queryable, userId: string, token: string): Promise<number> {
+  const { rows } = await db.query<{ verified: boolean }>("delete from sessions where user_id = $1 and token_hash <> $2 returning verified", [userId, hashToken(token)]);
+  return rows.filter((r) => r.verified).length;
+}
+
+/** A new password (its scrypt hash) for the user. */
+export async function setPasswordHash(db: Queryable, userId: string, passwordHash: string): Promise<void> {
+  await db.query("update users set password_hash = $2 where id = $1", [userId, passwordHash]);
+}
+
+/** What the account allows (migration 015). */
+export async function getAccountSettings(db: Queryable, accountId: string): Promise<AccountSettings | undefined> {
+  const { rows } = await db.query<{ drafting_with_claude: boolean }>("select drafting_with_claude from accounts where id = $1", [accountId]);
+  return rows[0] && { draftingWithClaude: rows[0].drafting_with_claude };
+}
+
+export async function setAccountSettings(db: Queryable, accountId: string, settings: AccountSettings): Promise<AccountSettings> {
+  await db.query("update accounts set drafting_with_claude = $2 where id = $1", [accountId, settings.draftingWithClaude]);
+  return settings;
 }
 
 /** Moves a session to another account the user belongs to. False when they are not a member there. */
@@ -399,11 +429,12 @@ export async function switchSessionAccount(db: Queryable, token: string, account
   return rows.length === 1;
 }
 
-/** How many other live, verified sessions the user has besides the one behind `token`. */
+/** How many other live, verified sessions the user has besides the one behind `token` (one unused for IDLE_MINUTES has ended). */
 export async function countOtherSessions(db: Queryable, userId: string, token: string): Promise<number> {
   const { rows } = await db.query<{ n: number }>(
-    "select count(*)::int as n from sessions where user_id = $1 and token_hash <> $2 and verified and expires_at > now()",
-    [userId, hashToken(token)],
+    `select count(*)::int as n from sessions
+     where user_id = $1 and token_hash <> $2 and verified and expires_at > now() and last_seen_at > now() - make_interval(mins => $3)`,
+    [userId, hashToken(token), IDLE_MINUTES],
   );
   return rows[0].n;
 }

@@ -4,7 +4,7 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import type { Db } from "@ystara/db";
+import { recordHeartbeat, type Db } from "@ystara/db";
 import { createTestDb } from "@ystara/db/testing";
 import { testSecrets, testUser } from "./auth/testing.js";
 import { buildServer, trustProxyFromEnv } from "./server.js";
@@ -146,5 +146,39 @@ describe("the client's address", () => {
     expect(trustProxyFromEnv("2")).toBe(2);
     expect(trustProxyFromEnv("10.0.0.0/8, 127.0.0.1")).toEqual(["10.0.0.0/8", "127.0.0.1"]);
     expect(() => trustProxyFromEnv("true")).toThrow(/number \(e\.g\. 1\) or their addresses/);
+  });
+});
+
+describe("in production", () => {
+  it("says whether the API reaches its database, and which version runs", async () => {
+    expect((await apiOnly.inject("/api/health")).json()).toMatchObject({ status: "ok", version: "dev", database: "ok" });
+  });
+
+  it("says when no worker took the schedule's tick for 3 minutes, so one uptime check sees a stopped worker", async () => {
+    const silent = await apiOnly.inject("/api/health/worker");
+    expect([silent.statusCode, silent.json().status]).toEqual([503, "silent"]);
+    await recordHeartbeat(db, { worker: "test:1", version: "abc1234", startedAt: new Date() });
+    expect((await apiOnly.inject("/api/health/worker")).json()).toMatchObject({ status: "ok", version: "abc1234" });
+  });
+
+  it("gives every answer a reference, and keeps API answers out of caches", async () => {
+    const res = await apiOnly.inject("/api/tenants");
+    expect(res.headers["x-request-id"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.headers["permissions-policy"]).toContain("camera=()");
+  });
+
+  it("answers a failure on its side with that reference, and nothing of the cause", async () => {
+    const failing = await buildServer(deps(), { logger: false });
+    failing.get("/api/fails", async () => {
+      throw new Error("connect ECONNREFUSED 10.0.0.5:5432");
+    });
+    const res = await failing.inject("/api/fails");
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({
+      error: `Something went wrong on Ystara's side. If it happens again, give Ystara's support this reference: ${res.headers["x-request-id"]}`,
+      requestId: res.headers["x-request-id"],
+    });
+    await failing.close();
   });
 });

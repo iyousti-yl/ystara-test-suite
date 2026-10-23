@@ -47,3 +47,54 @@ jobs:
           docker compose config > compose.out 2>&1
           if grep -E 'canary|SECRET_TAIL|KEY_TAIL' compose.out; then echo "Compose printed part of a secret"; exit 1; fi
           rm .env.local .master-key compose.out
+
+  # The same image and database as on a server: the migrations on a real Postgres (twice, as every
+  # update runs them again), the API and the worker started from the build, and both health checks.
+  production:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ystara
+          POSTGRES_PASSWORD: ystara
+          POSTGRES_DB: ystara
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U ystara -d ystara" --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      DATABASE_URL: postgres://ystara:ystara@127.0.0.1:5432/ystara
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Packages a customer's server runs with known high or critical vulnerabilities fail the build.
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npx tsc -b && npm run build -w @ystara/web
+      - name: Migrations, twice
+        run: node packages/db/dist/run-migrations.js && node packages/db/dist/run-migrations.js
+      - name: The API and the worker start and say they are well
+        run: |
+          openssl rand -base64 32 > "$RUNNER_TEMP/master_key"
+          export MASTER_KEY_FILE="$RUNNER_TEMP/master_key" YSTARA_VERSION=ci
+          node apps/api/dist/server.js > api.log 2>&1 &
+          node apps/worker/dist/main.js > worker.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4000/api/health/worker > /dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:4000/api/health | tee health.json && grep -q '"version":"ci"' health.json
+          curl -fsS http://127.0.0.1:4000/api/health/worker
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/api/tenants)" = 401
+      - name: Logs
+        if: always()
+        run: cat api.log worker.log 2>/dev/null || true
+      - name: The image builds
+        run: docker build --build-arg YSTARA_VERSION=ci -t ystara:ci .
+      - name: The server's compose files read as one
+        run: |
+          mkdir -p "$RUNNER_TEMP/secrets" && touch "$RUNNER_TEMP/secrets/"{master_key,db_password,database_url,smtp_url}
+          printf 'YSTARA_DOMAIN=ystara.example.com\nYSTARA_ACME_EMAIL=ops@example.com\nYSTARA_SMTP_FROM=Ystara <alerts@example.com>\n' > "$RUNNER_TEMP/ystara.env"
+          YSTARA_SECRETS="$RUNNER_TEMP/secrets" YSTARA_SETTINGS="$RUNNER_TEMP/ystara.env" deploy/compose config --quiet

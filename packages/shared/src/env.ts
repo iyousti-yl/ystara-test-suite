@@ -73,3 +73,10 @@ export function unquotedHashKeys(text: string, keys: string[]): string[] {
   }
   return [...found];
 }
+
+/**
+ * The version this program runs: YSTARA_VERSION, which the Docker build sets to the git commit it was built from
+ * (deploy/compose passes it), or "dev" on a developer's machine. /api/health and /api/meta show it, and each
+ * worker records it with its sign of life.
+ */
+export const appVersion = (env: NodeJS.ProcessEnv = process.env): string => env.YSTARA_VERSION?.trim() || "dev";

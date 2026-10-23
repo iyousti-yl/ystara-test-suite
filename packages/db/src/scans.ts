@@ -65,8 +65,13 @@ export async function getScan(db: Queryable, id: string): Promise<Scan | undefin
   return rows[0] && toScan(rows[0]);
 }
 
-export async function listScans(db: Queryable, tenantId: string): Promise<Scan[]> {
-  return (await db.query<ScanRow>("select * from scans where tenant_id = $1 order by requested_at desc", [tenantId])).rows.map(toScan);
+/** A tenant's scans, newest first, `limit` at a time; `before` (the requestedAt of the oldest one shown) gives the next older ones. */
+export async function listScans(db: Queryable, tenantId: string, page: { before?: Date; limit?: number } = {}): Promise<Scan[]> {
+  const { rows } = await db.query<ScanRow>(
+    "select * from scans where tenant_id = $1 and ($3::timestamptz is null or requested_at < $3) order by requested_at desc limit $2",
+    [tenantId, page.limit ?? 50, page.before ?? null],
+  );
+  return rows.map(toScan);
 }
 
 export async function latestSucceededScan(db: Queryable, tenantId: string): Promise<Scan | undefined> {

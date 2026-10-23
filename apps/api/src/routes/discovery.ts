@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { buildPipeline, pipelineGraph, toMermaid } from "@ystara/connector";
 import {
@@ -10,6 +10,7 @@ import {
   deleteTenant,
   getConnection,
   getScanSchedule,
+  hasUnfinishedScan,
   latestSucceededScan,
   listDatabaseUsers,
   listPipelines,
@@ -31,6 +32,7 @@ import {
   readableSpaces,
   refKey,
   type PipelineResult,
+  type Scan,
   type ScanGraph,
   type ScanJobData,
 } from "@ystara/shared";
@@ -58,6 +60,24 @@ export const spaceId = z.string().regex(/^[A-Za-z0-9_]{1,64}$/, "Space IDs conta
 const objectName = z.object({ id: z.string().uuid(), space: spaceId, name: z.string().regex(/^[A-Za-z0-9_]{1,128}$/, "Technical names contain only letters, digits and underscores") });
 const objectRef = z.string().regex(/^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)?$/, "Use NAME or SPACE.NAME");
 const ObjectQuery = z.object({ within: objectRef.optional() });
+/** ?before=<the requestedAt of the oldest row shown>: the next page of older rows. */
+export const Page = z.object({ before: z.coerce.date().optional() });
+
+/** A scan older than this that is still queued or running is taken as stuck (the worker's sweep ends it) and no longer stops a new one. */
+const SCAN_STUCK_MS = 5 * 60 * 60_000;
+
+/**
+ * A scan as a member limited to some spaces may see it: their spaces only, the warnings about those, and no error
+ * text, which can name any space's objects. Null when the scan read none of their spaces.
+ */
+export function scanFor(req: FastifyRequest, scan: Scan): Scan | null {
+  if (allSpaces(req)) return scan;
+  const spaces = scan.spaces.filter((s) => space(req, s));
+  if (!spaces.length) return null;
+  // Warnings start with the space they are about: "SALES: could not list ..." or "SALES.V_ORDERS (view): ...".
+  const warnings = scan.warnings.filter((w) => space(req, w.split(/[.:]/)[0]));
+  return { ...scan, spaces, warnings, error: scan.error && "The scan failed. An admin can see why on this page." };
+}
 const patterns = z.array(z.string().min(1).max(200)).max(50);
 
 const TenantInput = z.object({
@@ -116,7 +136,8 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
     app.get("/tenants/:id/scans", { config: read }, async (req, reply) => {
       const tenant = await ownTenant(req, id.parse(req.params).id);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
-      return listScans(db, tenant.id);
+      const { before } = Page.parse(req.query);
+      return (await listScans(db, tenant.id, { before })).map((s) => scanFor(req, s)).filter((s) => s !== null);
     });
 
     app.post("/tenants/:id/scans", { config: { access: "discovery.run" } }, async (req, reply) => {
@@ -134,8 +155,15 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
         const error = `The technical client can't read ${unconfirmed.join(", ")}, or hasn't been checked on it yet. Add the space to the tenant's connection and check again.`;
         return reply.code(409).send({ error });
       }
-      const scan = await createScan(db, tenant.id, spaces);
-      await queue.send(JOBS.scan, { scanId: scan.id } satisfies ScanJobData);
+      // One scan of a tenant at a time: a second would read the same spaces again, at the same moment.
+      if (await hasUnfinishedScan(db, tenant.id, new Date(Date.now() - SCAN_STUCK_MS))) {
+        return reply.code(409).send({ error: "A scan of this tenant is still running. Start the next one once it has finished." });
+      }
+      const scan = await db.transaction(async (tx) => {
+        const created = await createScan(tx, tenant.id, spaces);
+        await queue.send(JOBS.scan, { scanId: created.id } satisfies ScanJobData, tx);
+        return created;
+      });
       return reply.code(202).send(scan);
     });
 
@@ -174,7 +202,8 @@ export function discoveryRoutes(db: Db, queue: JobQueue) {
 
     app.get("/scans/:id", { config: read }, async (req, reply) => {
       const scan = await ownScan(req, id.parse(req.params).id);
-      return scan ?? reply.code(404).send({ error: "Scan not found" });
+      const visible = scan && scanFor(req, scan);
+      return visible ?? reply.code(404).send({ error: "Scan not found" });
     });
 
     app.get("/scans/:id/graph", { config: read }, async (req, reply) => {

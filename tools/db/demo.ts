@@ -21,6 +21,7 @@ import {
   saveScenarioAlert,
   getSnapshotDetails,
   listMembers,
+  recordAuditEvent,
   saveSnapshotAlert,
   saveSnapshotObject,
   setSchedule,
@@ -373,6 +374,21 @@ export async function loadDemo(
     const failedChecks = checks.filter((c) => c.status === "fail").map((c) => c.label);
     await saveScenarioAlert(db, created.id, { broken: [{ scenarioId: scenario.id, runId: suiteRunId, name: scenario.name, status: "failed", failedChecks }], status: "no_watchers" });
     const suite = (await getScenarioSuite(db, created.id))!;
+
+    // The Audit page's story of the demo, as if the account's first admin had set it up by hand.
+    if (admin) {
+      const onTenant = { kind: "tenant" as const, id: tenant.id, name: tenant.name };
+      const onPipeline = { kind: "pipeline" as const, id: pipeline.id, name: pipeline.name, tenantId: tenant.id };
+      const events: [string, typeof onTenant | typeof onPipeline | null, Record<string, unknown> | null][] = [
+        ["POST /tenants", null, { name: tenant.name, host: null }],
+        ["POST /tenants/:id/pipelines", onTenant, { name: pipeline.name, output }],
+        ["PUT /pipelines/:id/schedule", onPipeline, { cron, timeZone }],
+        ["POST /pipelines/:id/scenarios", onPipeline, { name: scenario.name, kind: DEMO_SCENARIO.kind }],
+        ["POST /pipelines/:id/scenario-suites", onPipeline, null],
+        ["POST /pipelines/:id/signoffs", onPipeline, { verdict: "approved", comment: signOff?.comment ?? "" }],
+      ];
+      for (const [action, target, detail] of events) await recordAuditEvent(db, { accountId, userId: admin.userId, action, target, detail, ip: null });
+    }
     return { tenant, scan, pipeline, snapshots, scenarioRun, suite, signOff };
   } catch (e) {
     await deleteTenant(db, tenant.id);

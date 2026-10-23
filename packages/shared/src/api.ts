@@ -1,5 +1,6 @@
 import type { ScenarioAlert, SnapshotAlert } from "./alerts.js";
 import type { Verdict } from "./compare.js";
+import type { ApprovalOutdatedBy } from "./health.js";
 import type { Measurability } from "./database-users.js";
 import type { DspEdge, DspObject, DspObjectRef, Pipeline } from "./objects.js";
 import type { Permission, Role, SpaceScope } from "./roles.js";
@@ -648,6 +649,8 @@ export interface SignOffState {
    * there is no sign-off or the scan it covered is gone.
    */
   changedSince: ChangedStep[] | null;
+  /** Why the latest sign-off, an approval, no longer holds (approvalOutdatedBy in health.ts); null while it holds. */
+  outdatedBy: ApprovalOutdatedBy | null;
   /** What signing off now would cover. */
   basis: SignOffBasis;
   /** Every sign-off, newest first. */

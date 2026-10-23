@@ -90,8 +90,12 @@ export async function getSnapshot(db: Queryable, id: string): Promise<Snapshot |
 }
 
 /** A pipeline's snapshots, newest first. */
-export async function listSnapshots(db: Queryable, pipelineId: string, limit = 50): Promise<Snapshot[]> {
-  const { rows } = await db.query<Row>(`${SELECT} where s.pipeline_id = $1 order by s.requested_at desc limit $2`, [pipelineId, limit]);
+/** Newest first, `limit` at a time; `before` (the requestedAt of the oldest one shown) gives the next older ones. */
+export async function listSnapshots(db: Queryable, pipelineId: string, page: { before?: Date; limit?: number } = {}): Promise<Snapshot[]> {
+  const { rows } = await db.query<Row>(
+    `${SELECT} where s.pipeline_id = $1 and ($3::timestamptz is null or s.requested_at < $3) order by s.requested_at desc limit $2`,
+    [pipelineId, page.limit ?? 50, page.before ?? null],
+  );
   return rows.map(toSnapshot);
 }
 

@@ -30,7 +30,11 @@ trap 'rm -f "$dump.part"' EXIT
 mv "$dump.part" "$dump"
 
 restic backup --tag ystara --host ystara "$dump"
-restic forget --tag ystara --host ystara --keep-daily 14 --keep-weekly 8 --keep-monthly 6 --prune
+# With storage keys that can't delete (YSTARA_BACKUP_PRUNE=0), someone who takes the server can't erase the
+# backups either; old ones are then removed from another machine (deploy/README.md, "Backups nobody on the server can delete").
+if [ "${YSTARA_BACKUP_PRUNE:-1}" != 0 ]; then
+  restic forget --tag ystara --host ystara --keep-daily 14 --keep-weekly 8 --keep-monthly 6 --prune
+fi
 rm -f "$dump"
 
 ping ""

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { deleteDatabaseUser, listDatabaseUsers, markDatabaseUserChecking, setDatabaseUser, type Db } from "@ystara/db";
+import { deleteDatabaseUser, listDatabaseUsers, markDatabaseUserChecking, setDatabaseUser, type Db, type Queryable } from "@ystara/db";
 import { DATABASE_HOST_HINT, databaseUserProblem, databaseUserSpace, isDatabaseHost, JOBS, type DatabaseCheckJobData } from "@ystara/shared";
 import { databaseUserSecretContext, type SecretBox } from "@ystara/shared/secrets";
 import { signedIn } from "../auth/access.js";
@@ -38,7 +38,13 @@ const spaceParams = z.object({ id: z.string().uuid(), space: spaceId });
 export function databaseUserRoutes(db: Db, queue: JobQueue, secrets: SecretBox) {
   /** The tenant, when it belongs to the signed-in account (scope.ts). */
   const ownTenant = scope(db).tenant;
-  const check = (tenantId: string, space: string) => queue.send(JOBS.databaseCheck, { tenantId, space } satisfies DatabaseCheckJobData);
+  /** Saves with `save` and queues the check on the same transaction: a user marked "checking" always has its check coming. */
+  const savedAndChecked = <T>(tenantId: string, space: string, save: (tx: Queryable) => Promise<T | undefined>) =>
+    db.transaction(async (tx) => {
+      const saved = await save(tx);
+      if (saved) await queue.send(JOBS.databaseCheck, { tenantId, space } satisfies DatabaseCheckJobData, tx);
+      return saved;
+    });
 
   return async (app: FastifyInstance) => {
     app.get("/tenants/:id/database-users", { config: { access: "pipelines.read" } }, async (req, reply) => {
@@ -54,25 +60,24 @@ export function databaseUserRoutes(db: Db, queue: JobQueue, secrets: SecretBox) 
       if (!tenant.host) return reply.code(409).send({ error: "This tenant has no Datasphere URL; it only has imported scans." });
       const input = DatabaseUserInput.parse(req.body);
       const space = databaseUserSpace(input.user);
-      const user = await setDatabaseUser(db, {
-        tenantId: tenant.id,
-        space,
-        host: input.host,
-        user: input.user,
-        sealedPassword: secrets.seal(input.password, databaseUserSecretContext(tenant.id, space)),
-        updatedBy: signedIn(req).userId,
-      });
-      await check(tenant.id, space);
-      return user;
+      return savedAndChecked(tenant.id, space, (tx) =>
+        setDatabaseUser(tx, {
+          tenantId: tenant.id,
+          space,
+          host: input.host,
+          user: input.user,
+          sealedPassword: secrets.seal(input.password, databaseUserSecretContext(tenant.id, space)),
+          updatedBy: signedIn(req).userId,
+        }),
+      );
     });
 
     app.post("/tenants/:id/database-users/:space/check", { config: { access: "discovery.run" } }, async (req, reply) => {
       const { id, space } = spaceParams.parse(req.params);
       const tenant = await ownTenant(req, id);
       if (!tenant) return reply.code(404).send({ error: "Tenant not found" });
-      const user = sees(req, space) ? await markDatabaseUserChecking(db, tenant.id, space) : undefined;
+      const user = sees(req, space) ? await savedAndChecked(tenant.id, space, (tx) => markDatabaseUserChecking(tx, tenant.id, space)) : undefined;
       if (!user) return reply.code(404).send({ error: `Space ${space} has no database user` });
-      await check(tenant.id, space);
       return reply.code(202).send(user);
     });
 

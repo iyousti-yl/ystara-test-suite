@@ -30,6 +30,8 @@ npm run db:import -- --from <scan folder> --tenant <NAME> [--account <NAME>]   #
 npm run db:demo -- [--account <NAME>]                  # the tenant "Synthetic demo": 30-50 character names, no tenant calls
 npm run account:create -- --name <ACCOUNT> --admin <email>   # create an account, print its first admin's invitation link
 npm run operator:grant -- --email <email> [--revoke]         # make an existing user the operator (operator panel)
+npm run user:erase -- --email <email> [--yes]                # erase a person (GDPR): sign-in gone, name out of the audit log
+npm run account:delete -- --name <ACCOUNT> [--yes]           # delete an account with its tenants, results and audit log
 npm run check:tenant-content -- [--base <branch>] [--head <commit>] [--file <path>]   # tenant names in what is about to be pushed
 npm run check:browser -- [--as <email>] [--tenant <NAME>] [--page /path] [--dark]   # the local web app in Chromium at 4 widths, every tenant, with screenshots
 npm run spike:simulate -- --output <OBJECT> [--from <scan folder>] [--run] [--oracle]   # phase 3 spike: compile a pipeline into fixture-only SELECTs; --run sends them

@@ -7,10 +7,20 @@
 
 {$YSTARA_DOMAIN} {
 	encode zstd gzip
-	reverse_proxy api:4000
+	# While the API restarts (an update), requests wait up to 10 seconds for it instead of failing at once.
+	reverse_proxy api:4000 {
+		lb_try_duration 10s
+	}
 	header -Server
 	log {
 		output stdout
-		format console
+		# An invitation or reset link's token opens an account: the log keeps the path without it.
+		format filter {
+			wrap console
+			fields {
+				request>uri regexp "/(invitations|invite|resets|reset)/[^/?#]+" "/${1}/<token>"
+				request>headers>Referer delete
+			}
+		}
 	}
 }

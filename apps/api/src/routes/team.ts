@@ -1,14 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { accountSpaces, changeMember, createInvitation, deleteInvitation, listInvitations, listMembers, renameAccount, type Db } from "@ystara/db";
-import { ROLES, type CreatedInvitation, type Team } from "@ystara/shared";
+import { accountSpaces, changeMember, createInvitation, deleteInvitation, getAccountSettings, listInvitations, listMembers, renameAccount, setAccountSettings, type Db } from "@ystara/db";
+import { ROLES, type AccountSettings, type CreatedInvitation, type Team } from "@ystara/shared";
 import { signedIn } from "../auth/access.js";
 import { spaceId } from "./discovery.js";
 
 /**
  * An account's users and roles, under /api/team: the admin page in the web
  * app. Every route needs "users.manage" (admins), except renaming the account
- * ("account.manage", admins too), and only touches the signed-in account. An
+ * and its settings under /api/account/settings ("account.manage", admins too),
+ * and only touches the signed-in account. An
  * account always keeps at least one admin.
  *
  * A member other than an admin can be limited to some spaces (spaces: a list
@@ -26,6 +27,7 @@ const spaces = z
 const NewInvitation = z.object({ email: z.string().trim().toLowerCase().email().max(254), role, spaces: spaces.default(null) });
 const MemberChange = z.object({ role, spaces: spaces.optional() });
 const AccountName = z.object({ name: z.string().trim().min(1).max(100) });
+const Settings = z.object({ draftingWithClaude: z.boolean() }).strict();
 const userId = z.object({ userId: z.string().uuid() });
 const id = z.object({ id: z.string().uuid() });
 
@@ -45,6 +47,11 @@ export function teamRoutes(db: Db) {
       req.log.info({ userId: me.userId, accountId: me.accountId }, "account renamed by its admin");
       return account;
     });
+
+    // What the account allows: drafting scenarios with Claude, which sends pipeline definitions to Anthropic.
+    app.get("/account/settings", { config: { access: "account.manage" } }, async (req) => (await getAccountSettings(db, signedIn(req).accountId))! satisfies AccountSettings);
+
+    app.put("/account/settings", { config: { access: "account.manage" } }, async (req) => setAccountSettings(db, signedIn(req).accountId, Settings.parse(req.body)));
 
     app.post("/team/invitations", { config: manage }, async (req, reply) => {
       const { accountId } = signedIn(req);

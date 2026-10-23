@@ -35,8 +35,12 @@ const scenario = { kind: "scenario", param: "id" } as const;
 
 /** Keyed by method and route as registered under /api, e.g. "DELETE /pipelines/:id". */
 export const AUDIT_ACTIONS: Record<string, AuditAction | null> = {
-  // Signing in. Failed attempts are not events: the sign-in limits and the server log cover them.
+  // Signing in. A failed attempt of a known user is an event in each of their accounts (not a route: routes/auth.ts
+  // writes it), so admins see someone guessing; an unknown email belongs to no account.
   "POST /auth/login": null, // the password step: the sign-in is logged once the code is checked
+  "sign-in: wrong password": { label: "Typed a wrong password", group: "Sign-in" },
+  "sign-in: wrong code": { label: "Typed a wrong authenticator code", group: "Sign-in" },
+  "sign-in: codes locked": { label: "Was locked out after too many wrong codes", group: "Sign-in" },
   "POST /auth/code": { label: "Signed in", group: "Sign-in" },
   "POST /auth/logout": null,
   "POST /auth/account": { label: "Switched to this account", group: "Sign-in" },

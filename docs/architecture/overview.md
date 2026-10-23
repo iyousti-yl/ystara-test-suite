@@ -81,6 +81,11 @@ In place (`packages/db/migrations/`):
 - `audit_events` (account, or none for the operator panel; user and their email as it was; when; the action; what it acted on with its name read before the request ran; the request fields the action lists; the IP address). Written only, never changed or deleted by the app
 - `memberships.spaces` and `invitations.spaces`: null for every space, or the space IDs a member sees
 - `pipeline_signoffs` (tenant, pipeline, approved or rejected, comment, the scan, latest suite and latest successful snapshot it covered, who signed and their email, when)
+- `sessions.last_seen_at`: when the session was last used (moved at most once a minute); a session ends after 60 minutes without use, and after 12 hours at most
+- `accounts.drafting_with_claude`: whether the account's admin agreed to send pipeline definitions to Anthropic for drafting; off until they do
+- `worker_heartbeats` (worker, version, started, last seen): each worker's sign of life at every schedule tick, read by `/api/health/worker`
+- `server_secrets` row `master_key_check`: a known value sealed with `MASTER_KEY` at the first start, so a program started with another key stops at once
+- Migration 015 also indexes every foreign key that a delete cascades through or a page reads by (scenario runs by pipeline, snapshots and suites by scan, and so on)
 
 Planned:
 
@@ -191,7 +196,24 @@ Open questions for phase 3: how delta loads and upserts in transformation flows 
 - No customer row data stored unless explicitly enabled per account.
 - Full audit log: every change made through the app (connections, scans, pipelines, tests, runs, sign-offs, users and roles) and every sign-in, with who, when and from where; admins read and export it, nobody can change it in the app.
 - Members can be limited to some spaces; a pipeline is visible to those who see its output's space.
+- Sessions live as long as the browser window (no cookie lifetime), end after 60 minutes without use and after 12 hours at most; the cookie is Secure on a server. A user changes their own password (the current one and a code) and signs out their other browsers in Account. Passwords are at least 12 characters, not one or two characters repeated, and not made of the user's email.
+- Sign-in is limited per address (30 a minute) and per email across addresses (20 every 15 minutes); a wrong password or code is written to the audit log of each of the user's accounts.
+- What Ystara's operator does to an account (renaming it, inviting its admin, a reset link for one of its people) is copied into that account's audit log.
+- Drafting scenarios with Claude sends pipeline definitions (never data) to Anthropic only after the account's admin switches it on, 50 drafts a day at most.
+- A failure on Ystara's side answers with a reference and nothing of the cause; the reference finds it in the log. Caddy's log keeps invitation and reset tokens out.
+- The containers drop every Linux capability and can't gain any; the API's filesystem is read-only.
+- GDPR: `npm run user:erase` removes a person's sign-in and their name and address from the audit log and sign-offs; `npm run account:delete` removes an account with everything stored for it.
+- CI fails on a known high or critical vulnerability in the packages a server runs (`npm audit --omit=dev`), and Dependabot proposes updates every week.
 - Self-hosted runner available when required (same connector interface).
+
+## Running in production
+
+- **Health.** `GET /api/health` answers 503 when the API can't reach Postgres, and shows the version (the commit the image was built from). `GET /api/health/worker` answers 503 when no worker took the once-a-minute tick for 3 minutes. Docker restarts a stopped container; the uptime checks in `deploy/README.md` say when one keeps failing.
+- **Restarts don't leave work hanging.** On a stop the worker takes no new job and gives the running ones 45 seconds. At every start, tick and stop it marks the scans, snapshots, runs, suites and checks that no job holds any more as interrupted ("Ystara restarted while it ran. Start it again."), so nothing shows "Running" forever (`sweepInterrupted` in `packages/db`).
+- **A row and its job are saved together.** Starting a scan, snapshot, run, suite or check saves the row and queues its job in one transaction: there is never a queued scan without a job, or a job without its scan. The same scan, snapshot or Run all is refused while one is still running.
+- **Time limits.** Every database statement stops after 30 seconds in the API and 5 minutes in the worker, a transaction left open after a minute, a migration that waits more than 10 seconds for a lock. A query on a tenant stops after 10 minutes, and mail and Teams calls after a minute.
+- **Logs.** The worker writes one JSON line per event, with the queue and job; the API one per request, with its id, which every answer carries in `x-request-id`.
+- **Paging.** Lists that grow (scans, snapshots, runs, suites) answer 50 at a time, newest first; `?before=<time>` gives the next 50.
 
 ## Feasibility spike results (2026-10-15)
 

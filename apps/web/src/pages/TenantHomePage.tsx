@@ -209,7 +209,7 @@ function SetupChecklist({ steps }: { steps: SetupStep[] }) {
 /** Once set up: how many pipelines are in each state, and those that need a look, each with its next step. */
 function HealthSummary({ tenantId, rows }: { tenantId: string; rows: { pipeline: PipelineDefinitionJson; health: PipelineHealth }[] }) {
   const navigate = useNavigate();
-  const problems = rows.filter((r) => r.health.state === "failing" || r.health.state === "changed");
+  const problems = rows.filter((r) => r.health.state === "failing" || r.health.state === "changed" || r.health.state === "empty");
   const counts = HEALTH_STATES.map((state) => [state, rows.filter((r) => r.health.state === state).length] as const).filter(([, n]) => n > 0);
   return (
     <section className="block setup" aria-label="Pipelines at a glance">

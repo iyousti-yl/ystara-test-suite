@@ -44,6 +44,7 @@ export function ConnectionStatusTag({ status }: { status: ConnectionJson["status
 const HEALTH_DESIGN = {
   failing: "Negative",
   changed: "Critical",
+  empty: "Critical",
   untested: "Neutral",
   running: "Information",
   ok: "Positive",

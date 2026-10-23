@@ -49,7 +49,8 @@ describe("signing in", () => {
     const login = await call("POST", "/auth/login", { payload: { email: " Anna@Example.com ", password: TEST_PASSWORD } });
     expect(login.json()).toEqual({ next: "code" });
     const pending = sessionCookie(login);
-    expect(pending).toMatchObject({ httpOnly: true, sameSite: "Strict", path: "/api", maxAge: 600 });
+    expect(pending).toMatchObject({ httpOnly: true, sameSite: "Strict", path: "/api" });
+    expect(pending.maxAge).toBeUndefined(); // gone when the browser closes; the server ends it after PENDING_MINUTES anyway
 
     // The password alone opens nothing.
     expect((await call("GET", "/auth/me", { cookie: pending.header })).statusCode).toBe(401);
@@ -66,7 +67,7 @@ describe("signing in", () => {
     // A new token after the code: the one from before it is worthless.
     const session = sessionCookie(verified);
     expect(session.value).not.toBe(pending.value);
-    expect(session.maxAge).toBe(12 * 60 * 60);
+    expect(session.maxAge).toBeUndefined(); // a session cookie: the browser forgets it when it closes
     expect((await call("GET", "/auth/me", { cookie: pending.header })).statusCode).toBe(401);
     expect((await call("GET", "/tenants", { cookie: session.header })).statusCode).toBe(200);
 
@@ -218,5 +219,85 @@ describe("guessing", () => {
     expect((await login(" TARGET@example.com")).statusCode).toBe(429);
     expect((await login("colleague@example.com")).statusCode).toBe(401);
     await limited.close();
+  });
+});
+
+describe("sign-in limits", () => {
+  it("stop guessing one email's password from many addresses", async () => {
+    await testUser(db, { account: "Sign-in", email: "spread@example.com", role: "viewer" });
+    const limited = await buildServer({ db, queue: { send: async () => undefined }, secrets: testSecrets }, { logger: false });
+    const login = (n: number) => limited.inject({ method: "POST", url: "/api/auth/login", remoteAddress: `198.51.100.${n}`, payload: { email: "spread@example.com", password: "wrong password!" } });
+    for (let n = 1; n <= 20; n++) expect((await login(n)).statusCode).toBe(401);
+    const refused = await login(21);
+    expect([refused.statusCode, refused.json().error]).toEqual([429, "Too many sign-in attempts. Wait 15 minutes and try again."]);
+    expect(Number(refused.headers["retry-after"])).toBeGreaterThan(800);
+    await limited.close();
+  });
+
+  it("write each wrong password and code to the user's accounts' audit logs", async () => {
+    const user = await testUser(db, { account: "Logged sign-ins", email: "logged@example.com", role: "viewer" });
+    await call("POST", "/auth/login", { payload: { email: "logged@example.com", password: "wrong password!" } });
+    const pending = sessionCookie(await call("POST", "/auth/login", { payload: { email: "logged@example.com", password: TEST_PASSWORD } }));
+    await call("POST", "/auth/code", { cookie: pending.header, payload: { code: "000000" === codeNow(user.totpSecret) ? "111111" : "000000" } });
+    const { rows } = await db.query<{ action: string }>("select action from audit_events where account_id = $1 order by id", [user.accountId]);
+    expect(rows.map((r) => r.action)).toEqual(["sign-in: wrong password", "sign-in: wrong code"]);
+  });
+});
+
+describe("a session", () => {
+  const lastUsed = (userId: string, minutesAgo: number) => db.query("update sessions set last_seen_at = now() - make_interval(mins => $2) where user_id = $1", [userId, minutesAgo]);
+  const seen = async (userId: string) => (await db.query<{ last_seen_at: Date }>("select last_seen_at from sessions where user_id = $1", [userId])).rows[0]?.last_seen_at;
+
+  it("ends after an hour without use, saying why", async () => {
+    const user = await testUser(db, { account: "Idle", email: "idle@example.com", role: "viewer" });
+    await lastUsed(user.userId, 61);
+    expect((await call("GET", "/health", { cookie: user.cookie })).statusCode).toBe(200); // public pages still answer
+    expect(await seen(user.userId)).toBeUndefined(); // and the session is gone
+    const user2 = await testUser(db, { account: "Idle", email: "idle2@example.com", role: "viewer" });
+    await lastUsed(user2.userId, 61);
+    const res = await call("GET", "/tenants", { cookie: user2.cookie });
+    expect([res.statusCode, res.json().error]).toEqual([401, "You were signed out after 60 minutes without using Ystara. Sign in again to continue."]);
+    expect(res.cookies.find((c) => c.name === "ystara_session")?.value).toBe("");
+  });
+
+  it("counts as used when something changes or the page says someone is at it, not when it only polls", async () => {
+    const user = await testUser(db, { account: "Active", email: "active@example.com", role: "viewer" });
+    await lastUsed(user.userId, 30);
+    const before = (await seen(user.userId))!;
+    await call("GET", "/tenants", { cookie: user.cookie });
+    expect(await seen(user.userId)).toEqual(before);
+    await app.inject({ method: "GET", url: "/api/tenants", headers: { cookie: user.cookie, "x-ystara-active": "1" } });
+    expect(Date.now() - (await seen(user.userId))!.getTime()).toBeLessThan(60_000);
+  });
+
+  it("can end every other browser signed in as the user", async () => {
+    const here = await testUser(db, { account: "Two browsers", email: "two@example.com", role: "viewer" });
+    const there = await testUser(db, { account: "Two browsers b", email: "two@example.com", role: "viewer" });
+    expect((await call("GET", "/auth/me", { cookie: here.cookie })).json().otherSessions).toBe(1);
+    expect((await call("POST", "/auth/sessions/end-others", { cookie: here.cookie })).json()).toEqual({ ended: 1 });
+    expect((await call("GET", "/auth/me", { cookie: there.cookie })).statusCode).toBe(401);
+    expect((await call("GET", "/auth/me", { cookie: here.cookie })).json().otherSessions).toBe(0);
+  });
+});
+
+describe("changing one's own password", () => {
+  it("takes the current password and a code, refuses a weak one, and signs out the other browsers", async () => {
+    const user = await testUser(db, { account: "Own password", email: "owner@example.com", role: "developer" });
+    const other = await testUser(db, { account: "Own password b", email: "owner@example.com", role: "developer" });
+    const change = (body: object) => call("POST", "/auth/password", { cookie: user.cookie, payload: body });
+    const good = { currentPassword: TEST_PASSWORD, newPassword: "a much longer passphrase", code: codeNow(user.totpSecret) };
+
+    expect((await change({ ...good, currentPassword: "not my password" })).json().error).toBe("Your current password is not right");
+    expect((await change({ ...good, code: "000000" === good.code ? "111111" : "000000" })).json().error).toMatch(/^That code is not right/);
+    const weak = await change({ ...good, newPassword: "owner@example.com!" });
+    expect([weak.statusCode, weak.json().error]).toEqual([400, "Don't use your email address in your password"]);
+    // The code above was used by the refused change: the next one is needed.
+    await db.query("update users set totp_last_step = 0 where id = $1", [user.userId]);
+    expect((await change({ ...good, code: codeNow(user.totpSecret) })).json()).toEqual({ ok: true });
+
+    expect((await call("GET", "/auth/me", { cookie: other.cookie })).statusCode).toBe(401);
+    expect((await call("GET", "/auth/me", { cookie: user.cookie })).statusCode).toBe(200);
+    const login = await call("POST", "/auth/login", { payload: { email: "owner@example.com", password: "a much longer passphrase" } });
+    expect(login.json()).toEqual({ next: "code" });
   });
 });

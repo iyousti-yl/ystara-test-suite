@@ -17,3 +17,6 @@ export * from "./suites.js";
 export * from "./audit.js";
 export * from "./history.js";
 export * from "./summaries.js";
+export * from "./sweep.js";
+export * from "./workers.js";
+export * from "./erase.js";

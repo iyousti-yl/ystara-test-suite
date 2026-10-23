@@ -22,6 +22,13 @@ export interface DatabaseUser {
 
 export type Row = Record<string, unknown>;
 
+/**
+ * The longest one statement may run. A count of distinct values over every column of a large view can take a
+ * while, but a statement that runs longer than this is stopped (its connection closed, which ends it in HANA too),
+ * so a job never waits on the customer's database for good.
+ */
+export const STATEMENT_TIMEOUT_MS = 10 * 60_000;
+
 export class SqlReader {
   private constructor(
     private readonly client: ReturnType<typeof hdb.createClient>,
@@ -39,18 +46,30 @@ export class SqlReader {
     return reader;
   }
 
-  /** Runs one SELECT with `params` bound to its `?` placeholders. */
-  async select<T extends Row = Row>(sql: string, params: unknown[] = []): Promise<T[]> {
+  /** Runs one SELECT with `params` bound to its `?` placeholders. Stopped after `timeoutMs` (STATEMENT_TIMEOUT_MS). */
+  async select<T extends Row = Row>(sql: string, params: unknown[] = [], timeoutMs = STATEMENT_TIMEOUT_MS): Promise<T[]> {
     assertSelectOnly(sql);
-    if (!params.length) return (await this.call<unknown>((cb) => this.client.exec(sql, cb))) as T[];
+    if (!params.length) return (await this.timed(timeoutMs, this.call<unknown>((cb) => this.client.exec(sql, cb)))) as T[];
     const statement = await this.call<{ exec(p: unknown[], cb: (e: Error | null, r: unknown) => void): void; drop(cb: (e: Error | null) => void): void }>(
       (cb) => this.client.prepare(sql, cb),
     );
     try {
-      return (await this.call<unknown>((cb) => statement.exec(params, cb))) as T[];
+      return (await this.timed(timeoutMs, this.call<unknown>((cb) => statement.exec(params, cb)))) as T[];
     } finally {
       statement.drop(() => undefined);
     }
+  }
+
+  /** `work`, or an error once `ms` have passed; then the connection is closed, which stops the statement in HANA. */
+  private timed<T>(ms: number, work: Promise<T>): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        this.client.close();
+        reject(new Error(`The query ran longer than ${Math.round(ms / 60_000)} minutes and was stopped.`));
+      }, ms);
+    });
+    return Promise.race([work, late]).finally(() => clearTimeout(timer));
   }
 
   async close(): Promise<void> {

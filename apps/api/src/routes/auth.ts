@@ -6,6 +6,7 @@ import {
   claimCodeAttempt,
   countOtherSessions,
   createSession,
+  deleteOtherSessions,
   deleteSession,
   findOpenInvitation,
   findOpenSignInReset,
@@ -14,7 +15,9 @@ import {
   getUser,
   invitationTotpSecret,
   membershipsOf,
+  recordAuditEvent,
   setInvitationTotpSecret,
+  setPasswordHash,
   setSignInResetTotpSecret,
   signInResetTotpSecret,
   switchSessionAccount,
@@ -42,7 +45,9 @@ import { matchTotp, newTotpSecret, otpauthUri } from "../auth/totp.js";
  */
 const email = z.string().trim().toLowerCase().email().max(254);
 const code = z.string().trim().max(10);
-const Login = z.object({ email, password: z.string().min(1).max(1000) });
+/** accountId: the account to land in, when the user belongs to it (signing in again where they were). */
+const Login = z.object({ email, password: z.string().min(1).max(1000), accountId: z.string().uuid().optional() });
+const ChangePassword = z.object({ currentPassword: z.string().min(1).max(1000), newPassword: z.string().max(1000), code });
 const Code = z.object({ code });
 const SwitchAccount = z.object({ accountId: z.string().uuid() });
 const Token = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{20,100}$/) });
@@ -70,6 +75,18 @@ const limitedBy = (what: (req: FastifyRequest) => string) => ({
 const byEmail = limitedBy((req) => String((req.body as { email?: unknown } | undefined)?.email ?? "").trim().toLowerCase());
 const byPendingUser = limitedBy((req) => req.pending?.userId ?? "");
 const byLink = limitedBy((req) => String((req.params as { token?: unknown }).token ?? ""));
+const byUser = limitedBy((req) => req.auth?.userId ?? "");
+
+/**
+ * Two more limits on the password step, on top of the one per address and email: 30 a minute from one address
+ * whatever the emails (one client trying many accounts), and 20 per 15 minutes for one email whatever the
+ * addresses (many clients guessing one person's password). The second can keep that person out for 15 minutes;
+ * that is the price of not letting a password be guessed from many places at once.
+ */
+const SIGN_IN_LIMITS = [
+  { max: 30, timeWindow: "1 minute", keyGenerator: (req: FastifyRequest) => `sign-in address|${req.ip}` },
+  { max: 20, timeWindow: "15 minutes", keyGenerator: (req: FastifyRequest) => `sign-in email|${String((req.body as { email?: unknown } | undefined)?.email ?? "").trim().toLowerCase()}` },
+];
 
 const INVITATION_GONE = "This invitation link is no longer valid. Ask your admin for a new one.";
 const RESET_GONE = "This link is no longer valid. Ask for a new one.";
@@ -85,10 +102,24 @@ export function authRoutes(db: Db, secrets: SecretBox) {
     if (req.sessionToken) await deleteSession(db, req.sessionToken);
     const minutes = input.verified ? SESSION_MINUTES : PENDING_MINUTES;
     const token = await createSession(db, { ...input, minutes });
-    setSessionCookie(reply, token, minutes);
+    setSessionCookie(reply, token);
     // The new session's user acts from here on: the audit log (audit.ts) names them, in the account they landed in.
     if (input.verified) req.auditActor = { userId: input.userId, accountId: input.accountId };
     return token;
+  }
+
+  /**
+   * A failed sign-in of a known user goes into the log of each account they belong to, so their admins see an
+   * attack on them (an unknown email belongs to no account: the limits and the server log cover it).
+   */
+  async function signInEvent(req: FastifyRequest, userId: string, action: string) {
+    try {
+      for (const account of await membershipsOf(db, userId)) {
+        await recordAuditEvent(db, { accountId: account.id, userId, action, target: null, detail: null, ip: req.ip ?? null });
+      }
+    } catch (err) {
+      req.log.error({ err, action }, "audit event not written");
+    }
   }
 
   /** Ends the sign-in (the password is needed again) and says how long codes are locked. */
@@ -111,9 +142,13 @@ export function authRoutes(db: Db, secrets: SecretBox) {
   }
 
   /** Checks a new password and a code from the link's secret (sealed); the stored form of both, or why they are refused. */
-  async function newSignIn(body: unknown, sealedSecret: string | undefined): Promise<{ problem: string } | { passwordHash: string; totpSecret: string; totpStep: number }> {
+  async function newSignIn(
+    body: unknown,
+    email: string,
+    sealedSecret: string | undefined,
+  ): Promise<{ problem: string } | { passwordHash: string; totpSecret: string; totpStep: number }> {
     const input = NewSignIn.parse(body);
-    const problem = passwordProblem(input.password);
+    const problem = passwordProblem(input.password, email);
     if (problem) return { problem };
     if (!sealedSecret) return { problem: "Set up the authenticator app first: open the link again." };
     const step = matchTotp(secrets.open(sealedSecret), input.code);
@@ -122,12 +157,26 @@ export function authRoutes(db: Db, secrets: SecretBox) {
   }
 
   return async (app: FastifyInstance) => {
+    const signInLimits = SIGN_IN_LIMITS.map((limit) => app.createRateLimit(limit));
+
     app.post("/auth/login", { config: { access: "public", ...byEmail } }, async (req, reply) => {
       const input = Login.parse(req.body);
+      for (const limit of signInLimits) {
+        const counted = await limit(req);
+        if (!counted.isAllowed && counted.isExceeded) {
+          const minutes = Math.max(1, Math.ceil(counted.ttlInSeconds / 60));
+          return reply
+            .code(429)
+            .header("retry-after", String(counted.ttlInSeconds))
+            .send({ error: `Too many sign-in attempts. Wait ${minutes === 1 ? "a minute" : `${minutes} minutes`} and try again.` });
+        }
+      }
       const user = await findUserByEmail(db, input.email);
       const ok = await verifyPassword(input.password, user?.passwordHash ?? (await dummyHash()));
+      if (user && !ok) await signInEvent(req, user.id, "sign-in: wrong password");
       if (!user || !ok) return reply.code(401).send({ error: "The email or password is not right" });
-      const [account] = await membershipsOf(db, user.id);
+      const accounts = await membershipsOf(db, user.id);
+      const account = accounts.find((a) => a.id === input.accountId) ?? accounts[0];
       if (!account) return reply.code(403).send({ error: "You are no longer a member of any account. Ask an admin to invite you again." });
       await startSession(req, reply, { userId: user.id, accountId: account.id, verified: false });
       return { next: "code" };
@@ -144,6 +193,7 @@ export function authRoutes(db: Db, secrets: SecretBox) {
       if (!attempt.allowed) return tooManyCodes(req, reply, attempt.lockedUntil ?? new Date());
       const step = matchTotp(secrets.open(user.totpSecret), code);
       if (step === undefined || !(await useTotpStep(db, user.id, step))) {
+        await signInEvent(req, user.id, attempt.lockedUntil ? "sign-in: codes locked" : "sign-in: wrong code");
         if (attempt.lockedUntil) return tooManyCodes(req, reply, attempt.lockedUntil);
         return reply.code(401).send({ error: "That code is not right, or was already used. Try the next one your app shows." });
       }
@@ -158,6 +208,36 @@ export function authRoutes(db: Db, secrets: SecretBox) {
     });
 
     app.get("/auth/me", async (req) => me(db, signedIn(req), req.sessionToken!));
+
+    /**
+     * A new password, with the current one and a code (someone at an unlocked browser can't change it alone).
+     * Every other browser signed in as the user is signed out; this one stays. Wrong answers are 400, not 401:
+     * the session itself is fine.
+     */
+    app.post("/auth/password", { config: { ...byUser } }, async (req, reply) => {
+      const { userId } = signedIn(req);
+      const input = ChangePassword.parse(req.body);
+      const user = (await getUser(db, userId))!;
+      if (!(await verifyPassword(input.currentPassword, user.passwordHash))) {
+        await signInEvent(req, userId, "sign-in: wrong password");
+        return reply.code(400).send({ error: "Your current password is not right" });
+      }
+      const attempt = await claimCodeAttempt(db, userId, CODE_LOCK);
+      if (!attempt.allowed) return reply.code(429).send({ error: "Too many wrong codes. Wait a few minutes, then try again." });
+      const step = matchTotp(secrets.open(user.totpSecret), input.code);
+      if (step === undefined || !(await useTotpStep(db, userId, step))) {
+        await signInEvent(req, userId, attempt.lockedUntil ? "sign-in: codes locked" : "sign-in: wrong code");
+        return reply.code(400).send({ error: "That code is not right, or was already used. Try the next one your app shows." });
+      }
+      const problem = passwordProblem(input.newPassword, user.email);
+      if (problem) return reply.code(400).send({ error: problem });
+      await setPasswordHash(db, userId, await hashPassword(input.newPassword));
+      await deleteOtherSessions(db, userId, req.sessionToken!);
+      return { ok: true };
+    });
+
+    /** Signs out every other browser signed in as the user (a laptop left somewhere, a shared PC). */
+    app.post("/auth/sessions/end-others", async (req) => ({ ended: await deleteOtherSessions(db, signedIn(req).userId, req.sessionToken!) }));
 
     /** Work in another account the user belongs to. */
     app.post("/auth/account", async (req, reply) => {
@@ -202,7 +282,7 @@ export function authRoutes(db: Db, secrets: SecretBox) {
       }
 
       // A new user chooses a password and proves the authenticator app works with one code.
-      const signIn = await newSignIn(req.body, await invitationTotpSecret(db, token));
+      const signIn = await newSignIn(req.body, invitation.email, await invitationTotpSecret(db, token));
       if ("problem" in signIn) return reply.code(400).send({ error: signIn.problem });
       const joined = await acceptInvitation(db, token, { newUser: signIn });
       if (!joined) return reply.code(404).send({ error: INVITATION_GONE });
@@ -227,8 +307,9 @@ export function authRoutes(db: Db, secrets: SecretBox) {
     // The new password and authenticator replace the old ones, every other sign-in of the user ends, and this browser is signed in.
     app.post("/resets/:token/accept", { config: { access: "public", ...byLink } }, async (req, reply) => {
       const { token } = Token.parse(req.params);
-      if (!(await findOpenSignInReset(db, token))) return reply.code(404).send({ error: RESET_GONE });
-      const signIn = await newSignIn(req.body, await signInResetTotpSecret(db, token));
+      const reset = await findOpenSignInReset(db, token);
+      if (!reset) return reply.code(404).send({ error: RESET_GONE });
+      const signIn = await newSignIn(req.body, reset.email, await signInResetTotpSecret(db, token));
       if ("problem" in signIn) return reply.code(400).send({ error: signIn.problem });
       const userId = await useSignInReset(db, token, signIn);
       if (!userId) return reply.code(404).send({ error: RESET_GONE });

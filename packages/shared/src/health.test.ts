@@ -4,8 +4,8 @@ import { HEALTH_STATES, pipelineHealth, type PipelineSummary } from "./health.js
 const at = new Date("2026-10-20T08:00:00Z");
 const suite = (status: NonNullable<PipelineSummary["suite"]>["status"], passed: number | null, total: number | null, cause: "manual" | "scan" = "manual") =>
   ({ id: "su1", cause, status, requestedAt: at, finishedAt: at, passed, total }) as const;
-const snapshot = (status: NonNullable<PipelineSummary["snapshot"]>["status"], alert: NonNullable<PipelineSummary["snapshot"]>["alert"] = null) =>
-  ({ id: "sn1", status, scheduled: true, requestedAt: at, finishedAt: at, outputRows: 10, alert }) as const;
+const snapshot = (status: NonNullable<PipelineSummary["snapshot"]>["status"], alert: NonNullable<PipelineSummary["snapshot"]>["alert"] = null, outputRows = 10) =>
+  ({ id: "sn1", status, scheduled: true, requestedAt: at, finishedAt: at, outputRows, alert }) as const;
 
 describe("pipelineHealth", () => {
   it("puts failing scenarios first, with how many and the run to open", () => {
@@ -28,6 +28,14 @@ describe("pipelineHealth", () => {
     });
   });
 
+  it("then an output without rows, even when the scenarios pass", () => {
+    expect(pipelineHealth({ scenarios: 2, suite: suite("passed", 2, 2), snapshot: snapshot("succeeded", null, 0) })).toEqual({
+      state: "empty",
+      sentence: "The latest snapshot found no rows in the output.",
+      next: { page: "snapshot", id: "sn1", text: "Open the snapshot" },
+    });
+  });
+
   it("says when something runs, when all is well, and what to start with", () => {
     expect(pipelineHealth({ scenarios: 2, suite: suite("running", null, 2), snapshot: null }).state).toBe("running");
     expect(pipelineHealth({ scenarios: 2, suite: suite("passed", 2, 2), snapshot: null })).toEqual({ state: "ok", sentence: "Both its scenarios pass.", next: null });
@@ -39,6 +47,6 @@ describe("pipelineHealth", () => {
   });
 
   it("orders the states most pressing first", () => {
-    expect(HEALTH_STATES).toEqual(["failing", "changed", "untested", "running", "ok"]);
+    expect(HEALTH_STATES).toEqual(["failing", "changed", "empty", "untested", "running", "ok"]);
   });
 });

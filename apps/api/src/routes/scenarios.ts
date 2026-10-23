@@ -5,11 +5,14 @@ import {
   createScenario,
   createScenarioRun,
   createScenarioSuite,
+  countAuditEvents,
   deleteScenario,
+  getAccountSettings,
   getPipeline,
   getScenarioRun,
   getScenarioSuite,
   getTenant,
+  hasUnfinishedSuite,
   latestSucceededScan,
   listDatabaseUsers,
   listScenarioRuns,
@@ -23,6 +26,7 @@ import {
 import {
   JOBS,
   refKey,
+  SCENARIO_SUITE_QUEUE_OPTIONS,
   ScenarioSpec,
   scenarioProblems,
   whyNoScenarioRun,
@@ -40,6 +44,7 @@ import { signedIn } from "../auth/access.js";
 import { scope } from "../scope.js";
 import { DraftFailed, type ScenarioDrafter } from "../drafting.js";
 import type { JobQueue } from "../server.js";
+import { Page } from "./discovery.js";
 
 /**
  * Scenarios of saved pipelines (StoredScenario and ScenarioRun in
@@ -51,7 +56,8 @@ import type { JobQueue } from "../server.js";
  * ("runs.execute") queues a job, and the worker sends each check as a SELECT
  * that reads only the scenario's rows. Drafting one from its description
  * ("scenarios.write_visual") sends the pipeline's definitions to Claude when
- * the server has an Anthropic API key (drafting.ts, operator.ts). "Run all"
+ * the server has an Anthropic API key (drafting.ts, operator.ts) and the
+ * account's admin switched drafting on under Settings. "Run all"
  * ("runs.execute") queues a suite of every scenario of the pipeline, which the
  * worker also queues on its own after a scan that changed the pipeline. As
  * everywhere, another account's pipeline, scenario, run or suite answers 404.
@@ -67,6 +73,11 @@ const DraftRequest = z.object({
 
 /** Scans don't change once they succeeded, so a few of their graphs are kept for compiling while someone builds. */
 const GRAPHS_KEPT = 4;
+/** Each draft is a paid call to Claude: an account drafts at most this many a day, whoever pays for the key. */
+export const DRAFTS_PER_DAY = 50;
+const DRAFT_ACTION = "POST /pipelines/:id/scenario-draft";
+/** At most `max` a minute per person: a draft is a call to Claude, and a check compiles on the whole graph (the builder checks as someone types). */
+const perUser = (max: number) => ({ max, timeWindow: "1 minute", hook: "preHandler" as const, keyGenerator: (req: FastifyRequest) => signedIn(req).userId });
 
 export function scenarioRoutes(db: Db, queue: JobQueue, drafter: ScenarioDrafter) {
   const graphs = new Map<string, Promise<LineageGraph>>();
@@ -83,6 +94,12 @@ export function scenarioRoutes(db: Db, queue: JobQueue, drafter: ScenarioDrafter
 
   // The pipeline or scenario, when the signed-in user may reach it (scope.ts).
   const { pipeline: ownPipeline, scenario: ownScenario } = scope(db);
+
+  /** Why drafting with Claude is off for the signed-in user's account, or undefined when it is on. */
+  async function draftingOff(req: FastifyRequest): Promise<ScenarioInputs["draftingOff"]> {
+    if (!(await drafter.available())) return "server";
+    return (await getAccountSettings(db, signedIn(req).accountId))?.draftingWithClaude ? undefined : "account";
+  }
 
   /** The pipeline built on the tenant's latest successful scan, or why it can't be (409). */
   async function built(pipeline: PipelineDefinition): Promise<{ scan: Scan; graph: LineageGraph; steps: Pipeline } | { error: string }> {
@@ -112,18 +129,27 @@ export function scenarioRoutes(db: Db, queue: JobQueue, drafter: ScenarioDrafter
       if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
       const b = await built(pipeline);
       if ("error" in b) return reply.code(409).send({ error: b.error });
-      return { scanId: b.scan.id, drafting: await drafter.available(), ...scenarioInputs(b.graph, b.steps) } satisfies ScenarioInputs;
+      const off = await draftingOff(req);
+      return { scanId: b.scan.id, drafting: !off, ...(off && { draftingOff: off }), ...scenarioInputs(b.graph, b.steps) } satisfies ScenarioInputs;
     });
 
     // Rows and checks drafted by Claude from a description, compiled on the latest scan and corrected; not saved.
-    // A few a minute per person at most: each one costs a call to Claude.
+    // A few a minute per person and DRAFTS_PER_DAY per account at most: each one costs a call to Claude.
     app.post(
       "/pipelines/:id/scenario-draft",
-      { config: { access: "scenarios.write_visual", rateLimit: { max: 5, timeWindow: "1 minute", hook: "preHandler", keyGenerator: (req: FastifyRequest) => signedIn(req).userId } } },
+      { config: { access: "scenarios.write_visual", rateLimit: perUser(5) } },
       async (req, reply) => {
         const pipeline = await ownPipeline(req, id.parse(req.params).id);
         if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
-        if (!(await drafter.available())) return reply.code(503).send({ error: "Drafting with Claude isn't set up on this server: its operator enters an Anthropic API key on the operator panel" });
+        const off = await draftingOff(req);
+        if (off === "server") return reply.code(503).send({ error: "Drafting with Claude isn't set up on this server: its operator enters an Anthropic API key on the operator panel" });
+        if (off === "account") {
+          return reply.code(409).send({ error: "Drafting with Claude is off for this account. An admin can switch it on under Settings, once they agree to send pipeline definitions to Anthropic." });
+        }
+        const dayAgo = new Date(Date.now() - 24 * 60 * 60_000);
+        if ((await countAuditEvents(db, { accountId: signedIn(req).accountId, action: DRAFT_ACTION, since: dayAgo })) >= DRAFTS_PER_DAY) {
+          return reply.code(429).send({ error: `This account drafted ${DRAFTS_PER_DAY} scenarios with Claude in the last 24 hours, the most Ystara allows. Build this one by hand, or draft again tomorrow.` });
+        }
         const request = DraftRequest.parse(req.body);
         const b = await built(pipeline);
         if ("error" in b) return reply.code(409).send({ error: b.error });
@@ -150,7 +176,7 @@ export function scenarioRoutes(db: Db, queue: JobQueue, drafter: ScenarioDrafter
     );
 
     // A scenario compiled as the builder has it now, saved or not. Sends nothing to the tenant.
-    app.post("/pipelines/:id/scenario-check", { config: { access: "scenarios.read" } }, async (req, reply) => {
+    app.post("/pipelines/:id/scenario-check", { config: { access: "scenarios.read", rateLimit: perUser(30) } }, async (req, reply) => {
       const pipeline = await ownPipeline(req, id.parse(req.params).id);
       if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
       const spec = specFrom(pipeline, req.body, reply);
@@ -223,15 +249,18 @@ export function scenarioRoutes(db: Db, queue: JobQueue, drafter: ScenarioDrafter
       if ("error" in b) return reply.code(409).send({ error: b.error });
       const { problems } = planScenario(b.graph, b.steps, scenario.spec);
       if (problems.length) return reply.code(409).send({ error: `The scenario can't run: ${problems.join(" ")}` });
-      const run = await createScenarioRun(db, scenario, signedIn(req).userId);
-      await queue.send(JOBS.scenarioRun, { runId: run.id } satisfies ScenarioRunJobData);
+      const run = await db.transaction(async (tx) => {
+        const created = await createScenarioRun(tx, scenario, signedIn(req).userId);
+        await queue.send(JOBS.scenarioRun, { runId: created.id } satisfies ScenarioRunJobData, tx);
+        return created;
+      });
       return reply.code(202).send(run);
     });
 
     app.get("/scenarios/:id/runs", { config: { access: "runs.read" } }, async (req, reply) => {
       const scenario = await ownScenario(req, id.parse(req.params).id);
       if (!scenario) return reply.code(404).send({ error: "Scenario not found" });
-      return listScenarioRuns(db, scenario.id);
+      return listScenarioRuns(db, scenario.id, Page.parse(req.query));
     });
 
     app.get("/scenario-runs/:id", { config: { access: "runs.read" } }, async (req, reply) => {
@@ -252,15 +281,22 @@ export function scenarioRoutes(db: Db, queue: JobQueue, drafter: ScenarioDrafter
       if (why) return reply.code(409).send({ error: why });
       const b = await built(pipeline);
       if ("error" in b) return reply.code(409).send({ error: b.error });
-      const suite = await createScenarioSuite(db, { tenantId: tenant.id, pipelineId: pipeline.id, cause: "manual", requestedBy: signedIn(req).userId });
-      await queue.send(JOBS.scenarioSuite, { suiteId: suite.id } satisfies ScenarioSuiteJobData);
+      // One "Run all" of a pipeline at a time: a second would run the same scenarios again.
+      if (await hasUnfinishedSuite(db, pipeline.id, new Date(Date.now() - SCENARIO_SUITE_QUEUE_OPTIONS.expireInSeconds * 1000))) {
+        return reply.code(409).send({ error: "This pipeline's scenarios are still running. Run them again once they have finished." });
+      }
+      const suite = await db.transaction(async (tx) => {
+        const created = await createScenarioSuite(tx, { tenantId: tenant.id, pipelineId: pipeline.id, cause: "manual", requestedBy: signedIn(req).userId });
+        await queue.send(JOBS.scenarioSuite, { suiteId: created.id } satisfies ScenarioSuiteJobData, tx);
+        return created;
+      });
       return reply.code(202).send(suite);
     });
 
     app.get("/pipelines/:id/scenario-suites", { config: { access: "runs.read" } }, async (req, reply) => {
       const pipeline = await ownPipeline(req, id.parse(req.params).id);
       if (!pipeline) return reply.code(404).send({ error: "Pipeline not found" });
-      return listScenarioSuites(db, pipeline.id);
+      return listScenarioSuites(db, pipeline.id, Page.parse(req.query));
     });
 
     app.get("/scenario-suites/:id", { config: { access: "runs.read" } }, async (req, reply) => {

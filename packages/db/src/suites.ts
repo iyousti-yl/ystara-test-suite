@@ -142,9 +142,12 @@ export async function getScenarioSuite(db: Queryable, id: string): Promise<Scena
   };
 }
 
-/** A pipeline's suites, newest first. */
-export async function listScenarioSuites(db: Queryable, pipelineId: string, limit = 20): Promise<ScenarioSuiteSummary[]> {
-  const { rows } = await db.query<SuiteRow>("select * from scenario_suites where pipeline_id = $1 order by requested_at desc limit $2", [pipelineId, limit]);
+/** A pipeline's suites, newest first, `limit` at a time; `before` gives the next older page. */
+export async function listScenarioSuites(db: Queryable, pipelineId: string, page: { before?: Date; limit?: number } = {}): Promise<ScenarioSuiteSummary[]> {
+  const { rows } = await db.query<SuiteRow>(
+    "select * from scenario_suites where pipeline_id = $1 and ($3::timestamptz is null or requested_at < $3) order by requested_at desc limit $2",
+    [pipelineId, page.limit ?? 50, page.before ?? null],
+  );
   return rows.map(toSummary);
 }
 

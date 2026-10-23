@@ -7,19 +7,24 @@ import {
   claimCodeAttempt,
   createAccount,
   createInvitation,
+  countOtherSessions,
   createSession,
   deleteInvitation,
+  deleteOtherSessions,
   deleteSession,
   findOpenInvitation,
   findSession,
   findUserByEmail,
+  getAccountSettings,
   getUser,
   invitationTotpSecret,
   listInvitations,
   listMembers,
   membershipsOf,
+  setAccountSettings,
   setInvitationTotpSecret,
   switchSessionAccount,
+  touchSession,
   useTotpStep,
 } from "./accounts.js";
 import type { Db } from "./db.js";
@@ -177,6 +182,7 @@ describe("sessions", () => {
       spaces: null,
       verified: true,
       operator: false,
+      lastSeenAt: expect.any(Date),
     });
 
     await deleteSession(db, token);
@@ -184,6 +190,24 @@ describe("sessions", () => {
 
     const expired = await createSession(db, { userId: adminId, accountId: account.id, verified: true, minutes: -1 });
     expect(await findSession(db, expired)).toBeUndefined();
+  });
+
+  it("remember their last use, and end in every other browser at once", async () => {
+    const { account, adminId } = await accountWithAdmin("Browsers", "browsers@example.com");
+    const here = await createSession(db, { userId: adminId, accountId: account.id, verified: true, minutes: 60 });
+    const laptop = await createSession(db, { userId: adminId, accountId: account.id, verified: true, minutes: 60 });
+    const idle = await createSession(db, { userId: adminId, accountId: account.id, verified: true, minutes: 60 });
+    await createSession(db, { userId: adminId, accountId: account.id, verified: false, minutes: 10 }); // a half sign-in
+    await db.query("update sessions set last_seen_at = now() - interval '2 hours' where user_id = $1", [adminId]);
+    await touchSession(db, here);
+    await touchSession(db, laptop);
+    expect(Date.now() - (await findSession(db, here))!.lastSeenAt.getTime()).toBeLessThan(60_000);
+    expect(await countOtherSessions(db, adminId, here)).toBe(1); // the idle one has ended already
+
+    expect(await deleteOtherSessions(db, adminId, here)).toBe(2);
+    expect(await findSession(db, laptop)).toBeUndefined();
+    expect(await findSession(db, idle)).toBeUndefined();
+    expect(await findSession(db, here)).toBeDefined();
   });
 
   it("end when the user leaves the account, and switch only to the user's own accounts", async () => {
@@ -266,5 +290,14 @@ describe("migration 003", () => {
     expect((await listTenants(old, rows[0].id)).map((t) => t.name)).toEqual(["Imported"]);
     await expect(createTenant(old, { accountId: rows[0].id, name: "Imported", host: null })).rejects.toThrow();
     await old.close();
+  });
+});
+
+describe("account settings", () => {
+  it("keep drafting with Claude off until an admin switches it on", async () => {
+    const account = await createAccount(db, "Settings");
+    expect(await getAccountSettings(db, account.id)).toEqual({ draftingWithClaude: false });
+    await setAccountSettings(db, account.id, { draftingWithClaude: true });
+    expect(await getAccountSettings(db, account.id)).toEqual({ draftingWithClaude: true });
   });
 });

@@ -64,6 +64,14 @@ describe("passwords", () => {
     expect(passwordProblem(" twelve chars ok")).toMatch(/spaces/);
     expect(passwordProblem("twelve chars")).toBeUndefined();
   });
+
+  it("refuse the guesses that come first: one character over and over, or the user's email", () => {
+    expect(passwordProblem("aaaaaaaaaaaaaaaa")).toBe("Use more different characters");
+    expect(passwordProblem("abababababababab")).toBe("Use more different characters");
+    expect(passwordProblem("Jane.Doe@example.com", "jane.doe@example.com")).toBe("Don't use your email address in your password");
+    expect(passwordProblem("my jane.doe password", "jane.doe@example.com")).toBe("Don't use your email address in your password");
+    expect(passwordProblem("a long passphrase ok", "jo@example.com")).toBeUndefined(); // a name shorter than 4 is too common to refuse
+  });
 });
 
 describe("stored secrets", () => {

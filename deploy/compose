@@ -4,6 +4,10 @@
 #   deploy/compose ps                 what runs
 #   deploy/compose logs -f api        follow the API's log
 # YSTARA_SETTINGS names another settings file than /etc/ystara/ystara.env (for a trial run).
+# The image is tagged with the checkout's commit (YSTARA_VERSION), which /api/health shows. To go back
+# to an image still on the machine: YSTARA_VERSION=<commit> deploy/compose up -d (deploy/README.md).
 set -eu
 cd "$(dirname "$0")/.."
+YSTARA_VERSION="${YSTARA_VERSION:-$(git rev-parse --short=12 HEAD 2>/dev/null || echo dev)}"
+export YSTARA_VERSION
 exec docker compose --project-name ystara -f docker-compose.yml -f deploy/docker-compose.prod.yml --env-file "${YSTARA_SETTINGS:-/etc/ystara/ystara.env}" "$@"

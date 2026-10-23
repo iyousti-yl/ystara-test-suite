@@ -33,19 +33,40 @@ export interface PipelineSummary {
     alert: AlertReason[] | null;
   } | null;
   schedule: { cron: string; timeZone: string; nextRunAt: Date } | null;
-  /** Its latest sign-off; `outdated` when it approved and a later scan has changed a step since. */
-  signOff: { verdict: SignOffVerdict; signedAt: Date; outdated: boolean } | null;
+  /**
+   * Its latest sign-off; `outdated` when it approved and no longer holds, `outdatedBy` saying why: a later scan
+   * changed a step, or a result that came in after it fails, changed or found an empty output (approvalOutdatedBy).
+   */
+  signOff: { verdict: SignOffVerdict; signedAt: Date; outdated: boolean; outdatedBy: ApprovalOutdatedBy | null } | null;
   /** Whether the signed-in user watches it. */
   watching: boolean;
 }
 
+/** Why an approval no longer holds. */
+export type ApprovalOutdatedBy = "scan" | "result";
+
+/**
+ * Why an approval given at `approvedAt` no longer holds: a later scan changed one of the pipeline's steps
+ * (`scanChanged`, changedSteps in the connector), or the result that makes the pipeline failing, changed or empty
+ * came in after it. Null while it holds. A rejection never goes out of date: it stands until someone approves.
+ */
+export function approvalOutdatedBy(s: Pick<PipelineSummary, "scenarios" | "suite" | "snapshot">, approvedAt: Date, scanChanged: boolean): ApprovalOutdatedBy | null {
+  if (scanChanged) return "scan";
+  const health = pipelineHealth(s);
+  if (!["failing", "changed", "empty"].includes(health.state)) return null;
+  const result = health.next?.page === "suite" ? s.suite : s.snapshot;
+  const at = result && (result.finishedAt ?? result.requestedAt);
+  return at && new Date(at).getTime() > new Date(approvedAt).getTime() ? "result" : null;
+}
+
 /** Most pressing first: the board sorts on this order. */
-export const HEALTH_STATES = ["failing", "changed", "untested", "running", "ok"] as const;
+export const HEALTH_STATES = ["failing", "changed", "empty", "untested", "running", "ok"] as const;
 export type HealthState = (typeof HEALTH_STATES)[number];
 
 export const HEALTH_LABEL: Record<HealthState, string> = {
   failing: "Failing",
   changed: "Changed",
+  empty: "Empty output",
   untested: "Not tested yet",
   running: "Running",
   ok: "OK",
@@ -84,6 +105,10 @@ export function pipelineHealth(s: Pick<PipelineSummary, "scenarios" | "suite" | 
   }
   if (snapshot?.alert?.length) {
     return { state: "changed", sentence: describeAlertReason(snapshot.alert[0]), next: { page: "compare", text: "Compare the latest snapshots" } };
+  }
+  // Scenarios pass on their own rows; an output with no rows at all on the tenant is still worth a look.
+  if (snapshot?.status === "succeeded" && snapshot.outputRows === 0) {
+    return { state: "empty", sentence: "The latest snapshot found no rows in the output.", next: { page: "snapshot", id: snapshot.id, text: "Open the snapshot" } };
   }
   const running = suite?.status === "queued" || suite?.status === "running" || snapshot?.status === "queued" || snapshot?.status === "running";
   if (running) return { state: "running", sentence: suite?.status === "queued" || suite?.status === "running" ? "Its scenarios are running." : "A snapshot is being taken.", next: null };

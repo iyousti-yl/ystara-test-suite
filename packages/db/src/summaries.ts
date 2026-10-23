@@ -11,7 +11,7 @@ export type { PipelineSummary };
 
 /** A summary as stored: the sign-off with the scan it covered, which the API compares with the latest scan to say whether it is outdated. */
 export type StoredPipelineSummary = Omit<PipelineSummary, "signOff"> & {
-  signOff: (Omit<NonNullable<PipelineSummary["signOff"]>, "outdated"> & { scanId: string | null }) | null;
+  signOff: (Omit<NonNullable<PipelineSummary["signOff"]>, "outdated" | "outdatedBy"> & { scanId: string | null }) | null;
 };
 
 interface Row {
@@ -40,7 +40,8 @@ interface Row {
   watching: boolean;
 }
 
-export async function pipelineSummaries(db: Queryable, tenantId: string, userId: string): Promise<StoredPipelineSummary[]> {
+/** The tenant's pipelines, or only `pipelineId` when given (a pipeline's own page). */
+export async function pipelineSummaries(db: Queryable, tenantId: string, userId: string, pipelineId?: string): Promise<StoredPipelineSummary[]> {
   const { rows } = await db.query<Row>(
     `select p.id as pipeline_id,
         (select count(*)::int from scenarios c where c.pipeline_id = p.id) as scenarios,
@@ -59,9 +60,9 @@ export async function pipelineSummaries(db: Queryable, tenantId: string, userId:
       left join lateral (select * from snapshots s where s.pipeline_id = p.id order by s.requested_at desc limit 1) sn on true
       left join pipeline_schedules sc on sc.pipeline_id = p.id
       left join lateral (select * from pipeline_signoffs o where o.pipeline_id = p.id order by o.signed_at desc limit 1) so on true
-      where p.tenant_id = $1
+      where p.tenant_id = $1 and ($3::uuid is null or p.id = $3)
       order by p.name`,
-    [tenantId, userId],
+    [tenantId, userId, pipelineId ?? null],
   );
   return rows.map((r) => ({
     pipelineId: r.pipeline_id,

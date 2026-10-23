@@ -117,12 +117,18 @@ describe("the audit log", () => {
     expect((await log(admin)).events.some((e) => e.userEmail === stranger.email)).toBe(false);
   });
 
-  it("keeps the operator panel's events out of every account's log", async () => {
+  it("keeps the operator panel's events out of every account's log, except a copy in the account they concern", async () => {
     const ops = await testUser(db, { account: "Customer", email: "ops@ystara.example.com", role: "admin", operator: true });
     expect((await call("POST", "/operator/accounts", ops, { name: "Operated", adminEmail: "first@operated.example.com" })).statusCode).toBe(201);
     expect((await latest(ops)).label).not.toBe("Created an account");
     const { rows } = await db.query("select account_id, user_email, detail from audit_events where action = 'POST /operator/accounts'");
     expect(rows).toEqual([{ account_id: null, user_email: ops.email, detail: { name: "Operated", adminEmail: "first@operated.example.com" } }]);
+
+    // Renaming the customer's account: its admins see that Ystara's operator did it.
+    const customer = (await db.query<{ id: string }>("select id from accounts where name = 'Customer'")).rows[0]!.id;
+    expect((await call("PATCH", `/operator/accounts/${customer}`, ops, { name: "Customer renamed" })).statusCode).toBe(200);
+    expect(await latest(ops)).toMatchObject({ label: "Renamed an account", userEmail: ops.email, target: { kind: "account", id: customer } });
+    await call("PATCH", `/operator/accounts/${customer}`, ops, { name: "Customer" });
   });
 
   it("filters by user, group and dates, a page at a time, and exports the same as CSV", async () => {
@@ -166,7 +172,8 @@ describe("every route", () => {
   });
 
   it("listed in the log exists", () => {
-    for (const key of Object.keys(AUDIT_ACTIONS)) {
+    // The sign-in events that aren't routes ("sign-in: wrong password") are written by routes/auth.ts itself.
+    for (const key of Object.keys(AUDIT_ACTIONS).filter((k) => !k.startsWith("sign-in: "))) {
       const [method, url] = key.split(" ");
       expect([key, app.hasRoute({ method: method as "POST", url: `/api${url}` })]).toEqual([key, true]);
     }

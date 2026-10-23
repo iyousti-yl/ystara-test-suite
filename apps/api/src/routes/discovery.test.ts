@@ -134,6 +134,10 @@ describe("scans", () => {
     expect(sent.at(-1)).toEqual({ name: "discovery-scan", data: { scanId: res.json().id } });
     expect((await get(`/scans/${res.json().id}`)).json().status).toBe("queued");
     expect((await get(`/scans/${res.json().id}/graph`)).statusCode).toBe(409);
+    // One scan of a tenant at a time.
+    const twice = await post(`/tenants/${tenant.id}/scans`, { spaces: ["HR"] });
+    expect([twice.statusCode, twice.json().error]).toEqual([409, "A scan of this tenant is still running. Start the next one once it has finished."]);
+    expect((await get(`/tenants/${tenant.id}/scans?before=${encodeURIComponent(res.json().requestedAt)}`)).json()).toEqual([]);
   });
 
   it("of a tenant with a technical client, read only the spaces its last check could read", async () => {
