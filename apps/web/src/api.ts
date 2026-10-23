@@ -170,14 +170,19 @@ export const PAGE = 50;
  * `?before=<requestedAt of the oldest row shown>` with the next older page; fetchNextPage loads it, and
  * hasNextPage says whether a full page came last, so older rows may be left. Refetching (polling while
  * something runs) asks for every page shown again. `poll`: how often to refetch, from the rows shown.
+ * A row on two pages (a new one pushed the others down meanwhile) shows once, and a page that brings
+ * nothing new ends the list.
  */
-function useOlderPages<T extends { requestedAt: string }>(key: QueryKey, path: string, options: { enabled?: boolean; poll: (rows: T[]) => number | false }) {
+function useOlderPages<T extends { id: string; requestedAt: string }>(key: QueryKey, path: string, options: { enabled?: boolean; poll: (rows: T[]) => number | false }) {
   return useInfiniteQuery({
     queryKey: key,
     queryFn: ({ pageParam }) => request<T[]>("GET", pageParam ? `${path}?before=${encodeURIComponent(pageParam)}` : path),
     initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => (last.length >= PAGE ? last.at(-1)?.requestedAt : undefined),
-    select: (data) => data.pages.flat(),
+    getNextPageParam: (last, pages) => {
+      const shown = new Set(pages.slice(0, -1).flatMap((page) => page.map((row) => row.id)));
+      return last.length >= PAGE && last.some((row) => !shown.has(row.id)) ? last.at(-1)?.requestedAt : undefined;
+    },
+    select: (data) => [...new Map(data.pages.flat().map((row) => [row.id, row])).values()],
     enabled: options.enabled,
     refetchInterval: (q) => options.poll(q.state.data?.pages.flat() ?? []),
   });
